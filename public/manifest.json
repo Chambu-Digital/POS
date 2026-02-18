@@ -1,0 +1,55 @@
+{
+  "name": "Chambu Digital POS",
+  "short_name": "Chambu POS",
+  "description": "Point of Sale system by Chambu Digital with offline support and automatic backup",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#10b981",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/chambu-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/chambu-logo.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["business", "finance", "productivity"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Make Sale",
+      "short_name": "Sale",
+      "description": "Quick access to sales page",
+      "url": "/dashboard/sales",
+      "icons": [
+        {
+          "src": "/chambu-logo.svg",
+          "sizes": "96x96",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Inventory",
+      "short_name": "Inventory",
+      "description": "View and manage inventory",
+      "url": "/dashboard/inventory",
+      "icons": [
+        {
+          "src": "/chambu-logo.svg",
+          "sizes": "96x96",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ],
+  "prefer_related_applications": false
+}

@@ -1,0 +1,139 @@
+'use client'
+
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { toast } from 'sonner'
+import Link from 'next/link'
+
+export default function RegisterPage() {
+  const router = useRouter()
+  const [loading, setLoading] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [shopName, setShopName] = useState('')
+  const [secretCode, setSecretCode] = useState('')
+
+  async function handleRegister(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true)
+
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, shopName, secretCode }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        toast.error(data.error || 'Registration failed')
+        return
+      }
+
+      toast.success('Account created successfully')
+      router.push('/dashboard')
+    } catch (error) {
+      toast.error('An error occurred during registration')
+      console.error(error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-green-50 to-white flex items-center justify-center p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="space-y-2">
+          <div className="flex items-center justify-center mx-auto">
+            <img 
+              src="/chambu-logo.svg" 
+              alt="Chambu Digital" 
+              className="h-20 w-auto"
+            />
+          </div>
+          <CardTitle className="text-center text-2xl">Chambu Digital POS</CardTitle>
+          <CardDescription className="text-center">
+            Create your shop account
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleRegister} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="shopName">Shop Name</Label>
+              <Input
+                id="shopName"
+                type="text"
+                placeholder="Your shop name"
+                value={shopName}
+                onChange={(e) => setShopName(e.target.value)}
+                disabled={loading}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={loading}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="Create a strong password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="secretCode">Admin Secret Code</Label>
+              <Input
+                id="secretCode"
+                type="password"
+                placeholder="Enter admin secret code"
+                value={secretCode}
+                onChange={(e) => setSecretCode(e.target.value)}
+                disabled={loading}
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                Contact Chambu Digital for the admin secret code
+              </p>
+            </div>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={loading}
+            >
+              {loading ? 'Creating account...' : 'Create Account'}
+            </Button>
+          </form>
+          <div className="mt-4 text-center text-sm">
+            <span className="text-muted-foreground">Already have an account? </span>
+            <Link href="/auth/login" className="text-primary hover:underline font-medium">
+              Sign in
+            </Link>
+          </div>
+          <div className="mt-6 text-center">
+            <p className="text-xs text-muted-foreground">
+              Powered by <span className="font-semibold text-primary">Chambu Digital</span>
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
