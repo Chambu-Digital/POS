@@ -14,6 +14,21 @@ interface POS_DB extends DBSchema {
       [key: string]: any
     }
   }
+  categories: {
+    key: string
+    value: {
+      _id: string
+      userId: string
+      name: string
+      description: string
+      productCount: number
+      color: string
+      icon: string
+      isActive: boolean
+      createdAt: string
+      updatedAt: string
+    }
+  }
   pending_sales: {
     key: string
     value: {
@@ -81,10 +96,13 @@ let db: IDBPDatabase<POS_DB> | null = null
 export async function initDB(): Promise<IDBPDatabase<POS_DB>> {
   if (db) return db
 
-  db = await openDB<POS_DB>('pos-system', 2, {
+  db = await openDB<POS_DB>('pos-system', 3, {
     upgrade(db, oldVersion) {
       if (!db.objectStoreNames.contains('products')) {
         db.createObjectStore('products', { keyPath: '_id' })
+      }
+      if (!db.objectStoreNames.contains('categories')) {
+        db.createObjectStore('categories', { keyPath: '_id' })
       }
       if (!db.objectStoreNames.contains('pending_sales')) {
         db.createObjectStore('pending_sales', { keyPath: 'id' })
@@ -281,4 +299,47 @@ export async function clearResolvedConflicts() {
   }
 
   await tx.done
+}
+
+// Category operations
+export async function cacheCategories(categories: any[]) {
+  const database = await initDB()
+  const tx = database.transaction('categories', 'readwrite')
+
+  await tx.objectStore('categories').clear()
+
+  for (const category of categories) {
+    await tx.objectStore('categories').put(category)
+  }
+
+  await tx.done
+}
+
+export async function getCachedCategories(): Promise<any[]> {
+  const database = await initDB()
+  return database.getAll('categories')
+}
+
+export async function getCachedCategory(id: string): Promise<any | undefined> {
+  const database = await initDB()
+  return database.get('categories', id)
+}
+
+export async function addCachedCategory(category: any) {
+  const database = await initDB()
+  await database.put('categories', category)
+}
+
+export async function updateCachedCategory(id: string, updates: any) {
+  const database = await initDB()
+  const category = await database.get('categories', id)
+
+  if (category) {
+    await database.put('categories', { ...category, ...updates })
+  }
+}
+
+export async function deleteCachedCategory(id: string) {
+  const database = await initDB()
+  await database.delete('categories', id)
 }

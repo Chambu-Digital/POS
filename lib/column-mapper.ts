@@ -137,7 +137,7 @@ export function applyMapping(csvData: Record<string, any>[], mapping: ColumnMapp
 }
 
 /**
- * Validate imported products
+ * Validate imported products with enhanced error checking
  */
 export function validateProducts(products: any[]): { valid: any[]; errors: string[] } {
   const valid = []
@@ -145,27 +145,73 @@ export function validateProducts(products: any[]): { valid: any[]; errors: strin
 
   products.forEach((product, index) => {
     const rowErrors: string[] = []
+    const rowNum = index + 2 // Account for header row
 
-    if (!product.productName) {
+    // Required field validation
+    if (!product.productName || product.productName.trim() === '') {
       rowErrors.push('Product name is required')
+    } else if (product.productName.length > 200) {
+      rowErrors.push('Product name too long (max 200 characters)')
     }
-    if (!product.category) {
+
+    if (!product.category || product.category.trim() === '') {
       rowErrors.push('Category is required')
+    } else if (product.category.length > 100) {
+      rowErrors.push('Category name too long (max 100 characters)')
     }
-    if (product.buyingPrice === undefined || product.buyingPrice === '') {
+
+    // Price validation
+    if (product.buyingPrice === undefined || product.buyingPrice === '' || product.buyingPrice === null) {
       rowErrors.push('Buying price is required')
+    } else if (isNaN(product.buyingPrice) || product.buyingPrice < 0) {
+      rowErrors.push('Buying price must be a positive number')
     }
-    if (product.sellingPrice === undefined || product.sellingPrice === '') {
+
+    if (product.sellingPrice === undefined || product.sellingPrice === '' || product.sellingPrice === null) {
       rowErrors.push('Selling price is required')
+    } else if (isNaN(product.sellingPrice) || product.sellingPrice < 0) {
+      rowErrors.push('Selling price must be a positive number')
     }
-    if (product.stock === undefined || product.stock === '') {
+
+    // Stock validation
+    if (product.stock === undefined || product.stock === '' || product.stock === null) {
       rowErrors.push('Stock is required')
+    } else if (isNaN(product.stock) || product.stock < 0) {
+      rowErrors.push('Stock must be a positive number')
+    } else if (!Number.isInteger(Number(product.stock))) {
+      rowErrors.push('Stock must be a whole number')
+    }
+
+    // Optional field validation
+    if (product.wholeSale !== undefined && product.wholeSale !== '' && product.wholeSale !== null) {
+      if (isNaN(product.wholeSale) || product.wholeSale < 0) {
+        rowErrors.push('Wholesale price must be a positive number')
+      }
+    }
+
+    // Business logic validation
+    if (product.sellingPrice && product.buyingPrice && product.sellingPrice < product.buyingPrice) {
+      rowErrors.push('Warning: Selling price is less than buying price')
     }
 
     if (rowErrors.length > 0) {
-      errors.push(`Row ${index + 2}: ${rowErrors.join(', ')}`)
+      errors.push(`Row ${rowNum}: ${rowErrors.join(', ')}`)
     } else {
-      valid.push(product)
+      // Sanitize and normalize data
+      valid.push({
+        ...product,
+        productName: product.productName.trim(),
+        category: product.category.trim(),
+        brand: product.brand?.trim() || '',
+        model: product.model?.trim() || '',
+        variant: product.variant?.trim() || '',
+        unit: product.unit?.trim() || 'piece',
+        description: product.description?.trim() || '',
+        stock: Math.floor(Number(product.stock)),
+        buyingPrice: Number(product.buyingPrice),
+        sellingPrice: Number(product.sellingPrice),
+        wholeSale: product.wholeSale ? Number(product.wholeSale) : 0,
+      })
     }
   })
 

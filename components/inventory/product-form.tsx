@@ -5,7 +5,22 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import { toast } from 'sonner'
+import { Check, ChevronsUpDown } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 interface Product {
   _id?: string
@@ -29,6 +44,8 @@ interface ProductFormProps {
 
 export function ProductForm({ product, onSuccess }: ProductFormProps) {
   const [loading, setLoading] = useState(false)
+  const [categories, setCategories] = useState<string[]>([])
+  const [categoryOpen, setCategoryOpen] = useState(false)
   const [formData, setFormData] = useState<Product>(
     product || {
       productName: '',
@@ -44,6 +61,22 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
       stock: 0,
     }
   )
+
+  useEffect(() => {
+    fetchCategories()
+  }, [])
+
+  async function fetchCategories() {
+    try {
+      const response = await fetch('/api/categories')
+      if (response.ok) {
+        const data = await response.json()
+        setCategories(data.categories.map((c: any) => c.name).sort())
+      }
+    } catch (error) {
+      console.error('Failed to load categories:', error)
+    }
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
@@ -98,13 +131,61 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
 
         <div className="space-y-2">
           <Label htmlFor="category">Category *</Label>
+          <Popover open={categoryOpen} onOpenChange={setCategoryOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={categoryOpen}
+                className="w-full justify-between"
+                disabled={loading}
+                type="button"
+              >
+                {formData.category || 'Select category...'}
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-full p-0">
+              <Command>
+                <CommandInput placeholder="Search or type new category..." />
+                <CommandList>
+                  <CommandEmpty>
+                    <div className="p-2 text-sm">
+                      Press Enter to create &quot;{formData.category}&quot;
+                    </div>
+                  </CommandEmpty>
+                  <CommandGroup>
+                    {categories.map((category) => (
+                      <CommandItem
+                        key={category}
+                        value={category}
+                        onSelect={(currentValue) => {
+                          setFormData({ ...formData, category: currentValue })
+                          setCategoryOpen(false)
+                        }}
+                      >
+                        <Check
+                          className={cn(
+                            'mr-2 h-4 w-4',
+                            formData.category === category ? 'opacity-100' : 'opacity-0'
+                          )}
+                        />
+                        {category}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
           <Input
-            id="category"
-            name="category"
+            type="text"
             value={formData.category}
-            onChange={handleChange}
-            required
+            onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+            className="mt-2"
+            placeholder="Or type a new category"
             disabled={loading}
+            required
           />
         </div>
 

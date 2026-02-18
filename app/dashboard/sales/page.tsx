@@ -88,6 +88,11 @@ export default function SalesPage() {
           prods = data.products || []
           // Cache products for offline use
           await cacheProducts(prods)
+        } else {
+          console.error('Failed to fetch products from API, trying cache...')
+          // Fallback to cache if API fails
+          const cached = await getCachedProducts()
+          prods = cached as Product[]
         }
       } else {
         // Load from cache if offline
@@ -99,8 +104,18 @@ export default function SalesPage() {
       const cats = Array.from(new Set(prods.map((p: Product) => p.category))).sort()
       setCategories(cats as string[])
     } catch (error) {
-      toast.error('Failed to load products')
-      console.error(error)
+      console.error('Error in fetchProducts:', error)
+      // Try to load from cache as last resort
+      try {
+        const cached = await getCachedProducts()
+        setProducts(cached as Product[])
+        const cats = Array.from(new Set((cached as Product[]).map((p: Product) => p.category))).sort()
+        setCategories(cats as string[])
+        toast.warning('Loaded products from cache')
+      } catch (cacheError) {
+        console.error('Failed to load from cache:', cacheError)
+        toast.error('Failed to load products. Please refresh the page.')
+      }
     } finally {
       setLoading(false)
     }
@@ -115,9 +130,21 @@ export default function SalesPage() {
           shopName: data.user.shopName || 'Shop',
           name: data.user.name || 'Cashier',
         })
+      } else {
+        console.error('Failed to fetch user info, status:', response.status)
+        // Set default user info if API fails
+        setUserInfo({
+          shopName: 'Shop',
+          name: 'Cashier',
+        })
       }
     } catch (error) {
       console.error('Failed to fetch user info:', error)
+      // Set default user info on error
+      setUserInfo({
+        shopName: 'Shop',
+        name: 'Cashier',
+      })
     }
   }
 
@@ -346,7 +373,28 @@ export default function SalesPage() {
   const total = subtotal - cartDiscount
 
   if (loading) {
-    return <div className="text-center py-8">Loading...</div>
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-200px)]">
+        <Card className="w-full max-w-md">
+          <CardContent className="pt-6">
+            <div className="text-center space-y-4">
+              <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                <ShoppingCart className="h-8 w-8 text-primary animate-pulse" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-lg">Loading Products</h3>
+                <p className="text-sm text-muted-foreground">
+                  Please wait while we fetch your inventory...
+                </p>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                <div className="bg-primary h-full rounded-full animate-pulse" style={{ width: '60%' }}></div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   return (
