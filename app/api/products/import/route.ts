@@ -1,5 +1,6 @@
 import { connectDB } from '@/lib/db'
 import Product from '@/lib/models/Product'
+import Category from '@/lib/models/Category'
 import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
 import Papa from 'papaparse'
@@ -133,14 +134,81 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Insert into database
-    const insertedProducts = await Product.insertMany(validProducts)
+    // Extract unique categories from valid products
+    const uniqueCategories = [...new Set(validProducts.map(p => p.category))]
+
+    // Auto-create categories that don't exist
+    const createdCategories: string[] = []
+    for (const categoryName of uniqueCategories) {
+      const existing = await Category.findOne({
+        userId: ownerId,
+        name: categoryName,
+      })
+
+      if (!existing) {
+        await Category.create({
+          userId: ownerId,
+          name: categoryName,
+          description: `Auto-created from import`,
+          productCount: 0,
+        })
+        createdCategories.push(categoryName)
+      }
+    }
+
+    // Check for duplicates (by productName and category)
+    const duplicateCheck = await Product.find({
+      userId: ownerId,
+      $or: validProducts.map(p => ({
+        productName: p.productName,
+        category: p.category,
+      })),
+    })
+
+    const duplicateKeys = new Set(
+      duplicateCheck.map(p => `${p.productName}|${p.category}`)
+    )
+
+    // Separate new products from duplicates
+    const newProducts = validProducts.filter(
+      p => !duplicateKeys.has(`${p.productName}|${p.category}`)
+    )
+    const duplicates = validProducts.filter(
+      p => duplicateKeys.has(`${p.productName}|${p.category}`)
+    )
+
+    // Insert new products
+    let insertedProducts: any[] = []
+    if (newProducts.length > 0) {
+      insertedProducts = await Product.insertMany(newProducts)
+    }
+
+    // Update category product counts
+    for (const categoryName of uniqueCategories) {
+      const count = await Product.countDocuments({
+        userId: ownerId,
+        category: categoryName,
+      })
+      await Category.findOneAndUpdate(
+        { userId: ownerId, name: categoryName },
+        { productCount: count }
+      )
+    }
 
     return NextResponse.json(
       {
         message: `Successfully imported ${insertedProducts.length} products`,
         count: insertedProducts.length,
         products: insertedProducts,
+        duplicatesSkipped: duplicates.length,
+        categoriesCreated: createdCategories.length,
+        newCategories: createdCategories,
+        stats: {
+          total: validProducts.length,
+          imported: insertedProducts.length,
+          duplicates: duplicates.length,
+          categoriesCreated: createdCategories.length,
+        },
       },
       { status: 201 }
     )

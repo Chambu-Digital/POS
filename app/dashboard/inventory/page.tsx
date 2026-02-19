@@ -15,10 +15,11 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Upload, Download, Trash2, Edit2, Search } from 'lucide-react'
+import { Plus, Upload, Download, Trash2, Edit2, Search, FolderTree } from 'lucide-react'
 import { toast } from 'sonner'
 import { ProductForm } from '@/components/inventory/product-form'
 import { ImportModal } from '@/components/inventory/import-modal'
+import { CategoryManager } from '@/components/inventory/category-manager'
 
 interface Product {
   _id: string
@@ -40,6 +41,7 @@ export default function InventoryPage() {
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [isViewOpen, setIsViewOpen] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
+  const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false)
 
   useEffect(() => {
     fetchProducts()
@@ -165,6 +167,15 @@ export default function InventoryPage() {
             >
               <Download size={16} className="mr-2" />
               Download Template
+            </Button>
+            <Button
+              onClick={() => setIsCategoryManagerOpen(true)}
+              variant="outline"
+              className="w-full"
+              size="sm"
+            >
+              <FolderTree size={16} className="mr-2" />
+              Manage Categories
             </Button>
           </CardContent>
         </Card>
@@ -414,6 +425,12 @@ export default function InventoryPage() {
           setIsImportOpen(false)
           fetchProducts()
         }}
+      />
+
+      {/* Category Manager */}
+      <CategoryManager
+        open={isCategoryManagerOpen}
+        onOpenChange={setIsCategoryManagerOpen}
       />
     </div>
   )

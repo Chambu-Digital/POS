@@ -23,8 +23,10 @@ import { toast } from 'sonner'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import { detectColumnMapping, applyMapping, validateProducts } from '@/lib/column-mapper'
-import { Upload, AlertCircle } from 'lucide-react'
+import { Upload, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Progress } from '@/components/ui/progress'
+import { Card, CardContent } from '@/components/ui/card'
 
 const PRODUCT_FIELDS = [
   'productName',
@@ -47,13 +49,16 @@ interface ImportModalProps {
 }
 
 export function ImportModal({ open, onOpenChange, onSuccess }: ImportModalProps) {
-  const [step, setStep] = useState<'upload' | 'mapping' | 'preview'>('upload')
+  const [step, setStep] = useState<'upload' | 'mapping' | 'preview' | 'importing'>('upload')
   const [file, setFile] = useState<File | null>(null)
   const [csvHeaders, setCsvHeaders] = useState<string[]>([])
   const [csvData, setCsvData] = useState<any[]>([])
   const [mapping, setMapping] = useState<Record<string, string>>({})
   const [processedData, setProcessedData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [importProgress, setImportProgress] = useState(0)
+  const [importStats, setImportStats] = useState<any>(null)
+  const [showConfirmation, setShowConfirmation] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -246,7 +251,10 @@ export function ImportModal({ open, onOpenChange, onSuccess }: ImportModalProps)
       return
     }
 
+    setShowConfirmation(false)
     setLoading(true)
+    setStep('importing')
+    setImportProgress(0)
 
     try {
       const formData = new FormData()
@@ -255,10 +263,18 @@ export function ImportModal({ open, onOpenChange, onSuccess }: ImportModalProps)
       }
       formData.append('mapping', JSON.stringify(mapping))
 
+      // Simulate progress for better UX
+      const progressInterval = setInterval(() => {
+        setImportProgress((prev) => Math.min(prev + 10, 90))
+      }, 200)
+
       const response = await fetch('/api/products/import', {
         method: 'POST',
         body: formData,
       })
+
+      clearInterval(progressInterval)
+      setImportProgress(100)
 
       if (!response.ok) {
         const error = await response.json()
@@ -266,20 +282,35 @@ export function ImportModal({ open, onOpenChange, onSuccess }: ImportModalProps)
       }
 
       const result = await response.json()
-      toast.success(`Successfully imported ${result.count} products`)
+      setImportStats(result.stats)
 
-      // Reset
-      setFile(null)
-      setCsvHeaders([])
-      setCsvData([])
-      setMapping({})
-      setProcessedData([])
-      setStep('upload')
+      // Show detailed success message
+      const messages = [
+        `✓ Imported ${result.count} products`,
+        result.duplicatesSkipped > 0 ? `⚠ Skipped ${result.duplicatesSkipped} duplicates` : null,
+        result.categoriesCreated > 0 ? `✓ Created ${result.categoriesCreated} new categories` : null,
+      ].filter(Boolean)
 
-      onOpenChange(false)
-      onSuccess()
+      toast.success(messages.join('\n'))
+
+      // Wait a bit to show the success state
+      setTimeout(() => {
+        // Reset
+        setFile(null)
+        setCsvHeaders([])
+        setCsvData([])
+        setMapping({})
+        setProcessedData([])
+        setImportProgress(0)
+        setImportStats(null)
+        setStep('upload')
+
+        onOpenChange(false)
+        onSuccess()
+      }, 2000)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Import failed')
+      setStep('preview')
     } finally {
       setLoading(false)
     }
@@ -287,15 +318,18 @@ export function ImportModal({ open, onOpenChange, onSuccess }: ImportModalProps)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Import Products</DialogTitle>
           <DialogDescription>
             {step === 'upload' && 'Select a CSV or Excel file to import'}
             {step === 'mapping' && 'Map CSV columns to product fields'}
             {step === 'preview' && 'Review products before importing'}
+            {step === 'importing' && 'Importing products and creating categories...'}
           </DialogDescription>
         </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto">{/* Scrollable content wrapper */}
 
         {step === 'upload' && (
           <div className="space-y-4">
@@ -405,29 +439,36 @@ export function ImportModal({ open, onOpenChange, onSuccess }: ImportModalProps)
                   </AlertDescription>
                 </Alert>
 
-                <div className="overflow-x-auto max-h-96 overflow-y-auto">
-                  <Table className="text-xs">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Product Name</TableHead>
-                        <TableHead>Category</TableHead>
-                        <TableHead>Stock</TableHead>
-                        <TableHead>Buying Price</TableHead>
-                        <TableHead>Selling Price</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {processedData.map((product, i) => (
-                        <TableRow key={i}>
-                          <TableCell>{product.productName}</TableCell>
-                          <TableCell>{product.category}</TableCell>
-                          <TableCell>{product.stock}</TableCell>
-                          <TableCell>KSh {product.buyingPrice}</TableCell>
-                          <TableCell>KSh {product.sellingPrice}</TableCell>
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                    <Table className="text-xs">
+                      <TableHeader className="sticky top-0 bg-gray-50 z-10">
+                        <TableRow>
+                          <TableHead>Product Name</TableHead>
+                          <TableHead>Category</TableHead>
+                          <TableHead>Stock</TableHead>
+                          <TableHead>Buying Price</TableHead>
+                          <TableHead>Selling Price</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {processedData.slice(0, 50).map((product, i) => (
+                          <TableRow key={i}>
+                            <TableCell>{product.productName}</TableCell>
+                            <TableCell>{product.category}</TableCell>
+                            <TableCell>{product.stock}</TableCell>
+                            <TableCell>KSh {product.buyingPrice}</TableCell>
+                            <TableCell>KSh {product.sellingPrice}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {processedData.length > 50 && (
+                    <div className="bg-gray-50 px-4 py-2 text-xs text-muted-foreground border-t">
+                      Showing first 50 of {processedData.length} products
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
@@ -437,23 +478,123 @@ export function ImportModal({ open, onOpenChange, onSuccess }: ImportModalProps)
               </Alert>
             )}
 
-            <div className="flex gap-2">
+            {/* Confirmation Dialog */}
+            {showConfirmation && (
+              <Alert className="border-2 border-blue-500 bg-blue-50">
+                <AlertCircle className="h-5 w-5 text-blue-600" />
+                <AlertDescription className="text-blue-900">
+                  <div className="space-y-3">
+                    <p className="font-semibold text-base">
+                      ⚠️ Are you sure you want to import {processedData.length} product(s)?
+                    </p>
+                    <p className="text-sm">
+                      This will add new products to your inventory and may create new categories.
+                      Duplicates will be automatically skipped.
+                    </p>
+                    <div className="flex gap-2 mt-3">
+                      <Button
+                        onClick={() => {
+                          setShowConfirmation(false)
+                          submitImport()
+                        }}
+                        disabled={loading}
+                        className="bg-blue-600 hover:bg-blue-700"
+                      >
+                        {loading ? 'Importing...' : '✓ Yes, Import Now'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowConfirmation(false)}
+                        disabled={loading}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <div className="flex gap-2 pt-2 border-t">
               <Button
                 variant="outline"
                 onClick={() => setStep('mapping')}
+                disabled={loading || showConfirmation}
               >
                 Back
               </Button>
-              <Button
-                onClick={submitImport}
-                disabled={loading || processedData.length === 0}
-                className="ml-auto"
-              >
-                {loading ? 'Importing...' : 'Import'}
-              </Button>
+              {!showConfirmation && (
+                <Button
+                  onClick={() => setShowConfirmation(true)}
+                  disabled={loading || processedData.length === 0}
+                  className="ml-auto"
+                >
+                  Confirm Import
+                </Button>
+              )}
             </div>
           </div>
         )}
+
+        {step === 'importing' && (
+          <div className="space-y-6 py-8">
+            <div className="text-center space-y-4">
+              <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                <Upload className="h-8 w-8 text-primary animate-pulse" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-lg">Importing Products</h3>
+                <p className="text-sm text-muted-foreground">
+                  Please wait while we process your file...
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Progress</span>
+                <span className="font-medium">{importProgress}%</span>
+              </div>
+              <Progress value={importProgress} className="h-2" />
+            </div>
+
+            {importStats && (
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-green-600">
+                      <CheckCircle2 className="h-5 w-5" />
+                      <span className="font-medium">Import Complete!</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">Total Processed</p>
+                        <p className="text-2xl font-bold">{importStats.total}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Successfully Imported</p>
+                        <p className="text-2xl font-bold text-green-600">{importStats.imported}</p>
+                      </div>
+                      {importStats.duplicates > 0 && (
+                        <div>
+                          <p className="text-muted-foreground">Duplicates Skipped</p>
+                          <p className="text-2xl font-bold text-orange-600">{importStats.duplicates}</p>
+                        </div>
+                      )}
+                      {importStats.categoriesCreated > 0 && (
+                        <div>
+                          <p className="text-muted-foreground">Categories Created</p>
+                          <p className="text-2xl font-bold text-blue-600">{importStats.categoriesCreated}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
+        </div>{/* End scrollable content wrapper */}
       </DialogContent>
     </Dialog>
   )

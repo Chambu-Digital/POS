@@ -1,61 +1,93 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose from 'mongoose'
 
-export interface IReport extends Document {
-  _id: string;
-  userId: string;
-  type: 'sales' | 'inventory' | 'staff' | 'financial';
-  title: string;
-  data: any;
+export interface IReport extends mongoose.Document {
+  userId: string
+  reportType: 'sales' | 'inventory' | 'profit' | 'custom'
+  title: string
+  description?: string
   dateRange: {
-    start: Date;
-    end: Date;
-  };
-  generatedAt: Date;
-  parameters?: any;
+    startDate: Date
+    endDate: Date
+  }
+  data: {
+    summary: {
+      totalSales?: number
+      totalRevenue?: number
+      totalProfit?: number
+      totalItems?: number
+      totalProducts?: number
+      lowStockItems?: number
+      outOfStockItems?: number
+      [key: string]: any
+    }
+    details: any[]
+    charts?: {
+      salesByDay?: any[]
+      salesByCategory?: any[]
+      topProducts?: any[]
+      [key: string]: any
+    }
+  }
+  generatedAt: Date
+  createdAt: Date
+  updatedAt: Date
 }
 
-const ReportSchema = new Schema<IReport>({
-  userId: {
-    type: String,
-    required: true,
-    index: true
-  },
-  type: {
-    type: String,
-    required: true,
-    enum: ['sales', 'inventory', 'staff', 'financial']
-  },
-  title: {
-    type: String,
-    required: true
-  },
-  data: {
-    type: Schema.Types.Mixed,
-    required: true
-  },
-  dateRange: {
-    start: {
-      type: Date,
-      required: true
+const reportSchema = new mongoose.Schema<IReport>(
+  {
+    userId: {
+      type: String,
+      required: true,
+      index: true,
     },
-    end: {
+    reportType: {
+      type: String,
+      enum: ['sales', 'inventory', 'profit', 'custom'],
+      required: true,
+    },
+    title: {
+      type: String,
+      required: true,
+    },
+    description: {
+      type: String,
+    },
+    dateRange: {
+      startDate: {
+        type: Date,
+        required: true,
+      },
+      endDate: {
+        type: Date,
+        required: true,
+      },
+    },
+    data: {
+      summary: {
+        type: mongoose.Schema.Types.Mixed,
+        default: {},
+      },
+      details: {
+        type: [mongoose.Schema.Types.Mixed],
+        default: [],
+      },
+      charts: {
+        type: mongoose.Schema.Types.Mixed,
+        default: {},
+      },
+    },
+    generatedAt: {
       type: Date,
-      required: true
-    }
+      default: Date.now,
+    },
   },
-  generatedAt: {
-    type: Date,
-    default: Date.now
-  },
-  parameters: {
-    type: Schema.Types.Mixed
+  {
+    timestamps: true,
   }
-}, {
-  timestamps: true
-});
+)
 
-// Create indexes for better query performance
-ReportSchema.index({ userId: 1, type: 1 });
-ReportSchema.index({ generatedAt: -1 });
+// Index for efficient querying
+reportSchema.index({ userId: 1, reportType: 1, createdAt: -1 })
 
-export default mongoose.models.Report || mongoose.model<IReport>('Report', ReportSchema);
+export default mongoose.models.Report || mongoose.model<IReport>('Report', reportSchema)
+
