@@ -7,6 +7,7 @@ export interface TokenPayload {
   userId: string;
   email: string;
   role: string;
+  adminId?: string; // Optional field for staff members
 }
 
 export function signToken(payload: TokenPayload): string {

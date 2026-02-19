@@ -139,7 +139,7 @@ async function generateSalesReport(userId: string, startDate: Date, endDate: Dat
 }
 
 async function generateInventoryReport(userId: string) {
-  const products = await Product.find({ userId }).lean()
+  const products = await Product.find({ userId }).lean() as any[]
 
   const totalProducts = products.length
   const totalStockValue = products.reduce(
@@ -182,7 +182,7 @@ async function generateProfitReport(userId: string, startDate: Date, endDate: Da
   const sales = await Sale.find({
     userId,
     createdAt: { $gte: startDate, $lte: endDate },
-  }).lean()
+  }).lean() as any[]
 
   let totalRevenue = 0
   let totalCost = 0
@@ -195,7 +195,7 @@ async function generateProfitReport(userId: string, startDate: Date, endDate: Da
       const product = await Product.findOne({
         userId,
         productName: item.productName,
-      }).lean()
+      }).lean() as any
       if (product) {
         totalCost += product.buyingPrice * item.quantity
       }
