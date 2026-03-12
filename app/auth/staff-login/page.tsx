@@ -10,7 +10,7 @@ import { toast } from 'sonner'
 import Link from 'next/link'
 import { Eye, EyeOff } from 'lucide-react'
 
-export default function LoginPage() {
+export default function StaffLoginPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [email, setEmail] = useState('')
@@ -22,7 +22,7 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch('/api/auth/staff-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -34,7 +34,8 @@ export default function LoginPage() {
         return
       }
 
-      toast.success('Login successful')
+      const data = await response.json()
+      toast.success(`Welcome back, ${data.staff.name}!`)
       router.push('/dashboard')
     } catch (error) {
       toast.error('An error occurred during login')
@@ -55,9 +56,9 @@ export default function LoginPage() {
               className="h-20 w-auto"
             />
           </div>
-          <CardTitle className="text-center text-2xl">Chambu Digital POS</CardTitle>
+          <CardTitle className="text-center text-2xl">Staff Login</CardTitle>
           <CardDescription className="text-center">
-            Sign in to your account
+            Sign in to your staff account
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -106,20 +107,22 @@ export default function LoginPage() {
               className="w-full"
               disabled={loading}
             >
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading ? 'Signing in...' : 'Sign In as Staff'}
             </Button>
           </form>
-          <div className="mt-4 text-center text-sm">
-            <span className="text-muted-foreground">Don't have an account? </span>
-            <Link href="/auth/register" className="text-primary hover:underline font-medium">
-              Create one
-            </Link>
-          </div>
-          <div className="mt-2 text-center text-sm">
-            <span className="text-muted-foreground">Staff member? </span>
-            <Link href="/auth/staff-login" className="text-primary hover:underline font-medium">
-              Staff Login
-            </Link>
+          <div className="mt-4 text-center text-sm space-y-2">
+            <div>
+              <span className="text-muted-foreground">Shop owner? </span>
+              <Link href="/auth/login" className="text-primary hover:underline font-medium">
+                Login here
+              </Link>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Need an account? </span>
+              <Link href="/auth/register" className="text-primary hover:underline font-medium">
+                Register shop
+              </Link>
+            </div>
           </div>
           <div className="mt-6 text-center">
             <p className="text-xs text-muted-foreground">

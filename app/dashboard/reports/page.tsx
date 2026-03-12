@@ -12,14 +12,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   FileText,
   Download,
-  TrendingUp,
-  Package,
-  DollarSign,
-  Calendar,
   BarChart3,
   PieChart,
   RefreshCw
@@ -59,7 +54,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     fetchReports()
-    // Set default dates (last 30 days)
+    // Set default dates (last 30 days to today)
     const end = new Date()
     const start = new Date()
     start.setDate(start.getDate() - 30)
@@ -129,27 +124,76 @@ export default function ReportsPage() {
   }
 
   function downloadCSV(report: Report) {
-    if (!report.data.details || report.data.details.length === 0) {
-      toast.error('No data to export')
-      return
+    // Build CSV with summary section first
+    let csv = ''
+    
+    // Add report header
+    csv += `${report.title}\n`
+    csv += `Generated: ${new Date(report.generatedAt).toLocaleString()}\n`
+    csv += `Date Range: ${new Date(report.dateRange.startDate).toLocaleDateString()} - ${new Date(report.dateRange.endDate).toLocaleDateString()}\n`
+    csv += '\n'
+    
+    // Add summary statistics
+    csv += 'SUMMARY STATISTICS\n'
+    Object.entries(report.data.summary).forEach(([key, value]) => {
+      const label = key.replace(/([A-Z])/g, ' $1').trim()
+      const formattedValue = typeof value === 'number'
+        ? (key.toLowerCase().includes('revenue') ||
+           key.toLowerCase().includes('profit') ||
+           key.toLowerCase().includes('value') ||
+           key.toLowerCase().includes('cost') ||
+           key.toLowerCase().includes('discount'))
+          ? `KES ${value.toLocaleString()}`
+          : value.toLocaleString()
+        : String(value)
+      csv += `${label},${formattedValue}\n`
+    })
+    csv += '\n'
+    
+    // Add detailed data if available
+    if (report.data.details && report.data.details.length > 0) {
+      csv += 'DETAILED DATA\n'
+      
+      // Get headers from first item
+      const firstItem = report.data.details[0]
+      const headers = Object.keys(firstItem).filter(key => 
+        !key.startsWith('_') && key !== '__v' && key !== 'userId'
+      )
+      
+      csv += headers.join(',') + '\n'
+      
+      // Add data rows
+      report.data.details.forEach((row: any) => {
+        const values = headers.map(header => {
+          let value = row[header]
+          
+          // Format dates
+          if (header.toLowerCase().includes('date') || header === 'createdAt' || header === 'updatedAt') {
+            value = value ? new Date(value).toLocaleString() : ''
+          }
+          // Format objects
+          else if (typeof value === 'object' && value !== null) {
+            value = JSON.stringify(value)
+          }
+          // Format numbers
+          else if (typeof value === 'number') {
+            value = value.toLocaleString()
+          }
+          
+          return `"${String(value || '').replace(/"/g, '""')}"`
+        })
+        csv += values.join(',') + '\n'
+      })
     }
 
-    const headers = Object.keys(report.data.details[0])
-    const csv = [
-      headers.join(','),
-      ...report.data.details.map((row: any) =>
-        headers.map((header) => JSON.stringify(row[header] || '')).join(',')
-      ),
-    ].join('\n')
-
-    const blob = new Blob([csv], { type: 'text/csv' })
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `${report.reportType}-report-${new Date().toISOString()}.csv`
+    link.download = `${report.reportType}-report-${new Date().toISOString().split('T')[0]}.csv`
     link.click()
     URL.revokeObjectURL(url)
-    toast.success('CSV downloaded')
+    toast.success('CSV downloaded with summary statistics')
   }
 
   if (loading) {
@@ -199,19 +243,16 @@ export default function ReportsPage() {
                 <SelectContent>
                   <SelectItem value="sales">
                     <div className="flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4" />
                       Sales Report
                     </div>
                   </SelectItem>
                   <SelectItem value="inventory">
                     <div className="flex items-center gap-2">
-                      <Package className="h-4 w-4" />
                       Inventory Report
                     </div>
                   </SelectItem>
                   <SelectItem value="profit">
                     <div className="flex items-center gap-2">
-                      <DollarSign className="h-4 w-4" />
                       Profit Report
                     </div>
                   </SelectItem>
@@ -249,7 +290,6 @@ export default function ReportsPage() {
                 </>
               ) : (
                 <>
-                  <BarChart3 className="mr-2 h-4 w-4" />
                   Generate Report
                 </>
               )}

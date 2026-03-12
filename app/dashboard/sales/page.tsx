@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,13 +22,9 @@ import { useOffline } from '@/hooks/use-offline'
 import {
   cacheProducts,
   getCachedProducts,
-  addPendingSale,
-  addCachedSale,
   isOnline,
 } from '@/lib/indexeddb'
-import { initAutoSync, syncPendingSales } from '@/lib/sync'
-import { createBackupSnapshot, isBackupEnabled } from '@/lib/backup'
-import { Receipt } from '@/components/sales/receipt'
+import { initAutoSync } from '@/lib/sync'
 
 interface Product {
   _id: string
@@ -52,6 +49,7 @@ interface CartItem {
 }
 
 export default function SalesPage() {
+  const router = useRouter()
   const [products, setProducts] = useState<Product[]>([])
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [cart, setCart] = useState<CartItem[]>([])
@@ -59,11 +57,7 @@ export default function SalesPage() {
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [categories, setCategories] = useState<string[]>([])
   const [cartDiscount, setCartDiscount] = useState(0)
-  const [paymentMethod, setPaymentMethod] = useState('cash')
   const [loading, setLoading] = useState(true)
-  const [processingOrder, setProcessingOrder] = useState(false)
-  const [showReceipt, setShowReceipt] = useState(false)
-  const [lastSale, setLastSale] = useState<any>(null)
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
   const isOffline = useOffline()
 
@@ -242,128 +236,14 @@ export default function SalesPage() {
       return
     }
 
-    setProcessingOrder(true)
+    // Save cart data to sessionStorage
+    sessionStorage.setItem('pendingSale', JSON.stringify({
+      cart,
+      cartDiscount
+    }))
 
-    try {
-      const subtotal = cart.reduce(
-        (sum, item) => sum + item.sellingPrice * item.quantity - item.discount,
-        0
-      )
-      const total = subtotal - cartDiscount
-
-      const saleData = {
-        items: cart.map((item) => ({
-          productId: item.productId,
-          quantity: item.quantity,
-          price: item.sellingPrice,
-          discount: item.discount,
-        })),
-        subtotal,
-        discount: cartDiscount,
-        total: Math.max(0, total),
-        paymentMethod,
-      }
-
-      if (isOnline()) {
-        const response = await fetch('/api/sales', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(saleData),
-        })
-
-        if (!response.ok) {
-          throw new Error('Failed to complete sale')
-        }
-
-        const result = await response.json()
-        
-        // Prepare receipt data
-        setLastSale({
-          items: cart.map((item) => ({
-            productName: item.productName,
-            brand: item.brand,
-            model: item.model,
-            variant: item.variant,
-            quantity: item.quantity,
-            price: item.sellingPrice,
-            discount: item.discount,
-            total: item.sellingPrice * item.quantity - item.discount,
-          })),
-          subtotal,
-          discount: cartDiscount,
-          total: Math.max(0, total),
-          paymentMethod,
-          date: new Date(),
-          receiptNumber: result.sale?._id || `SALE-${Date.now()}`,
-        })
-
-        toast.success('Sale completed and synced')
-        setShowReceipt(true)
-      } else {
-        // Save to IndexedDB when offline
-        await addPendingSale(saleData)
-        
-        // Prepare receipt data for offline sale
-        setLastSale({
-          items: cart.map((item) => ({
-            productName: item.productName,
-            brand: item.brand,
-            model: item.model,
-            variant: item.variant,
-            quantity: item.quantity,
-            price: item.sellingPrice,
-            discount: item.discount,
-            total: item.sellingPrice * item.quantity - item.discount,
-          })),
-          subtotal,
-          discount: cartDiscount,
-          total: Math.max(0, total),
-          paymentMethod,
-          date: new Date(),
-          receiptNumber: `OFFLINE-${Date.now()}`,
-        })
-        
-        toast.success('Sale saved offline - will sync when online')
-        setShowReceipt(true)
-      }
-
-      // Cache the sale in IndexedDB
-      await addCachedSale({
-        _id: result?.sale?._id || `OFFLINE-${Date.now()}`,
-        userId: userInfo?.shopName || 'unknown',
-        items: saleData.items,
-        subtotal: saleData.subtotal,
-        discount: saleData.discount,
-        total: saleData.total,
-        paymentMethod: saleData.paymentMethod,
-        createdAt: new Date().toISOString(),
-        synced: isOnline(),
-      })
-
-      // Trigger backup snapshot after sale
-      if (isBackupEnabled() && userInfo) {
-        try {
-          await createBackupSnapshot(
-            userInfo.shopName,
-            userInfo.shopName,
-            [] // Staff data will be fetched separately if needed
-          )
-          console.log('[Backup] Snapshot created after sale')
-        } catch (error) {
-          console.error('[Backup] Failed to create snapshot:', error)
-          // Don't show error to user, backup is background operation
-        }
-      }
-
-      setCart([])
-      setCartDiscount(0)
-      await fetchProducts()
-    } catch (error) {
-      toast.error('Error completing sale')
-      console.error(error)
-    } finally {
-      setProcessingOrder(false)
-    }
+    // Redirect to payment page
+    router.push('/dashboard/sales/payment')
   }
 
   const subtotal = cart.reduce(
@@ -615,44 +495,17 @@ export default function SalesPage() {
               </div>
             </div>
 
-            <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="cash">Cash</SelectItem>
-                <SelectItem value="card">Card</SelectItem>
-                <SelectItem value="mobile_money">Mobile Money</SelectItem>
-              </SelectContent>
-            </Select>
-
             <Button
               onClick={completeSale}
-              disabled={cart.length === 0 || processingOrder}
+              disabled={cart.length === 0}
               className="w-full"
               size="lg"
             >
-              {processingOrder ? 'Processing...' : 'Complete Sale'}
+              Complete Sale
             </Button>
           </CardContent>
         </Card>
       </div>
-
-      {/* Receipt Component */}
-      {showReceipt && lastSale && userInfo && (
-        <Receipt
-          shopName={userInfo.shopName}
-          cashierName={userInfo.name}
-          items={lastSale.items}
-          subtotal={lastSale.subtotal}
-          discount={lastSale.discount}
-          total={lastSale.total}
-          paymentMethod={lastSale.paymentMethod}
-          date={lastSale.date}
-          receiptNumber={lastSale.receiptNumber}
-          onPrintComplete={() => setShowReceipt(false)}
-        />
-      )}
     </div>
   )
 }

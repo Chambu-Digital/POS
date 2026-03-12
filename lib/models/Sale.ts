@@ -46,6 +46,12 @@ const saleSchema = new mongoose.Schema(
       enum: ['cash', 'card', 'mobile_money'],
       required: true,
     },
+    mpesaCode: {
+      type: String,
+    },
+    mpesaPhone: {
+      type: String,
+    },
     notes: String,
     synced: {
       type: Boolean,

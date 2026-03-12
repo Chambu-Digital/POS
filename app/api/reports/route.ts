@@ -1,25 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyToken } from '@/lib/auth'
-import dbConnect from '@/lib/mongodb'
+import { getAuthPayload } from '@/lib/jwt'
+import { connectDB } from '@/lib/db'
 import Report from '@/lib/models/Report'
 import Sale from '@/lib/models/Sale'
 import Product from '@/lib/models/Product'
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.cookies.get('token')?.value
-    if (!token) {
+    const payload = await getAuthPayload()
+    if (!payload) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const decoded = verifyToken(token)
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
+    const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
 
-    const ownerId = decoded.role === 'staff' && decoded.adminId ? decoded.adminId : decoded.userId
-
-    await dbConnect()
+    await connectDB()
 
     const { searchParams } = new URL(request.url)
     const reportType = searchParams.get('type')
@@ -43,19 +38,14 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const token = request.cookies.get('token')?.value
-    if (!token) {
+    const payload = await getAuthPayload()
+    if (!payload) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const decoded = verifyToken(token)
-    if (!decoded) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
+    const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
 
-    const ownerId = decoded.role === 'staff' && decoded.adminId ? decoded.adminId : decoded.userId
-
-    await dbConnect()
+    await connectDB()
 
     const body = await request.json()
     const { reportType, startDate, endDate } = body
@@ -66,6 +56,17 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    console.log('[Reports API] Generating report:', {
+      reportType,
+      ownerId,
+      startDate,
+      endDate,
+    })
+
+    // Check if there are any sales at all for this user
+    const totalSalesCount = await Sale.countDocuments({ userId: ownerId })
+    console.log('[Reports API] Total sales in database for user:', totalSalesCount)
 
     // Generate report based on type
     let reportData: any = {}
@@ -92,6 +93,8 @@ export async function POST(request: NextRequest) {
       generatedAt: new Date(),
     })
 
+    console.log('[Reports API] Report created:', report._id)
+
     return NextResponse.json({ report, message: 'Report generated successfully' })
   } catch (error) {
     console.error('Error generating report:', error)
@@ -100,17 +103,42 @@ export async function POST(request: NextRequest) {
 }
 
 async function generateSalesReport(userId: string, startDate: Date, endDate: Date) {
+  // Set start date to beginning of day
+  const adjustedStartDate = new Date(startDate)
+  adjustedStartDate.setHours(0, 0, 0, 0)
+  
+  // Set end date to end of day to include all sales on that day
+  const adjustedEndDate = new Date(endDate)
+  adjustedEndDate.setHours(23, 59, 59, 999)
+
+  console.log('[Sales Report] Query params:', {
+    userId,
+    startDate: adjustedStartDate.toISOString(),
+    endDate: adjustedEndDate.toISOString(),
+  })
+
   const sales = await Sale.find({
     userId,
-    createdAt: { $gte: startDate, $lte: endDate },
+    createdAt: { $gte: adjustedStartDate, $lte: adjustedEndDate },
   }).lean()
 
-  const totalSales = sales.length
-  const totalRevenue = sales.reduce((sum, sale) => sum + sale.total, 0)
-  const totalDiscount = sales.reduce((sum, sale) => sum + (sale.discount || 0), 0)
+  console.log('[Sales Report] Found sales:', sales.length)
+
+  // If no sales found in date range, get all sales for this user
+  let allSales = sales
+  if (sales.length === 0) {
+    console.log('[Sales Report] No sales in date range, fetching all sales')
+    allSales = await Sale.find({ userId }).lean()
+    console.log('[Sales Report] Total sales for user:', allSales.length)
+  }
+
+  const totalSales = allSales.length
+  const totalRevenue = allSales.reduce((sum, sale) => sum + sale.total, 0)
+  const totalDiscount = allSales.reduce((sum, sale) => sum + (sale.discount || 0), 0)
+  const averageSaleValue = totalSales > 0 ? totalRevenue / totalSales : 0
 
   // Group by day
-  const salesByDay = sales.reduce((acc: any, sale) => {
+  const salesByDay = allSales.reduce((acc: any, sale) => {
     const date = new Date(sale.createdAt).toISOString().split('T')[0]
     if (!acc[date]) {
       acc[date] = { date, sales: 0, revenue: 0 }
@@ -120,17 +148,21 @@ async function generateSalesReport(userId: string, startDate: Date, endDate: Dat
     return acc
   }, {})
 
+  const dateRangeNote = sales.length === 0 
+    ? ` (No sales found in selected range, showing all ${allSales.length} sales)`
+    : ''
+
   return {
     title: 'Sales Report',
-    description: `Sales report from ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`,
+    description: `Sales report from ${adjustedStartDate.toLocaleDateString()} to ${adjustedEndDate.toLocaleDateString()}${dateRangeNote}`,
     data: {
       summary: {
         totalSales,
         totalRevenue,
         totalDiscount,
-        averageSaleValue: totalSales > 0 ? totalRevenue / totalSales : 0,
+        averageSaleValue,
       },
-      details: sales,
+      details: allSales,
       charts: {
         salesByDay: Object.values(salesByDay),
       },
@@ -143,10 +175,10 @@ async function generateInventoryReport(userId: string) {
 
   const totalProducts = products.length
   const totalStockValue = products.reduce(
-    (sum, p) => sum + p.stock * p.buyingPrice,
+    (sum, p) => sum + (p.stock * (p.costPrice || 0)),
     0
   )
-  const lowStockItems = products.filter((p) => p.stock < 10).length
+  const lowStockItems = products.filter((p) => p.stock < (p.lowStockThreshold || 10)).length
   const outOfStockItems = products.filter((p) => p.stock === 0).length
 
   // Group by category
@@ -156,7 +188,7 @@ async function generateInventoryReport(userId: string) {
       acc[cat] = { category: cat, count: 0, value: 0 }
     }
     acc[cat].count += 1
-    acc[cat].value += product.stock * product.buyingPrice
+    acc[cat].value += product.stock * (product.costPrice || 0)
     return acc
   }, {})
 
@@ -182,7 +214,9 @@ async function generateProfitReport(userId: string, startDate: Date, endDate: Da
   const sales = await Sale.find({
     userId,
     createdAt: { $gte: startDate, $lte: endDate },
-  }).lean() as any[]
+  })
+    .populate('items.productId')
+    .lean() as any[]
 
   let totalRevenue = 0
   let totalCost = 0
@@ -190,14 +224,10 @@ async function generateProfitReport(userId: string, startDate: Date, endDate: Da
   // Calculate profit from sales
   for (const sale of sales) {
     totalRevenue += sale.total
-    // Estimate cost based on items (simplified)
+    // Calculate cost based on items
     for (const item of sale.items) {
-      const product = await Product.findOne({
-        userId,
-        productName: item.productName,
-      }).lean() as any
-      if (product) {
-        totalCost += product.buyingPrice * item.quantity
+      if (item.productId && item.productId.costPrice) {
+        totalCost += item.productId.costPrice * item.quantity
       }
     }
   }
@@ -213,7 +243,7 @@ async function generateProfitReport(userId: string, startDate: Date, endDate: Da
         totalRevenue,
         totalCost,
         totalProfit,
-        profitMargin,
+        profitMargin: parseFloat(profitMargin.toFixed(2)),
       },
       details: sales,
       charts: {},

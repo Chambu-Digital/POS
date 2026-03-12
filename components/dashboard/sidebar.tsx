@@ -11,6 +11,9 @@ import {
   LogOut,
   Menu,
   X,
+  FileText,
+  BarChart3,
+  Settings,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -28,15 +31,33 @@ const menuItems = [
     adminOnly: false,
   },
   {
+    icon: FileText,
+    label: 'Orders',
+    href: '/dashboard/orders',
+    adminOnly: false,
+  },
+  {
     icon: Package,
     label: 'Inventory',
     href: '/dashboard/inventory',
     adminOnly: false,
   },
   {
+    icon: BarChart3,
+    label: 'Reports',
+    href: '/dashboard/reports',
+    adminOnly: false,
+  },
+  {
     icon: Users,
     label: 'Staff',
     href: '/dashboard/staff',
+    adminOnly: true,
+  },
+  {
+    icon: Settings,
+    label: 'Settings',
+    href: '/dashboard/settings',
     adminOnly: true,
   },
 ]

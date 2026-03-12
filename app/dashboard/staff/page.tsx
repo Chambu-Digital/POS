@@ -31,20 +31,24 @@ interface Staff {
   _id: string
   name: string
   email: string
-  role: 'cashier' | 'manager'
+  role: 'cashier' | 'manager' | 'supervisor' | 'employee'
   active: boolean
   createdAt: string
   permissions?: {
     canMakeSales: boolean
+    canViewOrders: boolean
     canViewInventory: boolean
     canEditInventory: boolean
     canAddProducts: boolean
     canDeleteProducts: boolean
     canViewSalesReports: boolean
+    canViewDashboard: boolean
     canManageStaff: boolean
     canEditSettings: boolean
     canProcessRefunds: boolean
     canApplyDiscounts: boolean
+    canDeleteOrders: boolean
+    canExportData: boolean
   }
 }
 
@@ -58,18 +62,22 @@ export default function StaffPage() {
     name: '',
     email: '',
     password: '',
-    role: 'cashier' as const,
+    role: 'cashier' as 'cashier' | 'manager' | 'supervisor' | 'employee',
     permissions: {
       canMakeSales: true,
+      canViewOrders: true,
       canViewInventory: true,
       canEditInventory: false,
       canAddProducts: false,
       canDeleteProducts: false,
       canViewSalesReports: false,
+      canViewDashboard: true,
       canManageStaff: false,
       canEditSettings: false,
       canProcessRefunds: false,
       canApplyDiscounts: true,
+      canDeleteOrders: false,
+      canExportData: false,
     },
   })
 
@@ -328,7 +336,9 @@ export default function StaffPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="employee">Employee</SelectItem>
                     <SelectItem value="cashier">Cashier</SelectItem>
+                    <SelectItem value="supervisor">Supervisor</SelectItem>
                     <SelectItem value="manager">Manager</SelectItem>
                   </SelectContent>
                 </Select>

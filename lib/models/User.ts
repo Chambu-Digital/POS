@@ -24,6 +24,10 @@ const userSchema = new mongoose.Schema(
       enum: ['admin'],
       default: 'admin',
     },
+    settings: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
     createdAt: {
       type: Date,
       default: Date.now,

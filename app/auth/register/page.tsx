@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'sonner'
 import Link from 'next/link'
+import { Eye, EyeOff } from 'lucide-react'
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -16,6 +17,8 @@ export default function RegisterPage() {
   const [password, setPassword] = useState('')
   const [shopName, setShopName] = useState('')
   const [secretCode, setSecretCode] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [showSecretCode, setShowSecretCode] = useState(false)
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault()
@@ -88,27 +91,57 @@ export default function RegisterPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Create a strong password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={loading}
-                required
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Create a strong password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={loading}
+                  required
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  disabled={loading}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="secretCode">Admin Secret Code</Label>
-              <Input
-                id="secretCode"
-                type="password"
-                placeholder="Enter admin secret code"
-                value={secretCode}
-                onChange={(e) => setSecretCode(e.target.value)}
-                disabled={loading}
-                required
-              />
+              <div className="relative">
+                <Input
+                  id="secretCode"
+                  type={showSecretCode ? "text" : "password"}
+                  placeholder="Enter admin secret code"
+                  value={secretCode}
+                  onChange={(e) => setSecretCode(e.target.value)}
+                  disabled={loading}
+                  required
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSecretCode(!showSecretCode)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  disabled={loading}
+                >
+                  {showSecretCode ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
               <p className="text-xs text-muted-foreground">
                 Contact Chambu Digital for the admin secret code
               </p>
