@@ -18,6 +18,15 @@ interface OrderCompletionDialogProps {
   orderNumber: string
   totalAmount: number
   itemCount: number
+  items?: Array<{
+    productName: string
+    quantity: number
+    price: number
+    discount: number
+    total: number
+  }>
+  subtotal?: number
+  discount?: number
   onPrintReceipt: () => void
   onMakeNewSale: () => void
 }
@@ -28,6 +37,9 @@ export function OrderCompletionDialog({
   orderNumber,
   totalAmount,
   itemCount,
+  items = [],
+  subtotal = 0,
+  discount = 0,
   onPrintReceipt,
   onMakeNewSale,
 }: OrderCompletionDialogProps) {
@@ -59,8 +71,35 @@ export function OrderCompletionDialog({
       alert('Please enter a phone number')
       return
     }
-    // WhatsApp link with pre-filled message
-    const message = `Your receipt for Order ${orderNumber}. Total: KES ${totalAmount.toFixed(2)}`
+    
+    // Build detailed receipt message
+    let message = `*CHAMBU DIGITAL RECEIPT*\n\n`
+    message += `Order: ${orderNumber}\n`
+    message += `Items: ${itemCount}\n\n`
+    
+    message += `*Items:*\n`
+    if (items.length > 0) {
+      items.forEach((item) => {
+        message += `• ${item.productName}\n`
+        message += `  Qty: ${item.quantity} × KES ${item.price.toFixed(2)}\n`
+        if (item.discount > 0) {
+          message += `  Discount: -KES ${item.discount.toFixed(2)}\n`
+        }
+        message += `  Total: KES ${item.total.toFixed(2)}\n\n`
+      })
+    }
+    
+    message += `*Summary:*\n`
+    if (subtotal > 0) {
+      message += `Subtotal: KES ${subtotal.toFixed(2)}\n`
+    }
+    if (discount > 0) {
+      message += `Discount: -KES ${discount.toFixed(2)}\n`
+    }
+    message += `*Total: KES ${totalAmount.toFixed(2)}*\n\n`
+    message += `Thank you for shopping with us!\n`
+    message += `Powered by Chambu Digital`
+    
     const whatsappUrl = `https://wa.me/${phoneNumber.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`
     window.open(whatsappUrl, '_blank')
     setShowSendOptions(false)

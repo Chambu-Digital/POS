@@ -482,6 +482,9 @@ function PaymentPageContent() {
           orderNumber={lastSale.receiptNumber}
           totalAmount={lastSale.total}
           itemCount={lastSale.items.length}
+          items={lastSale.items}
+          subtotal={lastSale.subtotal}
+          discount={lastSale.discount}
           onPrintReceipt={handlePrintReceipt}
           onMakeNewSale={handleMakeNewSale}
         />
