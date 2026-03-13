@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
+import { ServiceWorkerRegister } from '@/components/pwa/service-worker-register'
+import { PWADebug } from '@/components/pwa/pwa-debug'
 
 import './globals.css'
 
@@ -33,7 +35,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        {children}
+        <ServiceWorkerRegister />
+        <PWADebug />
+      </body>
     </html>
   )
 }

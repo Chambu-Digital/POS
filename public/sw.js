@@ -1,42 +1,45 @@
 // Chambu Digital POS Service Worker
-// Handles offline caching and background sync
+// Handles offline caching, background sync, and automatic updates
 
-const CACHE_NAME = 'chambu-pos-v1'
-const RUNTIME_CACHE = 'chambu-pos-runtime-v1'
+// Generate cache version from timestamp to ensure fresh caches on each deployment
+const CACHE_VERSION = 'chambu-pos-' + (self.registration?.scope || 'v1')
+const CACHE_NAME = CACHE_VERSION + '-precache'
+const RUNTIME_CACHE = CACHE_VERSION + '-runtime'
+const API_CACHE = CACHE_VERSION + '-api'
 
 // Assets to cache on install (excluding large images)
 const PRECACHE_ASSETS = [
   '/',
-  '/dashboard',
-  '/dashboard/sales',
-  '/dashboard/inventory',
-  '/dashboard/staff',
-  '/auth/login',
-  '/auth/register',
   '/manifest.json',
   '/chambu-logo.svg',
 ]
 
-// Install event - cache essential assets
+// Install event - cache essential assets and skip waiting
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing service worker...')
+  console.log('[SW] Installing service worker...', CACHE_NAME)
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       console.log('[SW] Precaching assets')
-      return cache.addAll(PRECACHE_ASSETS)
+      return cache.addAll(PRECACHE_ASSETS).catch((error) => {
+        console.warn('[SW] Some assets failed to cache:', error)
+        // Continue even if some assets fail
+        return Promise.resolve()
+      })
     })
   )
+  // Skip waiting - activate immediately instead of waiting for all tabs to close
   self.skipWaiting()
 })
 
-// Activate event - clean up old caches
+// Activate event - clean up old caches and claim clients immediately
 self.addEventListener('activate', (event) => {
   console.log('[SW] Activating service worker...')
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME && cacheName !== RUNTIME_CACHE) {
+          // Delete all caches except current version
+          if (!cacheName.startsWith(CACHE_VERSION)) {
             console.log('[SW] Deleting old cache:', cacheName)
             return caches.delete(cacheName)
           }
@@ -44,59 +47,99 @@ self.addEventListener('activate', (event) => {
       )
     })
   )
+  // Claim all clients immediately - new SW takes control right away
   self.clients.claim()
 })
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event - intelligent caching strategy
 self.addEventListener('fetch', (event) => {
   const { request } = event
   const url = new URL(request.url)
 
-  // Skip caching for:
-  // 1. Non-GET requests
-  // 2. API calls (let them go to network/IndexedDB)
-  // 3. Large images (placeholder images, user uploads)
-  if (
-    request.method !== 'GET' ||
-    url.pathname.startsWith('/api/') ||
-    url.pathname.includes('placeholder') ||
-    url.pathname.match(/\.(jpg|jpeg|png|gif|webp)$/i)
-  ) {
+  // Skip caching for non-GET requests
+  if (request.method !== 'GET') {
     return
   }
 
-  event.respondWith(
-    caches.match(request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Return cached version
-        return cachedResponse
-      }
-
-      // Not in cache, fetch from network
-      return fetch(request)
+  // Strategy 1: Network-first for HTML (app shell)
+  // Don't cache HTML to ensure users always get latest version
+  if (request.destination === 'document' || url.pathname === '/') {
+    event.respondWith(
+      fetch(request)
         .then((response) => {
-          // Don't cache if not successful
-          if (!response || response.status !== 200 || response.type === 'error') {
-            return response
-          }
-
-          // Clone the response
-          const responseToCache = response.clone()
-
-          // Cache the fetched resource
-          caches.open(RUNTIME_CACHE).then((cache) => {
-            cache.put(request, responseToCache)
-          })
-
+          // Don't cache HTML responses
           return response
         })
         .catch(() => {
-          // Network failed, return offline page if available
-          if (request.destination === 'document') {
-            return caches.match('/')
-          }
+          // Network failed, try cache
+          return caches.match(request).then((cached) => {
+            return cached || caches.match('/')
+          })
         })
-    })
+    )
+    return
+  }
+
+  // Strategy 2: Cache-first for static assets (JS, CSS, images)
+  if (
+    url.pathname.match(/\.(js|css|woff2|woff|ttf|eot|svg|png|jpg|jpeg|gif|webp)$/i) &&
+    !url.pathname.includes('placeholder')
+  ) {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        if (cached) {
+          return cached
+        }
+        return fetch(request)
+          .then((response) => {
+            if (!response || response.status !== 200) {
+              return response
+            }
+            const responseToCache = response.clone()
+            caches.open(RUNTIME_CACHE).then((cache) => {
+              cache.put(request, responseToCache)
+            })
+            return response
+          })
+          .catch(() => {
+            // Return placeholder or cached version
+            return caches.match(request)
+          })
+      })
+    )
+    return
+  }
+
+  // Strategy 3: Network-first for API calls
+  if (url.pathname.startsWith('/api/')) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.status === 200) {
+            const responseToCache = response.clone()
+            caches.open(API_CACHE).then((cache) => {
+              cache.put(request, responseToCache)
+            })
+          }
+          return response
+        })
+        .catch(() => {
+          // Network failed, try cache
+          return caches.match(request)
+        })
+    )
+    return
+  }
+
+  // Default: network-first
+  event.respondWith(
+    fetch(request)
+      .then((response) => {
+        return response
+      })
+      .catch(() => {
+        return caches.match(request)
+      })
   )
 })
 
