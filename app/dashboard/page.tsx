@@ -83,7 +83,7 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Revenue</p>
-                <p className="text-2xl font-bold">KES {(stats.totalRevenue / 1000).toFixed(1)}K</p>
+                <p className="text-2xl font-bold">KES {stats.totalRevenue.toLocaleString()}</p>
               </div>
             </div>
           </CardContent>
@@ -199,7 +199,7 @@ export default function DashboardPage() {
               <Separator />
               <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">Stock Value</span>
-                <span className="font-semibold">KES {(stats.products.stockValue / 1000).toFixed(1)}K</span>
+                <span className="font-semibold">KES {stats.products.stockValue.toLocaleString()}</span>
               </div>
               <Separator />
               <div className="flex justify-between items-center">

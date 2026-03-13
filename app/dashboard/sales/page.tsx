@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,6 +19,7 @@ import { Plus, Minus, X, Search, ShoppingCart, AlertCircle } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
+import { FloatingCartButton } from '@/components/sales/floating-cart-button'
 import { useOffline } from '@/hooks/use-offline'
 import {
   cacheProducts,
@@ -69,6 +70,7 @@ function SalesPageContent() {
   const [loading, setLoading] = useState(true)
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
   const isOffline = useOffline()
+  const cartRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     fetchProducts()
@@ -239,6 +241,14 @@ function SalesPageContent() {
     setCart((prevCart) => prevCart.filter((item) => item.productId !== productId))
   }
 
+  function scrollToCart() {
+    cartRef.current?.scrollIntoView({ behavior: 'auto' })
+  }
+
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: 'auto' })
+  }
+
   async function completeSale() {
     if (cart.length === 0) {
       toast.error('Cart is empty')
@@ -287,7 +297,8 @@ function SalesPageContent() {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-200px)]">
+    <>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-200px)]">
       {/* Left Panel - Products */}
       <div className="lg:col-span-2 flex flex-col space-y-4">
         {isOffline && (
@@ -305,7 +316,7 @@ function SalesPageContent() {
         </div>
 
         {/* Search and Filter */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 sticky top-0 bg-white z-30 pb-4">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" size={20} />
             <Input
@@ -341,7 +352,7 @@ function SalesPageContent() {
               {filteredProducts.map((product) => (
                 <Card
                   key={product._id}
-                  className="hover:shadow-lg transition-shadow cursor-pointer"
+                  className="hover:shadow-lg hover:ring-2 hover:ring-green-500 transition-all cursor-pointer"
                   onClick={() => addToCart(product)}
                 >
                   <CardContent className="p-4">
@@ -372,9 +383,12 @@ function SalesPageContent() {
                     </div>
                     <div className="space-y-1">
                       <p className="text-xs text-muted-foreground">{product.category}</p>
-                      <p className="text-lg font-bold text-primary">
-                        KSh {product.sellingPrice.toLocaleString()}
-                      </p>
+                      <div className="flex items-center justify-between">
+                        <span className="text-2xl font-bold text-green-600">+</span>
+                        <p className="text-lg font-bold text-primary">
+                          KSh {product.sellingPrice.toLocaleString()}
+                        </p>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -385,13 +399,25 @@ function SalesPageContent() {
       </div>
 
       {/* Right Panel - Cart */}
-      <div className="flex flex-col space-y-4">
+      <div className="flex flex-col space-y-4" ref={cartRef}>
         <Card className="flex flex-col">
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2">
-              <ShoppingCart size={20} />
-              Cart ({cart.length})
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <ShoppingCart size={20} />
+                Cart ({cart.length})
+              </CardTitle>
+              {cart.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={scrollToTop}
+                  className="md:hidden"
+                >
+                  Add More Items
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="max-h-[400px] overflow-y-auto space-y-3">
             {cart.length === 0 ? (
@@ -516,5 +542,9 @@ function SalesPageContent() {
         </Card>
       </div>
     </div>
+
+    {/* Floating Cart Button - Mobile Only */}
+    <FloatingCartButton itemCount={cart.length} onClick={scrollToCart} />
+    </>
   )
 }
