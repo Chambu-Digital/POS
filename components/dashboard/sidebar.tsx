@@ -23,42 +23,49 @@ const menuItems = [
     label: 'Dashboard',
     href: '/dashboard',
     adminOnly: false,
+    permission: 'canViewDashboard',
   },
   {
     icon: ShoppingCart,
     label: 'Make Sale',
     href: '/dashboard/sales',
     adminOnly: false,
+    permission: 'canMakeSales',
   },
   {
     icon: FileText,
     label: 'Orders',
     href: '/dashboard/orders',
     adminOnly: false,
+    permission: 'canViewOrders',
   },
   {
     icon: Package,
     label: 'Inventory',
     href: '/dashboard/inventory',
     adminOnly: false,
+    permission: 'canViewInventory',
   },
   {
     icon: BarChart3,
     label: 'Reports',
     href: '/dashboard/reports',
     adminOnly: false,
+    permission: 'canViewSalesReports',
   },
   {
     icon: Users,
     label: 'Staff',
     href: '/dashboard/staff',
     adminOnly: true,
+    permission: 'canManageStaff',
   },
   {
     icon: Settings,
     label: 'Settings',
     href: '/dashboard/settings',
     adminOnly: true,
+    permission: 'canEditSettings',
   },
 ]
 
@@ -67,6 +74,8 @@ export function Sidebar() {
   const [isOpen, setIsOpen] = useState(false)
   const [userType, setUserType] = useState<'user' | 'staff' | null>(null)
   const [shopName, setShopName] = useState<string>('My Shop')
+  const [permissions, setPermissions] = useState<Record<string, boolean>>({})
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     // Fetch user info to determine if admin and get shop name
@@ -76,16 +85,39 @@ export function Sidebar() {
         if (data.user) {
           setUserType(data.user.type)
           setShopName(data.user.shopName || 'My Shop')
+          // Set permissions for staff members
+          if (data.user.type === 'staff' && data.user.permissions) {
+            setPermissions(data.user.permissions)
+          }
         }
+        setIsLoading(false)
       })
       .catch(() => {
-        // Ignore errors
+        setIsLoading(false)
       })
   }, [])
 
-  const visibleMenuItems = menuItems.filter(item => 
-    !item.adminOnly || userType === 'user'
-  )
+  const visibleMenuItems = menuItems.filter(item => {
+    // Admin/Owner sees all items
+    if (userType === 'user') {
+      return true
+    }
+    
+    // Staff members: check adminOnly flag and permissions
+    if (userType === 'staff') {
+      // Admin-only items hidden from staff
+      if (item.adminOnly) {
+        return false
+      }
+      // Check specific permission
+      if (item.permission) {
+        return permissions[item.permission] === true
+      }
+      return false
+    }
+    
+    return false
+  })
 
   return (
     <>
@@ -120,27 +152,31 @@ export function Sidebar() {
           </div>
 
           <nav className="space-y-2">
-            {visibleMenuItems.map((item) => {
-              const Icon = item.icon
-              const isActive = pathname === item.href
+            {isLoading ? (
+              <div className="text-sm text-muted-foreground p-4">Loading menu...</div>
+            ) : (
+              visibleMenuItems.map((item) => {
+                const Icon = item.icon
+                const isActive = pathname === item.href
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setIsOpen(false)}
-                  className={cn(
-                    'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors',
-                    isActive
-                      ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]'
-                      : 'text-[hsl(var(--sidebar-foreground))] hover:bg-[hsl(var(--sidebar-accent))]/50 hover:text-[hsl(var(--sidebar-accent-foreground))]'
-                  )}
-                >
-                  <Icon size={20} />
-                  <span>{item.label}</span>
-                </Link>
-              )
-            })}
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setIsOpen(false)}
+                    className={cn(
+                      'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors',
+                      isActive
+                        ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]'
+                        : 'text-[hsl(var(--sidebar-foreground))] hover:bg-[hsl(var(--sidebar-accent))]/50 hover:text-[hsl(var(--sidebar-accent-foreground))]'
+                    )}
+                  >
+                    <Icon size={20} />
+                    <span>{item.label}</span>
+                  </Link>
+                )
+              })
+            )}
           </nav>
 
           <div className="absolute bottom-6 left-6 right-6">

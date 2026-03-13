@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { X } from 'lucide-react'
 import {
   getPWAStatus,
   clearAllCaches,
@@ -22,6 +23,7 @@ export function PWADebug() {
   const [cachedUrls, setCachedUrls] = useState<string[]>([])
   const [swInfo, setSwInfo] = useState<any>(null)
   const [loading, setLoading] = useState(false)
+  const [isOpen, setIsOpen] = useState(false)
 
   useEffect(() => {
     if (process.env.NODE_ENV !== 'development') {
@@ -46,6 +48,18 @@ export function PWADebug() {
 
   if (process.env.NODE_ENV !== 'development' || !status) {
     return null
+  }
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="fixed bottom-4 right-4 z-50 w-10 h-10 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-white hover:bg-slate-800 transition-colors"
+        title="Open PWA Debug"
+      >
+        🔧
+      </button>
+    )
   }
 
   const handleClearCache = async () => {
@@ -73,9 +87,18 @@ export function PWADebug() {
   return (
     <div className="fixed bottom-4 right-4 w-96 z-50">
       <Card className="bg-slate-900 text-white border-slate-700">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">PWA Debug</CardTitle>
-          <CardDescription className="text-xs text-slate-400">Development Only</CardDescription>
+        <CardHeader className="pb-3 flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-sm">PWA Debug</CardTitle>
+            <CardDescription className="text-xs text-slate-400">Development Only</CardDescription>
+          </div>
+          <button
+            onClick={() => setIsOpen(false)}
+            className="text-slate-400 hover:text-white transition-colors"
+            title="Close PWA Debug"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </CardHeader>
         <CardContent className="space-y-3">
           {/* Status */}

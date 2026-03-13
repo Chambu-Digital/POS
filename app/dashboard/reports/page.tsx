@@ -20,6 +20,7 @@ import {
   RefreshCw
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { PermissionGuard } from '@/components/auth/permission-guard'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 
@@ -42,6 +43,14 @@ interface Report {
 }
 
 export default function ReportsPage() {
+  return (
+    <PermissionGuard requiredPermission="canViewSalesReports">
+      <ReportsPageContent />
+    </PermissionGuard>
+  )
+}
+
+function ReportsPageContent() {
   const [reports, setReports] = useState<Report[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)

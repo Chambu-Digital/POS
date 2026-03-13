@@ -18,6 +18,7 @@ import { Separator } from '@/components/ui/separator'
 import { Plus, Minus, X, Search, ShoppingCart, AlertCircle } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
+import { PermissionGuard } from '@/components/auth/permission-guard'
 import { useOffline } from '@/hooks/use-offline'
 import {
   cacheProducts,
@@ -49,6 +50,14 @@ interface CartItem {
 }
 
 export default function SalesPage() {
+  return (
+    <PermissionGuard requiredPermission="canMakeSales">
+      <SalesPageContent />
+    </PermissionGuard>
+  )
+}
+
+function SalesPageContent() {
   const router = useRouter()
   const [products, setProducts] = useState<Product[]>([])
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])

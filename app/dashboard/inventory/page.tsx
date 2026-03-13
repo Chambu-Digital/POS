@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Plus, Upload, Download, Trash2, Edit2, Search, FolderTree } from 'lucide-react'
 import { toast } from 'sonner'
+import { PermissionGuard } from '@/components/auth/permission-guard'
 import { ProductForm } from '@/components/inventory/product-form'
 import { ImportModal } from '@/components/inventory/import-modal'
 import { CategoryManager } from '@/components/inventory/category-manager'
@@ -32,6 +33,14 @@ interface Product {
 }
 
 export default function InventoryPage() {
+  return (
+    <PermissionGuard requiredPermission="canViewInventory">
+      <InventoryPageContent />
+    </PermissionGuard>
+  )
+}
+
+function InventoryPageContent() {
   const [products, setProducts] = useState<Product[]>([])
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
