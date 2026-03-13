@@ -66,6 +66,7 @@ function PaymentPageContent() {
   const [loading, setLoading] = useState(true)
   const [lastSale, setLastSale] = useState<any>(null)
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
+  const [shopSettings, setShopSettings] = useState<any>(null)
 
   useEffect(() => {
     // Get cart data from sessionStorage
@@ -109,6 +110,17 @@ function PaymentPageContent() {
     } catch (error) {
       console.error('Failed to fetch user info:', error)
       setUserInfo({ shopName: 'Shop', name: 'Cashier' })
+    }
+
+    // Fetch shop settings
+    try {
+      const response = await fetch('/api/settings')
+      if (response.ok) {
+        const data = await response.json()
+        setShopSettings(data.settings)
+      }
+    } catch (error) {
+      console.error('Failed to fetch settings:', error)
     }
   }
 
@@ -482,6 +494,8 @@ function PaymentPageContent() {
           orderNumber={lastSale.receiptNumber}
           totalAmount={lastSale.total}
           itemCount={lastSale.items.length}
+          shopName={userInfo?.shopName}
+          cashierName={userInfo?.name}
           items={lastSale.items}
           subtotal={lastSale.subtotal}
           discount={lastSale.discount}
@@ -503,6 +517,11 @@ function PaymentPageContent() {
           paymentMethod={lastSale.paymentMethod}
           date={lastSale.date}
           receiptNumber={lastSale.receiptNumber}
+          shopPhone={shopSettings?.shop?.phone}
+          shopEmail={shopSettings?.shop?.email}
+          shopAddress={shopSettings?.shop?.address}
+          mpesaPaybill={shopSettings?.payment?.mpesaPaybill}
+          mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}
         />
       )}
 

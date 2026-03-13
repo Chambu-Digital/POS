@@ -18,6 +18,8 @@ interface OrderCompletionDialogProps {
   orderNumber: string
   totalAmount: number
   itemCount: number
+  shopName?: string
+  cashierName?: string
   items?: Array<{
     productName: string
     quantity: number
@@ -37,6 +39,8 @@ export function OrderCompletionDialog({
   orderNumber,
   totalAmount,
   itemCount,
+  shopName = 'Chambu Digital',
+  cashierName = 'Cashier',
   items = [],
   subtotal = 0,
   discount = 0,
@@ -73,9 +77,10 @@ export function OrderCompletionDialog({
     }
     
     // Build detailed receipt message
-    let message = `*CHAMBU DIGITAL RECEIPT*\n\n`
+    let message = `*${shopName.toUpperCase()} RECEIPT*\n\n`
     message += `Order: ${orderNumber}\n`
-    message += `Items: ${itemCount}\n\n`
+    message += `Items: ${itemCount}\n`
+    message += `Cashier: ${cashierName}\n\n`
     
     message += `*Items:*\n`
     if (items.length > 0) {

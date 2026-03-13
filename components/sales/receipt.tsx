@@ -23,6 +23,11 @@ interface ReceiptProps {
   paymentMethod: string
   date: Date
   receiptNumber: string
+  shopPhone?: string
+  shopEmail?: string
+  shopAddress?: string
+  mpesaPaybill?: string
+  mpesaAccountNumber?: string
   onPrintComplete?: () => void
 }
 
@@ -40,6 +45,11 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
   paymentMethod,
   date,
   receiptNumber,
+  shopPhone = '+254748069158',
+  shopEmail = 'sales@chambudigital.co.ke',
+  shopAddress = 'Nairobi, Kenya',
+  mpesaPaybill = '522522',
+  mpesaAccountNumber = '7716828',
   onPrintComplete,
 }, ref) => {
   const receiptRef = useRef<HTMLDivElement>(null)
@@ -200,9 +210,9 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
       <div className="header">
         <div className="company-name">{shopName}</div>
         <div className="company-details">
-          Phone: +254748069158 / 0728756727<br/>
-          Email: sales@chambudigital.co.ke<br/>
-          Address: Nairobi, Kenya
+          {shopPhone && <div>Phone: {shopPhone}</div>}
+          {shopEmail && <div>Email: {shopEmail}</div>}
+          {shopAddress && <div>Address: {shopAddress}</div>}
         </div>
       </div>
 
@@ -268,8 +278,8 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
       {paymentMethod === 'mobile_money' && (
         <div style={{ margin: '15px 0', fontSize: '11px' }}>
           <div><strong>M-PESA</strong></div>
-          <div>PAYBILL: 522522</div>
-          <div>AC/NO: 7716828</div>
+          <div>PAYBILL: {mpesaPaybill}</div>
+          <div>AC/NO: {mpesaAccountNumber}</div>
         </div>
       )}
 
