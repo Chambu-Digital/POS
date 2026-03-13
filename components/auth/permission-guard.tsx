@@ -32,43 +32,66 @@ export function PermissionGuard({
     try {
       const response = await fetch('/api/auth/me')
       if (!response.ok) {
+        // Try to use cached permissions if offline
+        const cachedUser = localStorage.getItem('cachedUserInfo')
+        if (cachedUser) {
+          const data = JSON.parse(cachedUser)
+          setUserInfo(data)
+          evaluatePermissions(data)
+          return
+        }
         router.push('/auth/login')
         return
       }
 
       const data = await response.json()
       setUserInfo(data.user)
-
-      // Admin/Owner has all permissions
-      if (data.user.type === 'user') {
-        setHasAccess(true)
-        return
-      }
-
-      // Check staff permissions
-      const permissions = data.user.permissions || {}
-
-      if (requiredPermission) {
-        setHasAccess(permissions[requiredPermission] === true)
-      } else if (requiredPermissions && requiredPermissions.length > 0) {
-        if (requireAll) {
-          // User must have all permissions
-          setHasAccess(
-            requiredPermissions.every((perm) => permissions[perm] === true)
-          )
-        } else {
-          // User must have at least one permission
-          setHasAccess(
-            requiredPermissions.some((perm) => permissions[perm] === true)
-          )
-        }
-      } else {
-        // No specific permission required
-        setHasAccess(true)
-      }
+      
+      // Cache user info for offline use
+      localStorage.setItem('cachedUserInfo', JSON.stringify(data.user))
+      
+      evaluatePermissions(data.user)
     } catch (error) {
       console.error('Permission check error:', error)
+      // Try to use cached permissions if offline
+      const cachedUser = localStorage.getItem('cachedUserInfo')
+      if (cachedUser) {
+        const data = JSON.parse(cachedUser)
+        setUserInfo(data)
+        evaluatePermissions(data)
+        return
+      }
       setHasAccess(false)
+    }
+  }
+
+  function evaluatePermissions(user: any) {
+    // Admin/Owner has all permissions
+    if (user.type === 'user') {
+      setHasAccess(true)
+      return
+    }
+
+    // Check staff permissions
+    const permissions = user.permissions || {}
+
+    if (requiredPermission) {
+      setHasAccess(permissions[requiredPermission] === true)
+    } else if (requiredPermissions && requiredPermissions.length > 0) {
+      if (requireAll) {
+        // User must have all permissions
+        setHasAccess(
+          requiredPermissions.every((perm) => permissions[perm] === true)
+        )
+      } else {
+        // User must have at least one permission
+        setHasAccess(
+          requiredPermissions.some((perm) => permissions[perm] === true)
+        )
+      }
+    } else {
+      // No specific permission required
+      setHasAccess(true)
     }
   }
 

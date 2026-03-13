@@ -30,18 +30,76 @@ export default function LoginPage() {
 
       if (!response.ok) {
         const data = await response.json()
+        
+        // Try offline login if online login fails
+        const offlineSuccess = await tryOfflineLogin(email, password)
+        if (offlineSuccess) {
+          toast.success('Login successful (offline mode)')
+          router.push('/dashboard')
+          return
+        }
+        
         toast.error(data.error || 'Login failed')
         return
       }
 
+      const data = await response.json()
+      
+      // Cache login credentials for offline use
+      const credentialHash = await hashPassword(password)
+      localStorage.setItem('cachedCredentials', JSON.stringify({
+        email,
+        passwordHash: credentialHash,
+        timestamp: Date.now(),
+      }))
+      
       toast.success('Login successful')
       router.push('/dashboard')
     } catch (error) {
+      // Try offline login on network error
+      const offlineSuccess = await tryOfflineLogin(email, password)
+      if (offlineSuccess) {
+        toast.success('Login successful (offline mode)')
+        router.push('/dashboard')
+        return
+      }
+      
       toast.error('An error occurred during login')
       console.error(error)
     } finally {
       setLoading(false)
     }
+  }
+
+  async function tryOfflineLogin(email: string, password: string): Promise<boolean> {
+    try {
+      const cached = localStorage.getItem('cachedCredentials')
+      if (!cached) return false
+
+      const { email: cachedEmail, passwordHash } = JSON.parse(cached)
+      
+      // Check if email matches
+      if (cachedEmail !== email) return false
+      
+      // Simple password verification (in production, use proper hashing)
+      const inputHash = await hashPassword(password)
+      if (inputHash !== passwordHash) return false
+      
+      return true
+    } catch (error) {
+      console.error('Offline login error:', error)
+      return false
+    }
+  }
+
+  async function hashPassword(password: string): Promise<string> {
+    // Simple hash for offline verification (not cryptographically secure)
+    // In production, use a proper hashing library
+    const encoder = new TextEncoder()
+    const data = encoder.encode(password)
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+    const hashArray = Array.from(new Uint8Array(hashBuffer))
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
   }
 
   return (

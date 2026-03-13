@@ -12,7 +12,7 @@ export function FloatingCartButton({ itemCount, onClick }: FloatingCartButtonPro
   return (
     <button
       onClick={onClick}
-      className="fixed bottom-6 right-6 z-40 md:hidden"
+      className="fixed bottom-20 right-6 z-40 md:hidden"
       aria-label={`Shopping cart with ${itemCount} items`}
     >
       {/* Red Cart SVG */}

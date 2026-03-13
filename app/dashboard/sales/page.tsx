@@ -400,7 +400,7 @@ function SalesPageContent() {
       </div>
 
       {/* Right Panel - Cart */}
-      <div className="flex flex-col space-y-4" ref={cartRef}>
+      <div className="flex flex-col space-y-4 lg:pb-0 pb-32" ref={cartRef}>
         <Card className="flex flex-col">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
@@ -547,6 +547,19 @@ function SalesPageContent() {
 
     {/* Floating Cart Button - Mobile Only */}
     <FloatingCartButton itemCount={cart.length} onClick={scrollToCart} />
+
+    {/* Powered by Footer - Mobile Only */}
+    <div className="fixed bottom-0 left-0 right-0 bg-white border-t md:hidden py-2 px-4 text-center text-xs text-muted-foreground">
+      Powered by{' '}
+      <a
+        href="https://www.chambudigital.co.ke/"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-primary hover:underline font-medium"
+      >
+        Chambu Digital
+      </a>
+    </div>
     </>
   )
 }
