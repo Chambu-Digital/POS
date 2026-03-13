@@ -165,7 +165,11 @@ export function OrderDetailsDialog({ open, onOpenChange, order }: OrderDetailsDi
                   {order.items.map((item, index) => (
                     <tr key={index} className="border-t">
                       <td className="p-3">{index + 1}</td>
-                      <td className="p-3">{item.productId?.name || 'Unknown Item'}</td>
+                      <td className="p-3">
+                        {typeof item.productId === 'object' && item.productId?.productName
+                          ? item.productId.productName
+                          : (item as any).productName || 'Unknown Item'}
+                      </td>
                       <td className="p-3 text-right">{item.quantity}</td>
                       <td className="p-3 text-right">
                         {formatCurrency(item.price * item.quantity)}

@@ -19,7 +19,10 @@ export async function GET(request: NextRequest) {
 
     const sales = await Sale.find({ userId: ownerId })
       .sort({ createdAt: -1 })
-      .populate('items.productId')
+      .populate({
+        path: 'items.productId',
+        select: 'productName',
+      })
 
     return NextResponse.json({ sales })
   } catch (error) {
