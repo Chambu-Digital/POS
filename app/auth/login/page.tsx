@@ -121,10 +121,15 @@ export default function LoginPage() {
               Staff Login
             </Link>
           </div>
-          <div className="mt-6 text-center">
+          <div className="mt-6 text-center space-y-2">
             <p className="text-xs text-muted-foreground">
-              Powered by <span className="font-semibold text-primary">Chambu Digital</span>
+              Powered by <a href="https://www.chambudigital.co.ke/" target="_blank" rel="noopener noreferrer" className="font-semibold text-primary hover:underline">Chambu Digital</a>
             </p>
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>Need help? Contact us:</p>
+              <p>Phone: <a href="tel:+254748069158" className="text-primary hover:underline">+254 748 069 158</a></p>
+              <p>WhatsApp: <a href="https://wa.me/254748069158" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">+254 748 069 158</a></p>
+            </div>
           </div>
         </CardContent>
       </Card>
