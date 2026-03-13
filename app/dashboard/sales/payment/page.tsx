@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -39,6 +39,14 @@ interface CartItem {
 }
 
 export default function PaymentPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <PaymentPageContent />
+    </Suspense>
+  )
+}
+
+function PaymentPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const receiptRef = useRef<ReceiptRef>(null)
