@@ -71,6 +71,7 @@ function SalesPageContent() {
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
   const isOffline = useOffline()
   const cartRef = useRef<HTMLDivElement>(null)
+  const productsRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     fetchProducts()
@@ -246,7 +247,7 @@ function SalesPageContent() {
   }
 
   function scrollToTop() {
-    window.scrollTo({ top: 0, behavior: 'auto' })
+    productsRef.current?.scrollIntoView({ behavior: 'auto' })
   }
 
   async function completeSale() {
@@ -300,7 +301,7 @@ function SalesPageContent() {
     <>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-200px)]">
       {/* Left Panel - Products */}
-      <div className="lg:col-span-2 flex flex-col space-y-4">
+      <div className="lg:col-span-2 flex flex-col space-y-4" ref={productsRef}>
         {isOffline && (
           <Alert className="bg-yellow-50 border-yellow-200">
             <AlertCircle className="h-4 w-4 text-yellow-600" />
@@ -481,7 +482,7 @@ function SalesPageContent() {
                     <Input
                       type="number"
                       placeholder="Discount"
-                      value={item.discount}
+                      value={item.discount || ''}
                       onChange={(e) =>
                         updateDiscount(item.productId, parseFloat(e.target.value) || 0)
                       }
@@ -516,7 +517,8 @@ function SalesPageContent() {
                 <Input
                   id="discount"
                   type="number"
-                  value={cartDiscount}
+                  placeholder="Discount"
+                  value={cartDiscount || ''}
                   onChange={(e) => setCartDiscount(parseFloat(e.target.value) || 0)}
                   className="h-8 w-24"
                 />

@@ -20,7 +20,7 @@ export function FloatingCartButton({ itemCount, onClick }: FloatingCartButtonPro
         {/* Badge with item count - Above the cart */}
         {itemCount > 0 && (
           <Badge
-            className="absolute -top-6 left-1/2 transform -translate-x-1/2 bg-white text-red-600 hover:bg-white font-bold text-xs w-6 h-6 flex items-center justify-center p-0 rounded-full"
+            className="absolute -top-6 left-1/2 transform -translate-x-1/2 bg-green-600 text-white hover:bg-green-700 font-bold text-xs w-6 h-6 flex items-center justify-center p-0 rounded-full"
           >
             {itemCount > 99 ? '99+' : itemCount}
           </Badge>
