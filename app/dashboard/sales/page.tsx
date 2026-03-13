@@ -87,23 +87,58 @@ function SalesPageContent() {
     try {
       let prods: Product[] = []
 
+      // Check if products are already in sessionStorage (cached during this session)
+      const cachedSessionProducts = sessionStorage.getItem('sessionProducts')
+      if (cachedSessionProducts) {
+        try {
+          prods = JSON.parse(cachedSessionProducts)
+          setProducts(prods)
+          const cats = Array.from(new Set(prods.map((p: Product) => p.category))).sort()
+          setCategories(cats as string[])
+          setLoading(false)
+          return
+        } catch (e) {
+          console.error('Failed to parse session cache:', e)
+        }
+      }
+
       if (isOnline()) {
-        const response = await fetch('/api/products')
-        if (response.ok) {
-          const data = await response.json()
-          prods = data.products || []
-          // Cache products for offline use
-          await cacheProducts(prods)
-        } else {
-          console.error('Failed to fetch products from API, trying cache...')
-          // Fallback to cache if API fails
+        try {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+
+          const response = await fetch('/api/products', { signal: controller.signal })
+          clearTimeout(timeoutId)
+
+          if (response.ok) {
+            const data = await response.json()
+            prods = data.products || []
+            // Cache products for offline use
+            await cacheProducts(prods)
+            // Also cache in sessionStorage for fast access
+            sessionStorage.setItem('sessionProducts', JSON.stringify(prods))
+          } else {
+            console.error('Failed to fetch products from API, trying cache...')
+            // Fallback to cache if API fails
+            const cached = await getCachedProducts()
+            prods = cached as Product[]
+          }
+        } catch (fetchError) {
+          console.error('Fetch error:', fetchError)
+          // Fallback to cache if fetch fails
           const cached = await getCachedProducts()
           prods = cached as Product[]
+          if (prods.length === 0) {
+            toast.warning('Network error. No cached products available.')
+          }
         }
       } else {
         // Load from cache if offline
         const cached = await getCachedProducts()
         prods = cached as Product[]
+        if (prods.length === 0) {
+          toast.warning('You are offline and no products are cached. Please go online to load products.')
+        }
       }
 
       setProducts(prods)
@@ -117,7 +152,11 @@ function SalesPageContent() {
         setProducts(cached as Product[])
         const cats = Array.from(new Set((cached as Product[]).map((p: Product) => p.category))).sort()
         setCategories(cats as string[])
-        toast.warning('Loaded products from cache')
+        if ((cached as Product[]).length > 0) {
+          toast.warning('Loaded products from cache')
+        } else {
+          toast.error('No products available. Please go online and refresh.')
+        }
       } catch (cacheError) {
         console.error('Failed to load from cache:', cacheError)
         toast.error('Failed to load products. Please refresh the page.')
@@ -385,10 +424,10 @@ function SalesPageContent() {
                     <div className="space-y-1">
                       <p className="text-xs text-muted-foreground">{product.category}</p>
                       <div className="flex items-center justify-between">
-                        <span className="text-2xl font-bold text-green-600">+</span>
                         <p className="text-lg font-bold text-primary">
                           KSh {product.sellingPrice.toLocaleString()}
                         </p>
+                        <span className="text-2xl font-bold text-green-600">+</span>
                       </div>
                     </div>
                   </CardContent>

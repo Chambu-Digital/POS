@@ -151,13 +151,17 @@ export function OrderDetailsDialog({ open, onOpenChange, order }: OrderDetailsDi
           {/* Product Order List */}
           <div>
             <h3 className="font-semibold text-lg mb-4">Product order list</h3>
-            <div className="border rounded-lg overflow-hidden">
+            
+            {/* Desktop Table */}
+            <div className="hidden md:block border rounded-lg overflow-hidden">
               <table className="w-full">
                 <thead className="bg-muted/50">
                   <tr>
                     <th className="text-left p-3 font-medium">#</th>
                     <th className="text-left p-3 font-medium">Item</th>
                     <th className="text-right p-3 font-medium">Quantity</th>
+                    <th className="text-right p-3 font-medium">Price</th>
+                    <th className="text-right p-3 font-medium">Discount</th>
                     <th className="text-right p-3 font-medium">Amount</th>
                   </tr>
                 </thead>
@@ -172,12 +176,54 @@ export function OrderDetailsDialog({ open, onOpenChange, order }: OrderDetailsDi
                       </td>
                       <td className="p-3 text-right">{item.quantity}</td>
                       <td className="p-3 text-right">
-                        {formatCurrency(item.price * item.quantity)}
+                        {formatCurrency(item.price)}
+                      </td>
+                      <td className="p-3 text-right">
+                        {formatCurrency(item.discount)}
+                      </td>
+                      <td className="p-3 text-right">
+                        {formatCurrency(item.price * item.quantity - item.discount)}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+
+            {/* Mobile Card Layout */}
+            <div className="md:hidden space-y-3">
+              {order.items.map((item, index) => (
+                <div key={index} className="border rounded-lg p-4 space-y-2">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <p className="font-semibold text-sm">
+                        {typeof item.productId === 'object' && item.productId?.productName
+                          ? item.productId.productName
+                          : (item as any).productName || 'Unknown Item'}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">Item #{index + 1}</p>
+                    </div>
+                    <p className="font-bold text-sm">
+                      {formatCurrency(item.price * item.quantity - item.discount)}
+                    </p>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <p className="text-muted-foreground">Qty</p>
+                      <p className="font-semibold">{item.quantity}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Price</p>
+                      <p className="font-semibold">{formatCurrency(item.price)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Discount</p>
+                      <p className="font-semibold text-orange-600">{formatCurrency(item.discount)}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 

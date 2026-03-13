@@ -66,8 +66,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ sale }, { status: 201 })
   } catch (error) {
     console.error('[v0] Sales POST error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Failed to create sale'
     return NextResponse.json(
-      { error: 'Failed to create sale' },
+      { error: errorMessage },
       { status: 500 }
     )
   }

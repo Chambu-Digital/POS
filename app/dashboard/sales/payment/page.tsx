@@ -150,6 +150,7 @@ function PaymentPageContent() {
       const saleData = {
         items: cart.map((item) => ({
           productId: item.productId,
+          productName: item.productName,
           quantity: item.quantity,
           price: item.sellingPrice,
           discount: item.discount,
@@ -170,7 +171,9 @@ function PaymentPageContent() {
         })
 
         if (!response.ok) {
-          throw new Error('Failed to complete sale')
+          const errorData = await response.json()
+          console.error('Sales API error:', errorData)
+          throw new Error(errorData.error || 'Failed to complete sale')
         }
 
         const result = await response.json()
