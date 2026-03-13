@@ -95,8 +95,8 @@ export default function SettingsPage() {
     enableCash: true,
     enableCard: false,
     enableMpesa: true,
-    mpesaPaybill: '522522',
-    mpesaAccountNumber: '7716828',
+    mpesaPaybill: '',
+    mpesaAccountNumber: '',
     taxRate: 16,
   })
 
@@ -456,7 +456,7 @@ export default function SettingsPage() {
                         onChange={(e) =>
                           setPaymentSettings({ ...paymentSettings, mpesaPaybill: e.target.value })
                         }
-                        placeholder="522522"
+                        placeholder="Your paybill"
                       />
                     </div>
                     <div className="space-y-2">
@@ -467,7 +467,7 @@ export default function SettingsPage() {
                         onChange={(e) =>
                           setPaymentSettings({ ...paymentSettings, mpesaAccountNumber: e.target.value })
                         }
-                        placeholder="7716828"
+                        placeholder="Your account"
                       />
                     </div>
                   </div>
