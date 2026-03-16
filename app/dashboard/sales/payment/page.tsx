@@ -399,7 +399,7 @@ function PaymentPageContent() {
           </div>
 
           {/* Action Buttons */}
-          <div className="grid grid-cols-3 gap-3 mb-6">
+          <div className="flex flex-col sm:grid sm:grid-cols-3 gap-2 mb-6">
             <Button
               variant="outline"
               onClick={cancelOrder}
