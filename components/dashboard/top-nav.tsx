@@ -54,9 +54,10 @@ export function TopNav() {
 
   return (
     <header className="border-b border-border bg-background">
-      <div className="flex items-center justify-between h-16 px-6">
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold text-muted-foreground">
+      <div className="relative flex items-center justify-between h-16 px-6">
+        {/* Welcome text — centered on mobile, left-aligned on desktop */}
+        <div className="absolute left-1/2 -translate-x-1/2 lg:static lg:translate-x-0 lg:flex items-center gap-2">
+          <h1 className="text-lg font-semibold text-muted-foreground whitespace-nowrap">
             Welcome, <span className="text-foreground">{user?.name || 'User'}</span>
           </h1>
         </div>

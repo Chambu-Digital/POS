@@ -70,6 +70,15 @@ export function OrderCompletionDialog({
     setShowSendOptions(false)
   }
 
+  function formatPhone(raw: string) {
+    const digits = raw.replace(/\D/g, '')
+    // Convert 07xx or 01xx → 2547xx / 2541xx
+    if (digits.startsWith('0') && digits.length === 10) {
+      return '254' + digits.slice(1)
+    }
+    return digits
+  }
+
   function handleSendViaWhatsApp() {
     if (!phoneNumber) {
       alert('Please enter a phone number')
@@ -105,7 +114,7 @@ export function OrderCompletionDialog({
     message += `Thank you for shopping with us!\n`
     message += `Powered by Chambu Digital`
     
-    const whatsappUrl = `https://wa.me/${phoneNumber.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`
+    const whatsappUrl = `https://wa.me/${formatPhone(phoneNumber)}?text=${encodeURIComponent(message)}`
     window.open(whatsappUrl, '_blank')
     setShowSendOptions(false)
   }
