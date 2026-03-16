@@ -92,11 +92,13 @@ function SalesPageContent() {
       if (cachedSessionProducts) {
         try {
           prods = JSON.parse(cachedSessionProducts)
-          setProducts(prods)
-          const cats = Array.from(new Set(prods.map((p: Product) => p.category))).sort()
-          setCategories(cats as string[])
-          setLoading(false)
-          return
+          if (prods.length > 0) {
+            setProducts(prods)
+            const cats = Array.from(new Set(prods.map((p: Product) => p.category))).sort()
+            setCategories(cats as string[])
+            setLoading(false)
+            return
+          }
         } catch (e) {
           console.error('Failed to parse session cache:', e)
         }

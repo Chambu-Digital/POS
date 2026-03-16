@@ -105,7 +105,8 @@ function ReportsPageContent() {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to generate report')
+        const errData = await response.json()
+        throw new Error(errData.error || 'Failed to generate report')
       }
 
       const data = await response.json()
@@ -114,22 +115,10 @@ function ReportsPageContent() {
       await fetchReports()
     } catch (error) {
       console.error('Error generating report:', error)
-      toast.error('Failed to generate report')
+      toast.error(error instanceof Error ? error.message : 'Failed to generate report')
     } finally {
       setGenerating(false)
     }
-  }
-
-  function downloadReport(report: Report) {
-    const dataStr = JSON.stringify(report, null, 2)
-    const dataBlob = new Blob([dataStr], { type: 'application/json' })
-    const url = URL.createObjectURL(dataBlob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${report.reportType}-report-${new Date().toISOString()}.json`
-    link.click()
-    URL.revokeObjectURL(url)
-    toast.success('Report downloaded')
   }
 
   function downloadCSV(report: Report) {
@@ -166,7 +155,7 @@ function ReportsPageContent() {
       // Get headers from first item
       const firstItem = report.data.details[0]
       const headers = Object.keys(firstItem).filter(key => 
-        !key.startsWith('_') && key !== '__v' && key !== 'userId'
+        !key.startsWith('_') && key !== '__v' && key !== 'userId' && key !== 'staffId'
       )
       
       csv += headers.join(',') + '\n'
@@ -250,21 +239,10 @@ function ReportsPageContent() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="sales">
-                    <div className="flex items-center gap-2">
-                      Sales Report
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="inventory">
-                    <div className="flex items-center gap-2">
-                      Inventory Report
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="profit">
-                    <div className="flex items-center gap-2">
-                      Profit Report
-                    </div>
-                  </SelectItem>
+                  <SelectItem value="sales">Sales Report</SelectItem>
+                  <SelectItem value="inventory">Inventory Report</SelectItem>
+                  <SelectItem value="profit">Profit Report</SelectItem>
+                  <SelectItem value="rentals">Rentals Report</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -347,20 +325,68 @@ function ReportsPageContent() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => downloadReport(selectedReport)}
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    Download JSON
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
                     onClick={() => downloadCSV(selectedReport)}
                   >
                     <Download className="mr-2 h-4 w-4" />
-                    Download CSV
+                    Download Excel
                   </Button>
                 </div>
+
+                {/* Details Table */}
+                {selectedReport.data.details && selectedReport.data.details.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <p className="text-sm font-medium mb-2">Transaction Details</p>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          {selectedReport.reportType === 'rentals' ? (
+                            <>
+                              <TableHead>Customer</TableHead>
+                              <TableHead>Items</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead>Total (KSh)</TableHead>
+                            </>
+                          ) : (
+                            <>
+                              <TableHead>Items</TableHead>
+                              <TableHead>Payment</TableHead>
+                              <TableHead>Total (KSh)</TableHead>
+                            </>
+                          )}
+                          <TableHead>Served By</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedReport.data.details.slice(0, 50).map((row: any, i: number) => (
+                          <TableRow key={i}>
+                            <TableCell className="text-xs whitespace-nowrap">
+                              {new Date(row.createdAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </TableCell>
+                            {selectedReport.reportType === 'rentals' ? (
+                              <>
+                                <TableCell className="text-xs">{row.customer?.name}<br /><span className="text-muted-foreground">{row.customer?.phone}</span></TableCell>
+                                <TableCell className="text-xs">{row.items?.length} item{row.items?.length !== 1 ? 's' : ''}</TableCell>
+                                <TableCell><Badge variant="outline" className="text-xs">{row.status}</Badge></TableCell>
+                                <TableCell className="text-xs font-medium">{row.totalAmount ? row.totalAmount.toLocaleString() : '—'}</TableCell>
+                              </>
+                            ) : (
+                              <>
+                                <TableCell className="text-xs">{row.items?.length} item{row.items?.length !== 1 ? 's' : ''}</TableCell>
+                                <TableCell className="text-xs capitalize">{row.paymentMethod?.replace('_', ' ')}</TableCell>
+                                <TableCell className="text-xs font-medium">{row.total?.toLocaleString()}</TableCell>
+                              </>
+                            )}
+                            <TableCell className="text-xs font-medium text-primary">{row.servedBy || 'Owner'}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                    {selectedReport.data.details.length > 50 && (
+                      <p className="text-xs text-muted-foreground mt-2 text-center">Showing 50 of {selectedReport.data.details.length} records. Download Excel for full data.</p>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-center py-12 text-muted-foreground">
@@ -417,7 +443,7 @@ function ReportsPageContent() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => downloadReport(report)}
+                          onClick={() => downloadCSV(report)}
                         >
                           <Download className="h-4 w-4" />
                         </Button>

@@ -14,6 +14,7 @@ import {
   FileText,
   BarChart3,
   Settings,
+  CalendarClock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -31,6 +32,13 @@ const menuItems = [
     href: '/dashboard/sales',
     adminOnly: false,
     permission: 'canMakeSales',
+  },
+  {
+    icon: CalendarClock,
+    label: 'Rentals',
+    href: '/dashboard/rentals',
+    adminOnly: false,
+    permission: 'canManageRentals',
   },
   {
     icon: FileText,

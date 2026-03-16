@@ -15,6 +15,7 @@ export interface Permissions {
   canApplyDiscounts: boolean
   canDeleteOrders: boolean
   canExportData: boolean
+  canManageRentals: boolean
 }
 
 // Default permissions by role
@@ -34,6 +35,7 @@ export const rolePermissions: Record<string, Partial<Permissions>> = {
     canApplyDiscounts: true,
     canDeleteOrders: true,
     canExportData: true,
+    canManageRentals: true,
   },
   supervisor: {
     canMakeSales: true,
@@ -50,6 +52,7 @@ export const rolePermissions: Record<string, Partial<Permissions>> = {
     canApplyDiscounts: true,
     canDeleteOrders: false,
     canExportData: false,
+    canManageRentals: true,
   },
   cashier: {
     canMakeSales: true,
@@ -66,6 +69,7 @@ export const rolePermissions: Record<string, Partial<Permissions>> = {
     canApplyDiscounts: true,
     canDeleteOrders: false,
     canExportData: false,
+    canManageRentals: false,
   },
   employee: {
     canMakeSales: true,
@@ -82,6 +86,7 @@ export const rolePermissions: Record<string, Partial<Permissions>> = {
     canApplyDiscounts: false,
     canDeleteOrders: false,
     canExportData: false,
+    canManageRentals: false,
   },
 }
 

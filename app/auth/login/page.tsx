@@ -174,9 +174,9 @@ export default function LoginPage() {
             </Link>
           </div>
           <div className="mt-2 text-center text-sm">
-            <span className="text-muted-foreground">Staff member? </span>
-            <Link href="/auth/staff-login" className="text-primary hover:underline font-medium">
-              Staff Login
+            <span className="text-muted-foreground">Want to explore first? </span>
+            <Link href="/auth/demo" className="text-primary hover:underline font-medium">
+              Try the demo
             </Link>
           </div>
           <div className="mt-6 text-center space-y-2">

@@ -5,6 +5,7 @@ import { ServiceWorkerRegister } from '@/components/pwa/service-worker-register'
 import { BackupPermissionDialog } from '@/components/pwa/backup-permission-dialog'
 import { ConflictNotification } from '@/components/pwa/conflict-notification'
 import { InstallPrompt } from '@/components/pwa/install-prompt'
+import { DemoBanner } from '@/components/demo/demo-banner'
 import { Toaster } from 'sonner'
 
 export const metadata = {
@@ -22,6 +23,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       <Toaster position="top-right" />
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
+        <DemoBanner />
         <TopNav />
         <main className="flex-1 overflow-auto">
           <div className="container mx-auto p-6">

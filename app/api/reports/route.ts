@@ -4,6 +4,7 @@ import { connectDB } from '@/lib/db'
 import Report from '@/lib/models/Report'
 import Sale from '@/lib/models/Sale'
 import Product from '@/lib/models/Product'
+import Rental from '@/lib/models/Rental'
 
 export async function GET(request: NextRequest) {
   try {
@@ -77,6 +78,8 @@ export async function POST(request: NextRequest) {
       reportData = await generateInventoryReport(ownerId)
     } else if (reportType === 'profit') {
       reportData = await generateProfitReport(ownerId, new Date(startDate), new Date(endDate))
+    } else if (reportType === 'rentals') {
+      reportData = await generateRentalsReport(ownerId, new Date(startDate), new Date(endDate))
     }
 
     // Save report to database
@@ -120,7 +123,7 @@ async function generateSalesReport(userId: string, startDate: Date, endDate: Dat
   const sales = await Sale.find({
     userId,
     createdAt: { $gte: adjustedStartDate, $lte: adjustedEndDate },
-  }).lean()
+  }).populate('staffId', 'name').lean()
 
   console.log('[Sales Report] Found sales:', sales.length)
 
@@ -128,7 +131,7 @@ async function generateSalesReport(userId: string, startDate: Date, endDate: Dat
   let allSales = sales
   if (sales.length === 0) {
     console.log('[Sales Report] No sales in date range, fetching all sales')
-    allSales = await Sale.find({ userId }).lean()
+    allSales = await Sale.find({ userId }).populate('staffId', 'name').lean()
     console.log('[Sales Report] Total sales for user:', allSales.length)
   }
 
@@ -162,7 +165,10 @@ async function generateSalesReport(userId: string, startDate: Date, endDate: Dat
         totalDiscount,
         averageSaleValue,
       },
-      details: allSales,
+      details: allSales.map((s: any) => ({
+        ...s,
+        servedBy: s.staffId?.name || 'Owner',
+      })),
       charts: {
         salesByDay: Object.values(salesByDay),
       },
@@ -215,6 +221,7 @@ async function generateProfitReport(userId: string, startDate: Date, endDate: Da
     userId,
     createdAt: { $gte: startDate, $lte: endDate },
   })
+    .populate('staffId', 'name')
     .populate('items.productId')
     .lean() as any[]
 
@@ -245,9 +252,67 @@ async function generateProfitReport(userId: string, startDate: Date, endDate: Da
         totalProfit,
         profitMargin: parseFloat(profitMargin.toFixed(2)),
       },
-      details: sales,
+      details: sales.map((s: any) => ({
+        ...s,
+        servedBy: s.staffId?.name || 'Owner',
+      })),
       charts: {},
     },
   }
 }
 
+
+async function generateRentalsReport(userId: string, startDate: Date, endDate: Date) {
+  const adjustedStart = new Date(startDate)
+  adjustedStart.setHours(0, 0, 0, 0)
+  const adjustedEnd = new Date(endDate)
+  adjustedEnd.setHours(23, 59, 59, 999)
+
+  const rentals = await Rental.find({
+    userId,
+    createdAt: { $gte: adjustedStart, $lte: adjustedEnd },
+  }).populate('staffId', 'name').lean() as any[]
+
+  const totalRentals = rentals.length
+  const activeRentals = rentals.filter(r => r.status === 'active').length
+  const returnedRentals = rentals.filter(r => r.status === 'returned').length
+  const overdueRentals = rentals.filter(r => r.status === 'overdue').length
+  const totalRevenue = rentals.filter(r => r.totalAmount).reduce((sum, r) => sum + (r.totalAmount || 0), 0)
+  const totalDeposits = rentals.reduce((sum, r) => sum + (r.deposit || 0), 0)
+  const avgDuration = returnedRentals > 0
+    ? rentals.filter(r => r.duration).reduce((sum, r) => sum + (r.duration || 0), 0) / returnedRentals
+    : 0
+
+  // Top rented items
+  const itemCounts: Record<string, { name: string; count: number }> = {}
+  for (const rental of rentals) {
+    for (const item of rental.items) {
+      if (!itemCounts[item.productName]) {
+        itemCounts[item.productName] = { name: item.productName, count: 0 }
+      }
+      itemCounts[item.productName].count += item.quantity
+    }
+  }
+  const topItems = Object.values(itemCounts).sort((a, b) => b.count - a.count).slice(0, 5)
+
+  return {
+    title: 'Rentals Report',
+    description: `Rental activity from ${adjustedStart.toLocaleDateString()} to ${adjustedEnd.toLocaleDateString()}`,
+    data: {
+      summary: {
+        totalRentals,
+        activeRentals,
+        returnedRentals,
+        overdueRentals,
+        totalRevenue,
+        totalDeposits,
+        avgDurationMinutes: Math.round(avgDuration),
+      },
+      details: rentals.map((r: any) => ({
+        ...r,
+        servedBy: r.staffId?.name || 'Owner',
+      })),
+      charts: { topItems },
+    },
+  }
+}

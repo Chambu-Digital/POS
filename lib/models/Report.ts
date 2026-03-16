@@ -2,7 +2,7 @@ import mongoose from 'mongoose'
 
 export interface IReport extends mongoose.Document {
   userId: string
-  reportType: 'sales' | 'inventory' | 'profit' | 'custom'
+  reportType: 'sales' | 'inventory' | 'profit' | 'custom' | 'rentals'
   title: string
   description?: string
   dateRange: {
@@ -42,7 +42,7 @@ const reportSchema = new mongoose.Schema<IReport>(
     },
     reportType: {
       type: String,
-      enum: ['sales', 'inventory', 'profit', 'custom'],
+      enum: ['sales', 'inventory', 'profit', 'custom', 'rentals'],
       required: true,
     },
     title: {
@@ -89,5 +89,8 @@ const reportSchema = new mongoose.Schema<IReport>(
 // Index for efficient querying
 reportSchema.index({ userId: 1, reportType: 1, createdAt: -1 })
 
-export default mongoose.models.Report || mongoose.model<IReport>('Report', reportSchema)
+// Clear cached model to pick up schema changes
+if (mongoose.models.Report) delete mongoose.models.Report
+
+export default mongoose.model<IReport>('Report', reportSchema)
 

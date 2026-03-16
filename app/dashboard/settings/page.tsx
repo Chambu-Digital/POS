@@ -63,7 +63,7 @@ interface ReceiptSettings {
   showAddress: boolean
   showPhone: boolean
   customMessage: string
-  paperSize: 'A4' | '80mm'
+  paperSize: '58mm' | '80mm' | 'A4'
 }
 
 export default function SettingsPage() {
@@ -106,7 +106,7 @@ export default function SettingsPage() {
     showAddress: true,
     showPhone: true,
     customMessage: 'Thank You For Shopping With Us!',
-    paperSize: 'A4',
+    paperSize: '58mm',
   })
 
   useEffect(() => {
@@ -567,7 +567,7 @@ export default function SettingsPage() {
                 <Label htmlFor="paperSize">Paper Size</Label>
                 <Select
                   value={receiptSettings.paperSize}
-                  onValueChange={(value: 'A4' | '80mm') =>
+                  onValueChange={(value: '58mm' | '80mm' | 'A4') =>
                     setReceiptSettings({ ...receiptSettings, paperSize: value })
                   }
                 >
@@ -575,8 +575,9 @@ export default function SettingsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="A4">A4 (Standard)</SelectItem>
+                    <SelectItem value="58mm">58mm (Thermal — default)</SelectItem>
                     <SelectItem value="80mm">80mm (Thermal)</SelectItem>
+                    <SelectItem value="A4">A4 (Standard)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

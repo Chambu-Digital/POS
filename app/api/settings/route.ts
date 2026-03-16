@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
         showAddress: true,
         showPhone: true,
         customMessage: 'Thank You For Shopping With Us!',
-        paperSize: 'A4',
+        paperSize: '58mm',
       },
     }
 

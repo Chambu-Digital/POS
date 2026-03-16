@@ -522,6 +522,7 @@ function PaymentPageContent() {
           shopAddress={shopSettings?.shop?.address}
           mpesaPaybill={shopSettings?.payment?.mpesaPaybill}
           mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}
+          paperSize={shopSettings?.receipt?.paperSize || '58mm'}
         />
       )}
 
@@ -651,7 +652,7 @@ function PaymentPageContent() {
 
             <div>
               <Label htmlFor="payment-amount" className="text-sm font-medium mb-2 block">
-                Amount
+                {selectedPayment === 'cash' ? 'Cash Received' : 'Amount'}
               </Label>
               <Input
                 id="payment-amount"
@@ -661,9 +662,17 @@ function PaymentPageContent() {
                 placeholder="Enter amount"
                 step="0.01"
               />
-              <p className="text-xs text-muted-foreground mt-1">
-                To split Payment you can change amount (Applies to deposits)
-              </p>
+              {selectedPayment === 'cash' && parseFloat(paymentAmount) > 0 && (
+                <div className={`mt-2 flex justify-between items-center px-3 py-2 rounded-lg text-sm font-semibold ${parseFloat(paymentAmount) >= Math.max(0, total) ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                  <span>Change</span>
+                  <span>KES {Math.max(0, parseFloat(paymentAmount) - Math.max(0, total)).toFixed(2)}</span>
+                </div>
+              )}
+              {selectedPayment !== 'cash' && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  To split Payment you can change amount (Applies to deposits)
+                </p>
+              )}
             </div>
 
             <Button

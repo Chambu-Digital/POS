@@ -2,21 +2,36 @@ import { connectDB } from '@/lib/db'
 import User from '@/lib/models/User'
 import Staff from '@/lib/models/Staff'
 import { createToken, setAuthCookie } from '@/lib/jwt'
+import { DEMO_EMAIL, DEMO_PASSWORD, DEMO_USER_ID, getDemoUser } from '@/lib/demo'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
   try {
-    await connectDB()
     const { email, password } = await request.json()
 
-    // Validation
     if (!email || !password) {
-      return NextResponse.json(
-        { error: 'Email and password are required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Email and password are required' }, { status: 400 })
     }
 
+    // --- Demo account shortcut ---
+    if (email.toLowerCase() === DEMO_EMAIL && password === DEMO_PASSWORD) {
+      const token = await createToken({
+        userId: DEMO_USER_ID,
+        email: DEMO_EMAIL,
+        role: 'admin',
+        type: 'user',
+        isDemo: true,
+      })
+      await setAuthCookie(token)
+      const demoUser = getDemoUser()
+      return NextResponse.json({
+        message: 'Login successful',
+        user: { ...demoUser, isDemo: true },
+      })
+    }
+    // --- End demo ---
+
+    await connectDB()
     // Find user and select password
     let user = await User.findOne({ email }).select('+password')
     let userType: 'user' | 'staff' = 'user'
