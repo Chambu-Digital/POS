@@ -59,6 +59,10 @@ export default function RentalsPage() {
   )
 }
 
+function formatReceiptNumber(id: string): string {
+  return 'RCP-' + id.slice(-8).toUpperCase()
+}
+
 function RentalsPageContent() {
   const [activeTab, setActiveTab] = useState('new')
   const [products, setProducts] = useState<Product[]>([])
@@ -679,7 +683,7 @@ function RentalsPageContent() {
           receiptType="rental_slip"
           shopName={userInfo.shopName}
           cashierName={userInfo.name}
-          receiptNumber={createdRental._id}
+          receiptNumber={formatReceiptNumber(createdRental._id)}
           date={new Date(createdRental.startTime)}
           customerName={createdRental.customer.name}
           customerPhone={createdRental.customer.phone}
@@ -712,7 +716,7 @@ function RentalsPageContent() {
           receiptType="rental_return"
           shopName={userInfo.shopName}
           cashierName={userInfo.name}
-          receiptNumber={returnedRental.rental._id}
+          receiptNumber={formatReceiptNumber(returnedRental.rental._id)}
           date={new Date()}
           customerName={returnedRental.rental.customer.name}
           customerPhone={returnedRental.rental.customer.phone}

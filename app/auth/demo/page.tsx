@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { DEMO_EMAIL, DEMO_PASSWORD } from '@/lib/demo'
+import { clearCachedProducts } from '@/lib/indexeddb'
 
 export default function DemoLoginPage() {
   const router = useRouter()
@@ -23,6 +24,8 @@ export default function DemoLoginPage() {
         body: JSON.stringify({ email: DEMO_EMAIL, password: DEMO_PASSWORD }),
       })
       if (res.ok) {
+        sessionStorage.clear()
+        await clearCachedProducts()
         router.push('/dashboard')
       } else {
         setStatus('error')

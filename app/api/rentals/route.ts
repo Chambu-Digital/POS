@@ -42,6 +42,9 @@ export async function POST(request: NextRequest) {
 
     // Check stock
     for (const item of data.items) {
+      // Skip stock check for demo product IDs
+      if (!item.productId || item.productId.toString().startsWith('demo_')) continue
+
       const product = await Product.findById(new Types.ObjectId(item.productId))
       if (!product) {
         return NextResponse.json({ error: `Product not found: ${item.productName}` }, { status: 404 })
@@ -56,6 +59,7 @@ export async function POST(request: NextRequest) {
 
     // Deduct stock
     for (const item of data.items) {
+      if (!item.productId || item.productId.toString().startsWith('demo_')) continue
       await Product.findByIdAndUpdate(
         new Types.ObjectId(item.productId),
         { $inc: { stock: -item.quantity } }

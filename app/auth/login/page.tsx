@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { Eye, EyeOff } from 'lucide-react'
+import { clearCachedProducts } from '@/lib/indexeddb'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -44,6 +45,10 @@ export default function LoginPage() {
       }
 
       const data = await response.json()
+      
+      // Clear any cached session data from previous user/demo session
+      sessionStorage.clear()
+      await clearCachedProducts()
       
       // Cache login credentials for offline use
       const credentialHash = await hashPassword(password)

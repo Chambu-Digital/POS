@@ -151,6 +151,8 @@ export default function SettingsPage() {
       }
 
       toast.success('Settings saved successfully')
+      // Reload so nav/sidebar pick up the new shop name immediately
+      setTimeout(() => window.location.reload(), 800)
     } catch (error) {
       console.error('Error saving settings:', error)
       toast.error('Failed to save settings')

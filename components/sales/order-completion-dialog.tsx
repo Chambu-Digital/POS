@@ -121,44 +121,44 @@ export function OrderCompletionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md w-[95vw] sm:w-full">
         <DialogTitle className="sr-only">Order Completed</DialogTitle>
-        <div className="flex flex-col items-center justify-center py-8 space-y-6">
+        <div className="flex flex-col items-center justify-center py-6 space-y-5">
 
           {/* Order Completed Text */}
-          <div className="text-center space-y-2">
+          <div className="text-center space-y-1">
             <h2 className="text-xl font-semibold text-gray-700">Order Completed</h2>
-            <p className="text-4xl font-bold">Paid KES {totalAmount.toFixed(2)}</p>
+            <p className="text-3xl font-bold">Paid KES {totalAmount.toFixed(2)}</p>
             <p className="text-sm text-muted-foreground">{itemCount} items</p>
           </div>
 
           {/* Order ID */}
-          <p className="text-orange-600 font-medium">
+          <p className="text-orange-600 font-medium text-sm text-center break-all">
             Order Id: {orderNumber}
           </p>
 
           {/* Action Buttons */}
-          <div className="grid grid-cols-3 gap-3 w-full">
+          <div className="grid grid-cols-3 gap-2 w-full">
             <Button
-              className="bg-green-600 hover:bg-green-700 text-white"
+              className="bg-green-600 hover:bg-green-700 text-white text-xs px-2"
               onClick={handleMakeNewSale}
             >
-              <ShoppingCart className="w-4 h-4 mr-2" />
-              Make a sale
+              <ShoppingCart className="w-3 h-3 mr-1 shrink-0" />
+              <span className="truncate">New Sale</span>
             </Button>
             <Button
-              className="bg-orange-600 hover:bg-orange-700 text-white"
+              className="bg-orange-600 hover:bg-orange-700 text-white text-xs px-2"
               onClick={handlePrintReceipt}
             >
-              <Printer className="w-4 h-4 mr-2" />
-              Print Receipt
+              <Printer className="w-3 h-3 mr-1 shrink-0" />
+              <span className="truncate">Print</span>
             </Button>
             <Button
-              className="bg-green-600 hover:bg-green-700 text-white"
+              className="bg-green-600 hover:bg-green-700 text-white text-xs px-2"
               onClick={() => setShowSendOptions(!showSendOptions)}
             >
-              <Send className="w-4 h-4 mr-2" />
-              Send Receipt
+              <Send className="w-3 h-3 mr-1 shrink-0" />
+              <span className="truncate">Send</span>
             </Button>
           </div>
 
@@ -177,22 +177,22 @@ export function OrderCompletionDialog({
                   onChange={(e) => setPhoneNumber(e.target.value)}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2">
                 <Button
                   variant="outline"
                   onClick={handleSendViaSMS}
-                  className="w-full"
+                  className="w-full text-xs"
                 >
-                  <MessageSquare className="w-4 h-4 mr-2" />
-                  Send via SMS
+                  <MessageSquare className="w-3 h-3 mr-1 shrink-0" />
+                  SMS
                 </Button>
                 <Button
                   variant="outline"
                   onClick={handleSendViaWhatsApp}
-                  className="w-full border-green-600 text-green-600 hover:bg-green-50"
+                  className="w-full text-xs border-green-600 text-green-600 hover:bg-green-50"
                 >
-                  <Phone className="w-4 h-4 mr-2" />
-                  Send via WhatsApp
+                  <Phone className="w-3 h-3 mr-1 shrink-0" />
+                  WhatsApp
                 </Button>
               </div>
             </div>

@@ -46,6 +46,11 @@ export default function PaymentPage() {
   )
 }
 
+function formatReceiptNumber(id: string): string {
+  // Take last 8 chars of the ID and uppercase — e.g. "RCP-E43733E2"
+  return 'RCP-' + id.slice(-8).toUpperCase()
+}
+
 function PaymentPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -206,7 +211,7 @@ function PaymentPageContent() {
           total: Math.max(0, total),
           paymentMethod: selectedPayment,
           date: new Date(),
-          receiptNumber: result.sale?._id || `SALE-${Date.now()}`,
+          receiptNumber: result.sale?._id ? formatReceiptNumber(result.sale._id) : `SALE-${Date.now()}`,
         })
 
         toast.success('Payment completed successfully')
@@ -399,7 +404,7 @@ function PaymentPageContent() {
           </div>
 
           {/* Action Buttons */}
-          <div className="flex flex-col sm:grid sm:grid-cols-3 gap-2 mb-6">
+          <div className="grid grid-cols-3 gap-2 mb-6">
             <Button
               variant="outline"
               onClick={cancelOrder}

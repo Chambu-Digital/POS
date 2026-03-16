@@ -31,21 +31,43 @@ export async function middleware(request: NextRequest) {
 
   try {
     const { payload } = await jwtVerify(token, secret)
-    if (!payload.isDemo) return NextResponse.next()
+    // Only intercept if explicitly flagged as demo
+    if (payload.isDemo !== true) return NextResponse.next()
   } catch {
+    // Token invalid/expired — let the route handle auth normally
     return NextResponse.next()
   }
 
   // --- Demo user detected ---
 
-  // For write operations, return a generic success immediately
-  // without hitting any real route or DB
+  // For write operations, return a shaped fake success
   const method = request.method
   if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
-    return NextResponse.json(
-      { success: true, message: 'Demo mode — changes are not saved', _demo: true },
-      { status: method === 'POST' ? 201 : 200 }
-    )
+    const fakeId = `demo_${Date.now()}`
+    const now = new Date().toISOString()
+
+    // Shape the response based on the route so pages don't crash
+    let body: any = { success: true, _demo: true }
+
+    if (pathname.includes('/rentals')) {
+      body.rental = {
+        _id: fakeId,
+        customer: { name: 'Demo Customer', phone: '0700000000' },
+        items: [],
+        startTime: now,
+        deposit: 0,
+        status: 'active',
+        createdAt: now,
+      }
+    } else if (pathname.includes('/sales')) {
+      body.sale = { _id: fakeId, createdAt: now }
+    } else if (pathname.includes('/products')) {
+      body.product = { _id: fakeId }
+    } else if (pathname.includes('/staff')) {
+      body.staff = { _id: fakeId }
+    }
+
+    return NextResponse.json(body, { status: method === 'POST' ? 201 : 200 })
   }
 
   // For GET requests, rewrite to /api/demo/[...rest]

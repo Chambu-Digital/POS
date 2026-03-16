@@ -141,6 +141,11 @@ export async function cacheProducts(products: any[]) {
   await tx.done
 }
 
+export async function clearCachedProducts() {
+  const database = await initDB()
+  await database.clear('products')
+}
+
 export async function getCachedProducts(): Promise<any[]> {
   const database = await initDB()
   return database.getAll('products')

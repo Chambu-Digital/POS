@@ -115,8 +115,11 @@ function SalesPageContent() {
           if (response.ok) {
             const data = await response.json()
             prods = data.products || []
-            // Cache products for offline use
-            await cacheProducts(prods)
+            // Only cache in IndexedDB if not demo data (demo IDs start with 'demo_')
+            const isDemo = prods.length > 0 && String(prods[0]._id).startsWith('demo_')
+            if (!isDemo) {
+              await cacheProducts(prods)
+            }
             // Also cache in sessionStorage for fast access
             sessionStorage.setItem('sessionProducts', JSON.stringify(prods))
           } else {
