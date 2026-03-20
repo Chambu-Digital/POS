@@ -9,6 +9,7 @@ export interface TokenPayload {
   role: string
   type: 'user' | 'staff'
   adminId?: string // For staff members, this is the owner's userId
+  isDemo?: boolean
 }
 
 export async function createToken(payload: TokenPayload): Promise<string> {

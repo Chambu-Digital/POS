@@ -46,6 +46,11 @@ export default function PaymentPage() {
   )
 }
 
+function formatReceiptNumber(id: string): string {
+  // Take last 8 chars of the ID and uppercase — e.g. "RCP-E43733E2"
+  return 'RCP-' + id.slice(-8).toUpperCase()
+}
+
 function PaymentPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -206,7 +211,7 @@ function PaymentPageContent() {
           total: Math.max(0, total),
           paymentMethod: selectedPayment,
           date: new Date(),
-          receiptNumber: result.sale?._id || `SALE-${Date.now()}`,
+          receiptNumber: result.sale?._id ? formatReceiptNumber(result.sale._id) : `SALE-${Date.now()}`,
         })
 
         toast.success('Payment completed successfully')
@@ -399,7 +404,7 @@ function PaymentPageContent() {
           </div>
 
           {/* Action Buttons */}
-          <div className="grid grid-cols-3 gap-3 mb-6">
+          <div className="grid grid-cols-3 gap-2 mb-6">
             <Button
               variant="outline"
               onClick={cancelOrder}
@@ -522,6 +527,7 @@ function PaymentPageContent() {
           shopAddress={shopSettings?.shop?.address}
           mpesaPaybill={shopSettings?.payment?.mpesaPaybill}
           mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}
+          paperSize={shopSettings?.receipt?.paperSize || '58mm'}
         />
       )}
 
@@ -651,7 +657,7 @@ function PaymentPageContent() {
 
             <div>
               <Label htmlFor="payment-amount" className="text-sm font-medium mb-2 block">
-                Amount
+                {selectedPayment === 'cash' ? 'Cash Received' : 'Amount'}
               </Label>
               <Input
                 id="payment-amount"
@@ -661,9 +667,17 @@ function PaymentPageContent() {
                 placeholder="Enter amount"
                 step="0.01"
               />
-              <p className="text-xs text-muted-foreground mt-1">
-                To split Payment you can change amount (Applies to deposits)
-              </p>
+              {selectedPayment === 'cash' && parseFloat(paymentAmount) > 0 && (
+                <div className={`mt-2 flex justify-between items-center px-3 py-2 rounded-lg text-sm font-semibold ${parseFloat(paymentAmount) >= Math.max(0, total) ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                  <span>Change</span>
+                  <span>KES {Math.max(0, parseFloat(paymentAmount) - Math.max(0, total)).toFixed(2)}</span>
+                </div>
+              )}
+              {selectedPayment !== 'cash' && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  To split Payment you can change amount (Applies to deposits)
+                </p>
+              )}
             </div>
 
             <Button

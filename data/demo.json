@@ -1,0 +1,80 @@
+{
+  "user": {
+    "id": "demo000000000000000000001",
+    "email": "demo@chambudigital.co.ke",
+    "name": "Demo Shop",
+    "shopName": "Demo Shop",
+    "role": "admin",
+    "type": "user"
+  },
+  "settings": {
+    "shop": {
+      "shopName": "Demo Shop",
+      "email": "demo@chambudigital.co.ke",
+      "phone": "+254 700 000 000",
+      "address": "Nairobi, Kenya",
+      "taxId": "P000000000X",
+      "currency": "KES",
+      "timezone": "Africa/Nairobi",
+      "receiptFooter": "Thank you for shopping with Demo Shop!"
+    },
+    "notifications": {
+      "emailNotifications": true,
+      "smsNotifications": false,
+      "lowStockAlerts": true,
+      "dailySalesReport": false,
+      "newOrderNotification": true
+    },
+    "payment": {
+      "enableCash": true,
+      "enableCard": true,
+      "enableMpesa": true,
+      "mpesaPaybill": "522522",
+      "mpesaAccountNumber": "1234567",
+      "taxRate": 16
+    },
+    "receipt": {
+      "showLogo": true,
+      "showTaxId": false,
+      "showAddress": true,
+      "showPhone": true,
+      "customMessage": "Thank You For Shopping With Us!",
+      "paperSize": "58mm"
+    }
+  },
+  "products": [
+    { "_id": "demo_prod_001", "productName": "Mountain Bike", "category": "Bicycles", "brand": "Trek", "model": "Marlin 5", "variant": "Blue", "sellingPrice": 45000, "buyingPrice": 32000, "costPrice": 32000, "stock": 8, "lowStockThreshold": 3, "userId": "demo000000000000000000001" },
+    { "_id": "demo_prod_002", "productName": "Road Bike", "category": "Bicycles", "brand": "Giant", "model": "Contend 3", "variant": "Red", "sellingPrice": 55000, "buyingPrice": 40000, "costPrice": 40000, "stock": 5, "lowStockThreshold": 2, "userId": "demo000000000000000000001" },
+    { "_id": "demo_prod_003", "productName": "Bicycle Helmet", "category": "Accessories", "brand": "Bell", "model": "Stratus", "variant": "Black", "sellingPrice": 3500, "buyingPrice": 2000, "costPrice": 2000, "stock": 20, "lowStockThreshold": 5, "userId": "demo000000000000000000001" },
+    { "_id": "demo_prod_004", "productName": "Bicycle Lock", "category": "Accessories", "brand": "Kryptonite", "model": "Evolution", "variant": "Standard", "sellingPrice": 2200, "buyingPrice": 1200, "costPrice": 1200, "stock": 15, "lowStockThreshold": 5, "userId": "demo000000000000000000001" },
+    { "_id": "demo_prod_005", "productName": "Cycling Gloves", "category": "Apparel", "brand": "Giro", "model": "Bravo", "variant": "Medium", "sellingPrice": 1800, "buyingPrice": 900, "costPrice": 900, "stock": 12, "lowStockThreshold": 4, "userId": "demo000000000000000000001" },
+    { "_id": "demo_prod_006", "productName": "Water Bottle", "category": "Accessories", "brand": "Camelbak", "model": "Podium", "variant": "750ml", "sellingPrice": 1200, "buyingPrice": 600, "costPrice": 600, "stock": 30, "lowStockThreshold": 10, "userId": "demo000000000000000000001" },
+    { "_id": "demo_prod_007", "productName": "Bike Pump", "category": "Tools", "brand": "Topeak", "model": "Joe Blow", "variant": "Floor", "sellingPrice": 3800, "buyingPrice": 2200, "costPrice": 2200, "stock": 7, "lowStockThreshold": 3, "userId": "demo000000000000000000001" },
+    { "_id": "demo_prod_008", "productName": "Cycling Jersey", "category": "Apparel", "brand": "Pearl Izumi", "model": "Quest", "variant": "Large", "sellingPrice": 4500, "buyingPrice": 2500, "costPrice": 2500, "stock": 10, "lowStockThreshold": 3, "userId": "demo000000000000000000001" },
+    { "_id": "demo_prod_009", "productName": "Bike Lights Set", "category": "Accessories", "brand": "Cateye", "model": "Volt 400", "variant": "Front+Rear", "sellingPrice": 2800, "buyingPrice": 1500, "costPrice": 1500, "stock": 18, "lowStockThreshold": 5, "userId": "demo000000000000000000001" },
+    { "_id": "demo_prod_010", "productName": "Repair Kit", "category": "Tools", "brand": "Park Tool", "model": "IK-2", "variant": "Standard", "sellingPrice": 1500, "buyingPrice": 800, "costPrice": 800, "stock": 2, "lowStockThreshold": 5, "userId": "demo000000000000000000001" },
+    { "_id": "demo_prod_011", "productName": "Kids Bike", "category": "Bicycles", "brand": "Raleigh", "model": "Striker", "variant": "20 inch", "sellingPrice": 18000, "buyingPrice": 12000, "costPrice": 12000, "stock": 4, "lowStockThreshold": 2, "userId": "demo000000000000000000001" },
+    { "_id": "demo_prod_012", "productName": "Cycling Shorts", "category": "Apparel", "brand": "Castelli", "model": "Endurance", "variant": "Medium", "sellingPrice": 3200, "buyingPrice": 1800, "costPrice": 1800, "stock": 0, "lowStockThreshold": 3, "userId": "demo000000000000000000001" }
+  ],
+  "categories": [
+    { "_id": "demo_cat_001", "name": "Bicycles", "userId": "demo000000000000000000001" },
+    { "_id": "demo_cat_002", "name": "Accessories", "userId": "demo000000000000000000001" },
+    { "_id": "demo_cat_003", "name": "Apparel", "userId": "demo000000000000000000001" },
+    { "_id": "demo_cat_004", "name": "Tools", "userId": "demo000000000000000000001" }
+  ],
+  "sales": [
+    { "_id": "demo_sale_001", "items": [{ "productId": "demo_prod_001", "productName": "Mountain Bike", "quantity": 1, "price": 45000, "discount": 0 }], "subtotal": 45000, "discount": 0, "total": 45000, "paymentMethod": "cash", "servedBy": "Demo Cashier", "createdAt": "2026-03-10T09:15:00Z" },
+    { "_id": "demo_sale_002", "items": [{ "productId": "demo_prod_003", "productName": "Bicycle Helmet", "quantity": 2, "price": 3500, "discount": 500 }, { "productId": "demo_prod_004", "productName": "Bicycle Lock", "quantity": 1, "price": 2200, "discount": 0 }], "subtotal": 9200, "discount": 500, "total": 8700, "paymentMethod": "mobile_money", "servedBy": "Owner", "createdAt": "2026-03-11T11:30:00Z" },
+    { "_id": "demo_sale_003", "items": [{ "productId": "demo_prod_002", "productName": "Road Bike", "quantity": 1, "price": 55000, "discount": 2000 }], "subtotal": 55000, "discount": 2000, "total": 53000, "paymentMethod": "card", "servedBy": "Demo Cashier", "createdAt": "2026-03-12T14:00:00Z" },
+    { "_id": "demo_sale_004", "items": [{ "productId": "demo_prod_005", "productName": "Cycling Gloves", "quantity": 1, "price": 1800, "discount": 0 }, { "productId": "demo_prod_006", "productName": "Water Bottle", "quantity": 2, "price": 1200, "discount": 0 }], "subtotal": 4200, "discount": 0, "total": 4200, "paymentMethod": "cash", "servedBy": "Owner", "createdAt": "2026-03-13T10:00:00Z" },
+    { "_id": "demo_sale_005", "items": [{ "productId": "demo_prod_008", "productName": "Cycling Jersey", "quantity": 1, "price": 4500, "discount": 0 }], "subtotal": 4500, "discount": 0, "total": 4500, "paymentMethod": "mobile_money", "servedBy": "Demo Cashier", "createdAt": "2026-03-14T16:45:00Z" },
+    { "_id": "demo_sale_006", "items": [{ "productId": "demo_prod_007", "productName": "Bike Pump", "quantity": 1, "price": 3800, "discount": 300 }], "subtotal": 3800, "discount": 300, "total": 3500, "paymentMethod": "cash", "servedBy": "Owner", "createdAt": "2026-03-15T08:20:00Z" }
+  ],
+  "rentals": [
+    { "_id": "demo_rental_001", "customer": { "name": "John Kamau", "phone": "0712345678", "idNo": "12345678" }, "items": [{ "productId": "demo_prod_001", "productName": "Mountain Bike", "quantity": 1, "rentalRate": 200, "rateType": "hourly" }], "startTime": "2026-03-14T08:00:00Z", "endTime": "2026-03-14T11:00:00Z", "duration": 180, "deposit": 500, "depositPaymentMethod": "cash", "totalAmount": 600, "paymentMethod": "cash", "status": "returned", "createdAt": "2026-03-14T08:00:00Z" },
+    { "_id": "demo_rental_002", "customer": { "name": "Mary Wanjiku", "phone": "0723456789" }, "items": [{ "productId": "demo_prod_011", "productName": "Kids Bike", "quantity": 1, "rentalRate": 150, "rateType": "hourly" }], "startTime": "2026-03-15T09:00:00Z", "deposit": 300, "depositPaymentMethod": "mobile_money", "status": "active", "createdAt": "2026-03-15T09:00:00Z" }
+  ],
+  "staff": [
+    { "_id": "demo_staff_001", "name": "Demo Cashier", "email": "cashier@demo.com", "role": "cashier", "active": true, "permissions": { "canMakeSales": true, "canViewOrders": true, "canViewInventory": true, "canEditInventory": false, "canAddProducts": false, "canDeleteProducts": false, "canViewSalesReports": false, "canViewDashboard": true, "canManageStaff": false, "canEditSettings": false, "canProcessRefunds": false, "canApplyDiscounts": true, "canDeleteOrders": false, "canExportData": false }, "createdAt": "2026-01-01T00:00:00Z" }
+  ]
+}

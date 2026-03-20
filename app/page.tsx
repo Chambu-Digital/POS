@@ -14,10 +14,10 @@ export default function Page() {
         if (response.ok) {
           router.push('/dashboard')
         } else {
-          router.push('/auth/register')
+          router.push('/auth/login')
         }
       } catch {
-        router.push('/auth/register')
+        router.push('/auth/login')
       }
     }
 

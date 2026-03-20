@@ -788,7 +788,7 @@ export default function BarPage() {
     const tot = tabTotal({ ...t, discount })
 
     try {
-      await fetch('/api/bar/sale', {
+      const res = await fetch('/api/bar/sale', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -804,8 +804,14 @@ export default function BarPage() {
           status:        (method === 'mpesa' && !mpesaCode) ? 'pending' : 'completed',
         }),
       })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        console.error('Bar sale API error:', err)
+        addToast(`Sale saved locally but failed to sync: ${err.error || res.status}`, 'error')
+      }
     } catch (e) {
       console.error('Failed to save bar sale', e)
+      addToast('Network error — sale saved locally only', 'error')
     }
 
     setTabs(p => p.map(tab => tab.id !== tabId ? tab : {
@@ -835,7 +841,7 @@ export default function BarPage() {
     <>
       <div
         className="flex flex-col bg-gray-100"
-        style={{ marginLeft: '-1.5rem', marginRight: '-1.5rem', marginTop: '-1.5rem', height: 'calc(100vh - 56px)', overflow: 'hidden' }}
+        style={{ marginLeft: '-1.5rem', marginRight: '-1.5rem', marginTop: '-1.5rem', marginBottom: '-1.5rem', height: 'calc(100vh - 64px)', overflow: 'hidden' }}
       >
         {/* ── Header ── */}
         <header className="bg-green-700 text-white px-3 sm:px-4 h-11 flex items-center justify-between shrink-0 gap-2">

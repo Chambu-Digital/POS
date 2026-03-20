@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { Eye, EyeOff } from 'lucide-react'
+import { clearCachedProducts } from '@/lib/indexeddb'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -44,6 +45,10 @@ export default function LoginPage() {
       }
 
       const data = await response.json()
+      
+      // Clear any cached session data from previous user/demo session
+      sessionStorage.clear()
+      await clearCachedProducts()
       
       // Cache login credentials for offline use
       const credentialHash = await hashPassword(password)
@@ -174,9 +179,9 @@ export default function LoginPage() {
             </Link>
           </div>
           <div className="mt-2 text-center text-sm">
-            <span className="text-muted-foreground">Staff member? </span>
-            <Link href="/auth/staff-login" className="text-primary hover:underline font-medium">
-              Staff Login
+            <span className="text-muted-foreground">Want to explore first? </span>
+            <Link href="/auth/demo" className="text-primary hover:underline font-medium">
+              Try the demo
             </Link>
           </div>
           <div className="mt-6 text-center space-y-2">
