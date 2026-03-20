@@ -57,6 +57,16 @@ const saleSchema = new mongoose.Schema(
       type: String,
     },
     notes: String,
+    source: {
+      type: String,
+      enum: ['pos', 'bar', 'kds'],
+      default: 'pos',
+    },
+    status: {
+      type: String,
+      enum: ['completed', 'pending', 'held', 'refunded'],
+      default: 'completed',
+    },
     synced: {
       type: Boolean,
       default: true,

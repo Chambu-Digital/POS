@@ -2,6 +2,8 @@ import { connectDB } from '@/lib/db'
 import Sale from '@/lib/models/Sale'
 import Product from '@/lib/models/Product'
 import Staff from '@/lib/models/Staff'
+import KitchenOrder from '@/lib/models/KitchenOrder'
+import User from '@/lib/models/User'
 import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -48,11 +50,17 @@ export async function GET(request: NextRequest) {
     const totalDiscount = allSales.reduce((sum, sale) => sum + (sale.discount || 0), 0)
     const averageSaleValue = totalSales > 0 ? totalRevenue / totalSales : 0
 
+    // Revenue breakdown by source
+    const revenueBySource = {
+      pos: allSales.filter((s: any) => !s.source || s.source === 'pos').reduce((sum, s) => sum + s.total, 0),
+      bar: allSales.filter((s: any) => s.source === 'bar').reduce((sum, s) => sum + s.total, 0),
+      kds: allSales.filter((s: any) => s.source === 'kds').reduce((sum, s) => sum + s.total, 0),
+    }
+
     // Recent period stats
     const recentTotalSales = recentSales.length
     const recentRevenue = recentSales.reduce((sum, sale) => sum + sale.total, 0)
     const recentDiscount = recentSales.reduce((sum, sale) => sum + (sale.discount || 0), 0)
-
     // Product statistics
     const totalProducts = products.length
     const totalStock = products.reduce((sum, p: any) => sum + p.stock, 0)
@@ -117,6 +125,57 @@ export async function GET(request: NextRequest) {
       .populate('staffId', 'name')
       .lean()
 
+    // ── KDS stats (today) — only if feature is enabled ───────────────────────
+    const user = await User.findById(ownerId).lean() as { settings?: { features?: { kdsEnabled?: boolean } } } | null
+    const kdsEnabled = user?.settings?.features?.kdsEnabled === true
+
+    let kdsStats = null
+    if (kdsEnabled) {
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
+      const todayEnd   = new Date(); todayEnd.setHours(23, 59, 59, 999)
+
+      const todayOrders = await KitchenOrder.find({
+        userId: ownerId,
+        createdAt: { $gte: todayStart, $lte: todayEnd },
+      }).lean()
+
+      const completed = todayOrders.filter(o => o.status === 'collected')
+      const active    = todayOrders.filter(o => o.status !== 'collected')
+
+      // Avg prep time (preparingAt → readyAt)
+      const prepTimes = completed
+        .filter(o => o.preparingAt && o.readyAt)
+        .map(o => (new Date(o.readyAt!).getTime() - new Date(o.preparingAt!).getTime()) / 60000)
+      const avgPrepMins = prepTimes.length
+        ? Math.round(prepTimes.reduce((a, b) => a + b, 0) / prepTimes.length)
+        : 0
+
+      // Unique tables served today
+      const tablesServed = new Set(todayOrders.map(o => o.tableNumber)).size
+
+      // Revenue from collected orders
+      const kdsRevenue = completed.reduce((s, o) => s + (o.totalAmount ?? 0), 0)
+
+      // Recent 5 kitchen orders
+      const recentKitchenOrders = await KitchenOrder.find({ userId: ownerId })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .lean()
+
+      kdsStats = {
+        todayTotal:    todayOrders.length,
+        todayCompleted: completed.length,
+        todayActive:   active.length,
+        tablesServed,
+        avgPrepMins,
+        kdsRevenue,
+        recentKitchenOrders: recentKitchenOrders.map(o => ({
+          ...o,
+          id: o._id.toString(),
+        })),
+      }
+    }
+
     return NextResponse.json({
       stats: {
         // Overall statistics
@@ -124,6 +183,7 @@ export async function GET(request: NextRequest) {
         totalRevenue,
         totalDiscount,
         averageSaleValue,
+        revenueBySource,
 
         // Recent period statistics
         recentPeriod: {
@@ -154,6 +214,10 @@ export async function GET(request: NextRequest) {
 
         // Recent orders
         recentOrders,
+
+        // KDS stats (null if KDS not enabled)
+        kdsEnabled,
+        kdsStats,
       },
     })
   } catch (error) {

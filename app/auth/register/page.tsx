@@ -14,6 +14,7 @@ export default function RegisterPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [shopName, setShopName] = useState('')
   const [secretCode, setSecretCode] = useState('')
@@ -28,7 +29,7 @@ export default function RegisterPage() {
       const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, shopName, secretCode }),
+        body: JSON.stringify({ email, phone, password, shopName, secretCode }),
       })
 
       if (!response.ok) {
@@ -87,6 +88,17 @@ export default function RegisterPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}
                 required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="phone">Phone Number</Label>
+              <Input
+                id="phone"
+                type="tel"
+                placeholder="+254 712 345 678"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                disabled={loading}
               />
             </div>
             <div className="space-y-2">

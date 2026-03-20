@@ -18,6 +18,30 @@ const staffSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+    phone: {
+      type: String,
+      default: '',
+    },
+    jobDescription: {
+      type: String,
+      default: '',
+    },
+    // Extended employee details
+    firstName: { type: String, default: '' },
+    middleName: { type: String, default: '' },
+    lastName: { type: String, default: '' },
+    nationalId: { type: String, default: '' },
+    kraPin: { type: String, default: '' },
+    nhifNo: { type: String, default: '' },
+    nssfNo: { type: String, default: '' },
+    leaveDays: { type: Number, default: 14 },
+    salary: { type: Number, default: 0 },
+    commissionStructure: { type: String, default: '' },
+    employmentType: {
+      type: String,
+      enum: ['full-time', 'part-time', 'contract', 'intern', ''],
+      default: '',
+    },
     password: {
       type: String,
       required: true,

@@ -24,6 +24,14 @@ const userSchema = new mongoose.Schema(
       enum: ['admin'],
       default: 'admin',
     },
+    // Personal profile fields
+    firstName:  { type: String, default: '' },
+    middleName: { type: String, default: '' },
+    lastName:   { type: String, default: '' },
+    phone:      { type: String, default: '' },
+    nationalId: { type: String, default: '' },
+    kraPin:     { type: String, default: '' },
+    position:   { type: String, default: 'OWNER' },
     settings: {
       type: mongoose.Schema.Types.Mixed,
       default: {},

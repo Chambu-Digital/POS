@@ -133,65 +133,50 @@ function ReportsPageContent() {
   }
 
   function downloadCSV(report: Report) {
-    // Build CSV with summary section first
     let csv = ''
-    
-    // Add report header
     csv += `${report.title}\n`
     csv += `Generated: ${new Date(report.generatedAt).toLocaleString()}\n`
     csv += `Date Range: ${new Date(report.dateRange.startDate).toLocaleDateString()} - ${new Date(report.dateRange.endDate).toLocaleDateString()}\n`
     csv += '\n'
-    
-    // Add summary statistics
-    csv += 'SUMMARY STATISTICS\n'
+
+    // Summary
+    csv += 'SUMMARY\n'
     Object.entries(report.data.summary).forEach(([key, value]) => {
       const label = key.replace(/([A-Z])/g, ' $1').trim()
-      const formattedValue = typeof value === 'number'
-        ? (key.toLowerCase().includes('revenue') ||
-           key.toLowerCase().includes('profit') ||
-           key.toLowerCase().includes('value') ||
-           key.toLowerCase().includes('cost') ||
-           key.toLowerCase().includes('discount'))
-          ? `KES ${value.toLocaleString()}`
-          : value.toLocaleString()
+      const isMonetary = ['revenue','profit','cost','value','discount'].some(k => key.toLowerCase().includes(k))
+      const formatted = typeof value === 'number'
+        ? isMonetary ? `KES ${(value as number).toLocaleString()}` : (value as number).toLocaleString()
         : String(value)
-      csv += `${label},${formattedValue}\n`
+      csv += `${label},${formatted}\n`
     })
-    csv += '\n'
-    
-    // Add detailed data if available
+
+    // Source breakdown if present
+    const sb = (report.data as any).sourceBreakdown
+    if (sb) {
+      csv += '\nSOURCE BREAKDOWN\n'
+      csv += 'Source,Orders,Revenue\n'
+      ;[['POS', sb.pos], ['Bar', sb.bar], ['KDS', sb.kds]].forEach(([label, d]: any) => {
+        csv += `${label},${d.count},KES ${d.revenue.toLocaleString()}\n`
+      })
+    }
+
+    // Detailed rows
     if (report.data.details && report.data.details.length > 0) {
-      csv += 'DETAILED DATA\n'
-      
-      // Get headers from first item
-      const firstItem = report.data.details[0]
-      const headers = Object.keys(firstItem).filter(key => 
-        !key.startsWith('_') && key !== '__v' && key !== 'userId'
-      )
-      
-      csv += headers.join(',') + '\n'
-      
-      // Add data rows
+      csv += '\nDETAILED SALES\n'
+      csv += 'Order ID,Date,Source,Payment,Total,Discount,Status,Notes\n'
       report.data.details.forEach((row: any) => {
-        const values = headers.map(header => {
-          let value = row[header]
-          
-          // Format dates
-          if (header.toLowerCase().includes('date') || header === 'createdAt' || header === 'updatedAt') {
-            value = value ? new Date(value).toLocaleString() : ''
-          }
-          // Format objects
-          else if (typeof value === 'object' && value !== null) {
-            value = JSON.stringify(value)
-          }
-          // Format numbers
-          else if (typeof value === 'number') {
-            value = value.toLocaleString()
-          }
-          
-          return `"${String(value || '').replace(/"/g, '""')}"`
-        })
-        csv += values.join(',') + '\n'
+        const source = row.source || 'pos'
+        const payment = row.paymentMethod === 'mobile_money' ? 'M-Pesa' : (row.paymentMethod || '')
+        csv += [
+          `"${row._id}"`,
+          `"${new Date(row.createdAt).toLocaleString()}"`,
+          source.toUpperCase(),
+          payment,
+          `KES ${(row.total || 0).toLocaleString()}`,
+          `KES ${(row.discount || 0).toLocaleString()}`,
+          row.status || 'completed',
+          `"${(row.notes || '').replace(/"/g, '""')}"`,
+        ].join(',') + '\n'
       })
     }
 
@@ -202,7 +187,7 @@ function ReportsPageContent() {
     link.download = `${report.reportType}-report-${new Date().toISOString().split('T')[0]}.csv`
     link.click()
     URL.revokeObjectURL(url)
-    toast.success('CSV downloaded with summary statistics')
+    toast.success('CSV downloaded')
   }
 
   if (loading) {
@@ -341,6 +326,30 @@ function ReportsPageContent() {
                     </Card>
                   ))}
                 </div>
+
+                {/* Source breakdown */}
+                {(selectedReport.data as any).sourceBreakdown && (
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700 mb-2">Revenue by Source</p>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[
+                        { key: 'pos', label: 'POS', color: 'text-gray-800' },
+                        { key: 'bar', label: 'Bar', color: 'text-green-700' },
+                        { key: 'kds', label: 'Kitchen', color: 'text-blue-700' },
+                      ].map(({ key, label, color }) => {
+                        const d = (selectedReport.data as any).sourceBreakdown[key]
+                        return (
+                          <Card key={key}>
+                            <CardContent className="pt-4 pb-4">
+                              <p className={`text-lg font-bold ${color}`}>KES {d.revenue.toLocaleString()}</p>
+                              <p className="text-xs text-muted-foreground">{label} · {d.count} orders</p>
+                            </CardContent>
+                          </Card>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Actions */}
                 <div className="flex gap-2">

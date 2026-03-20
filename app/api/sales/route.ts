@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
         path: 'items.productId',
         select: 'productName',
       })
+      .lean()
 
     return NextResponse.json({ sales })
   } catch (error) {

@@ -50,17 +50,26 @@ export async function POST(request: NextRequest) {
     }
 
     await connectDB()
-    const { name, email, password, role, permissions } = await request.json()
+    const {
+      name, email, password, role, permissions, phone, jobDescription,
+      firstName, middleName, lastName, nationalId, kraPin, nhifNo, nssfNo,
+      leaveDays, salary, commissionStructure, employmentType,
+    } = await request.json()
 
     // Validate
-    if (!name || !email || !password || !role) {
+    if (!email || !password || !role) {
       return NextResponse.json(
-        { error: 'All fields are required' },
+        { error: 'Email, password and role are required' },
         { status: 400 }
       )
     }
 
-    if (!['cashier', 'manager'].includes(role)) {
+    // Build display name from parts if not provided
+    const displayName = name ||
+      [firstName, middleName, lastName].filter(Boolean).join(' ') ||
+      email
+
+    if (!['cashier', 'manager', 'supervisor', 'employee'].includes(role)) {
       return NextResponse.json(
         { error: 'Invalid role' },
         { status: 400 }
@@ -104,10 +113,23 @@ export async function POST(request: NextRequest) {
     // Create staff
     const staff = new Staff({
       userId: payload.userId,
-      name,
+      name: displayName,
       email,
       password,
       role,
+      phone: phone || '',
+      jobDescription: jobDescription || '',
+      firstName: firstName || '',
+      middleName: middleName || '',
+      lastName: lastName || '',
+      nationalId: nationalId || '',
+      kraPin: kraPin || '',
+      nhifNo: nhifNo || '',
+      nssfNo: nssfNo || '',
+      leaveDays: leaveDays ?? 14,
+      salary: salary ?? 0,
+      commissionStructure: commissionStructure || '',
+      employmentType: employmentType || '',
       permissions: permissions || defaultPermissions,
     })
 

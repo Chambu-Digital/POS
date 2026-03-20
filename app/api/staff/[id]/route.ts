@@ -29,7 +29,7 @@ export async function PUT(
     const staff = await Staff.findOne({
       _id: new Types.ObjectId(id),
       userId: payload.userId,
-    })
+    }).select(data.password ? '+password' : '')
 
     if (!staff) {
       return NextResponse.json(
@@ -43,6 +43,22 @@ export async function PUT(
     if (data.role) staff.role = data.role
     if (data.active !== undefined) staff.active = data.active
     if (data.permissions) staff.permissions = data.permissions
+    if (data.phone !== undefined) staff.phone = data.phone
+    if (data.jobDescription !== undefined) staff.jobDescription = data.jobDescription
+    if (data.firstName !== undefined) staff.firstName = data.firstName
+    if (data.middleName !== undefined) staff.middleName = data.middleName
+    if (data.lastName !== undefined) staff.lastName = data.lastName
+    if (data.nationalId !== undefined) staff.nationalId = data.nationalId
+    if (data.kraPin !== undefined) staff.kraPin = data.kraPin
+    if (data.nhifNo !== undefined) staff.nhifNo = data.nhifNo
+    if (data.nssfNo !== undefined) staff.nssfNo = data.nssfNo
+    if (data.leaveDays !== undefined) staff.leaveDays = data.leaveDays
+    if (data.salary !== undefined) staff.salary = data.salary
+    if (data.commissionStructure !== undefined) staff.commissionStructure = data.commissionStructure
+    if (data.employmentType !== undefined) staff.employmentType = data.employmentType
+    if (data.password) {
+      staff.password = data.password
+    }
 
     await staff.save()
 

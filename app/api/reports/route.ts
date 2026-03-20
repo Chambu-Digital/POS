@@ -137,6 +137,18 @@ async function generateSalesReport(userId: string, startDate: Date, endDate: Dat
   const totalDiscount = allSales.reduce((sum, sale) => sum + (sale.discount || 0), 0)
   const averageSaleValue = totalSales > 0 ? totalRevenue / totalSales : 0
 
+  // Source breakdown
+  const bySource = {
+    pos: allSales.filter((s: any) => !s.source || s.source === 'pos'),
+    bar: allSales.filter((s: any) => s.source === 'bar'),
+    kds: allSales.filter((s: any) => s.source === 'kds'),
+  }
+  const sourceBreakdown = {
+    pos: { count: bySource.pos.length, revenue: bySource.pos.reduce((s, x) => s + x.total, 0) },
+    bar: { count: bySource.bar.length, revenue: bySource.bar.reduce((s, x) => s + x.total, 0) },
+    kds: { count: bySource.kds.length, revenue: bySource.kds.reduce((s, x) => s + x.total, 0) },
+  }
+
   // Group by day
   const salesByDay = allSales.reduce((acc: any, sale) => {
     const date = new Date(sale.createdAt).toISOString().split('T')[0]
@@ -161,7 +173,11 @@ async function generateSalesReport(userId: string, startDate: Date, endDate: Dat
         totalRevenue,
         totalDiscount,
         averageSaleValue,
+        posRevenue: sourceBreakdown.pos.revenue,
+        barRevenue: sourceBreakdown.bar.revenue,
+        kdsRevenue: sourceBreakdown.kds.revenue,
       },
+      sourceBreakdown,
       details: allSales,
       charts: {
         salesByDay: Object.values(salesByDay),
@@ -235,6 +251,13 @@ async function generateProfitReport(userId: string, startDate: Date, endDate: Da
   const totalProfit = totalRevenue - totalCost
   const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0
 
+  // Source breakdown for profit report
+  const sourceRevenue = {
+    pos: sales.filter((s: any) => !s.source || s.source === 'pos').reduce((sum: number, s: any) => sum + s.total, 0),
+    bar: sales.filter((s: any) => s.source === 'bar').reduce((sum: number, s: any) => sum + s.total, 0),
+    kds: sales.filter((s: any) => s.source === 'kds').reduce((sum: number, s: any) => sum + s.total, 0),
+  }
+
   return {
     title: 'Profit Report',
     description: `Profit analysis from ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`,
@@ -244,6 +267,9 @@ async function generateProfitReport(userId: string, startDate: Date, endDate: Da
         totalCost,
         totalProfit,
         profitMargin: parseFloat(profitMargin.toFixed(2)),
+        posRevenue: sourceRevenue.pos,
+        barRevenue: sourceRevenue.bar,
+        kdsRevenue: sourceRevenue.kds,
       },
       details: sales,
       charts: {},

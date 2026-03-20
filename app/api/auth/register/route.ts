@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from 'next/server'
 export async function POST(request: NextRequest) {
   try {
     await connectDB()
-    const { email, password, shopName, secretCode } = await request.json()
+    const { email, password, shopName, secretCode, phone } = await request.json()
 
     // Validation
     if (!email || !password || !shopName) {
@@ -39,6 +39,7 @@ export async function POST(request: NextRequest) {
       email,
       password,
       shopName,
+      phone: phone || '',
     })
 
     await user.save()

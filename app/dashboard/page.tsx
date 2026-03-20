@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
-import { ShoppingCart, Package, TrendingUp, Users, DollarSign, TrendingDown, AlertCircle, Receipt } from 'lucide-react'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { UtensilsCrossed, ChefHat, Clock, Table } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -80,44 +80,75 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Revenue</p>
-                <p className="text-2xl font-bold">KES {stats.totalRevenue.toLocaleString()}</p>
-              </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Total Revenue</p>
+              <p className="text-2xl font-bold">KES {stats.totalRevenue.toLocaleString()}</p>
             </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Sales</p>
-                <p className="text-2xl font-bold">{stats.totalSales}</p>
-              </div>
+            <div>
+              <p className="text-sm text-muted-foreground">POS Sales</p>
+              <p className="text-2xl font-bold">KES {(stats.revenueBySource?.pos ?? 0).toLocaleString()}</p>
             </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Products</p>
-                <p className="text-2xl font-bold">{stats.products.total}</p>
-              </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Bar Revenue</p>
+              <p className="text-2xl font-bold text-green-700">KES {(stats.revenueBySource?.bar ?? 0).toLocaleString()}</p>
             </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Avg Sale</p>
-                <p className="text-2xl font-bold">KES {(stats.averageSaleValue).toFixed(0)}</p>
-              </div>
+            <div>
+              <p className="text-sm text-muted-foreground">KDS Revenue</p>
+              <p className="text-2xl font-bold text-blue-700">KES {(stats.revenueBySource?.kds ?? 0).toLocaleString()}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Secondary Metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div>
+              <p className="text-sm text-muted-foreground">Total Orders</p>
+              <p className="text-2xl font-bold">{stats.totalSales}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div>
+              <p className="text-sm text-muted-foreground">Products</p>
+              <p className="text-2xl font-bold">{stats.products.total}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div>
+              <p className="text-sm text-muted-foreground">Avg Sale</p>
+              <p className="text-2xl font-bold">KES {(stats.averageSaleValue).toFixed(0)}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div>
+              <p className="text-sm text-muted-foreground">Staff</p>
+              <p className="text-2xl font-bold">{stats.staffCount}</p>
             </div>
           </CardContent>
         </Card>
@@ -263,6 +294,79 @@ export default function DashboardPage() {
           </Card>
         </div>
       </div>
+
+      {/* KDS Section — only shown when KDS is enabled */}
+      {stats.kdsEnabled && stats.kdsStats && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <UtensilsCrossed className="h-5 w-5 text-green-600" />
+            <h2 className="text-xl font-bold">Kitchen Display — Today</h2>
+          </div>
+
+          {/* KDS stat cards */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {[
+              { label: 'Total Orders',   value: stats.kdsStats.todayTotal,     color: 'text-blue-600' },
+              { label: 'Completed',      value: stats.kdsStats.todayCompleted, color: 'text-green-600' },
+              { label: 'Active Now',     value: stats.kdsStats.todayActive,    color: 'text-amber-600' },
+              { label: 'Tables Served',  value: stats.kdsStats.tablesServed,   color: 'text-purple-600' },
+              { label: 'Avg Prep (min)', value: stats.kdsStats.avgPrepMins || '—', color: 'text-gray-700' },
+            ].map(s => (
+              <Card key={s.label}>
+                <CardContent className="pt-5">
+                  <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+                  <p className="text-sm text-muted-foreground mt-1">{s.label}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Recent kitchen orders */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <ChefHat className="h-4 w-4 text-green-600" />
+                Recent Kitchen Orders
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {stats.kdsStats.recentKitchenOrders.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">No kitchen orders yet today</p>
+                )}
+                {stats.kdsStats.recentKitchenOrders.map((o: any) => (
+                  <div key={o.id} className="flex items-center justify-between text-sm border rounded-lg px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono font-bold text-green-700">{o.orderNumber}</span>
+                      <span className="text-muted-foreground">Table {o.tableNumber}</span>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="text-muted-foreground">{o.waiterName}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Badge variant={
+                        o.status === 'collected' ? 'secondary' :
+                        o.status === 'ready'     ? 'default'   :
+                        o.status === 'preparing' ? 'outline'   : 'outline'
+                      } className={
+                        o.status === 'collected' ? 'bg-gray-100 text-gray-600' :
+                        o.status === 'ready'     ? 'bg-green-100 text-green-700 border-green-200' :
+                        o.status === 'preparing' ? 'bg-orange-100 text-orange-700 border-orange-200' :
+                        'bg-blue-100 text-blue-700 border-blue-200'
+                      }>
+                        {o.status.toUpperCase()}
+                      </Badge>
+                      <span className="text-muted-foreground text-xs flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

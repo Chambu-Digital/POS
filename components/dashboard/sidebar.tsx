@@ -14,110 +14,126 @@ import {
   FileText,
   BarChart3,
   Settings,
+  Receipt,
+  UtensilsCrossed,
+  Wine,           // ← Bar Tabs icon
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const menuItems = [
-  {
-    icon: LayoutDashboard,
-    label: 'Dashboard',
-    href: '/dashboard',
-    adminOnly: false,
-    permission: 'canViewDashboard',
-  },
-  {
-    icon: ShoppingCart,
-    label: 'Make Sale',
-    href: '/dashboard/sales',
-    adminOnly: false,
-    permission: 'canMakeSales',
-  },
-  {
-    icon: FileText,
-    label: 'Orders',
-    href: '/dashboard/orders',
-    adminOnly: false,
-    permission: 'canViewOrders',
-  },
-  {
-    icon: Package,
-    label: 'Inventory',
-    href: '/dashboard/inventory',
-    adminOnly: false,
-    permission: 'canViewInventory',
-  },
-  {
-    icon: BarChart3,
-    label: 'Reports',
-    href: '/dashboard/reports',
-    adminOnly: false,
-    permission: 'canViewSalesReports',
-  },
-  {
-    icon: Users,
-    label: 'Staff',
-    href: '/dashboard/staff',
-    adminOnly: true,
-    permission: 'canManageStaff',
-  },
-  {
-    icon: Settings,
-    label: 'Settings',
-    href: '/dashboard/settings',
-    adminOnly: true,
-    permission: 'canEditSettings',
-  },
+  { icon: LayoutDashboard, label: 'Dashboard',       href: '/dashboard',           adminOnly: false, permission: null,                  featureFlag: null        },
+  { icon: ShoppingCart,    label: 'Make Order Sale', href: '/dashboard/sales',     adminOnly: false, permission: 'canMakeSales',         featureFlag: null        },
+  { icon: FileText,        label: 'Orders',          href: '/dashboard/orders',    adminOnly: false, permission: 'canViewOrders',        featureFlag: null        },
+  { icon: UtensilsCrossed, label: 'Kitchen Display', href: '/dashboard/kds',       adminOnly: false, permission: null,                  featureFlag: 'kdsEnabled' },
+  { icon: Wine,            label: 'Bar',        href: '/dashboard/bar',       adminOnly: false, permission: null,                  featureFlag: 'barEnabled' },
+  { icon: Package,         label: 'Inventory',       href: '/dashboard/inventory', adminOnly: false, permission: 'canViewInventory',     featureFlag: null        },
+  { icon: BarChart3,       label: 'Reports',         href: '/dashboard/reports',   adminOnly: false, permission: 'canViewSalesReports',  featureFlag: null        },
+  { icon: Receipt,         label: 'Expenses',        href: '/dashboard/expenses',  adminOnly: false, permission: null,                  featureFlag: null        },
+  { icon: Users,           label: 'Staff',           href: '/dashboard/staff',     adminOnly: true,  permission: null,                  featureFlag: null        },
+  { icon: Settings,        label: 'Settings',        href: '/dashboard/settings',  adminOnly: true,  permission: null,                  featureFlag: null        },
 ]
+
+// Feature flags that are loaded from /api/settings
+type FeatureFlags = {
+  kdsEnabled: boolean
+  barEnabled: boolean
+}
 
 export function Sidebar() {
   const pathname = usePathname()
-  const [isOpen, setIsOpen] = useState(false)
-  const [userType, setUserType] = useState<'user' | 'staff' | null>(null)
-  const [shopName, setShopName] = useState<string>('My Shop')
+  const [isOpen, setIsOpen]         = useState(false)
+  const [mounted, setMounted]       = useState(false)
+  const [userType, setUserType]     = useState<'user' | 'staff' | null>(null)
+  const [shopName, setShopName]     = useState<string>('My Shop')
   const [permissions, setPermissions] = useState<Record<string, boolean>>({})
-  const [isLoading, setIsLoading] = useState(true)
+  const [features, setFeatures]     = useState<FeatureFlags>({ kdsEnabled: false, barEnabled: false })
 
   useEffect(() => {
-    // Fetch user info to determine if admin and get shop name
-    fetch('/api/auth/me')
-      .then(res => res.json())
-      .then(data => {
-        if (data.user) {
-          setUserType(data.user.type)
-          setShopName(data.user.shopName || 'My Shop')
-          // Set permissions for staff members
-          if (data.user.type === 'staff' && data.user.permissions) {
-            setPermissions(data.user.permissions)
+    setMounted(true)
+
+    function loadUser() {
+      fetch('/api/auth/me')
+        .then(res => res.json())
+        .then(data => {
+          if (data.user) {
+            setUserType(data.user.type)
+            setShopName(data.user.shopName || 'My Shop')
+            if (data.user.type === 'staff' && data.user.permissions) {
+              setPermissions(data.user.permissions)
+            }
           }
-        }
-        setIsLoading(false)
-      })
-      .catch(() => {
-        setIsLoading(false)
-      })
+        })
+        .catch(() => {})
+    }
+
+    function loadFeatures() {
+      fetch('/api/settings')
+        .then(res => res.json())
+        .then(data => {
+          setFeatures({
+            kdsEnabled: data.settings?.features?.kdsEnabled === true,
+            barEnabled: data.settings?.features?.barEnabled === true,
+          })
+        })
+        .catch(() => {})
+    }
+
+    loadUser()
+    loadFeatures()
+
+    // Re-fetch feature flags whenever the tab regains focus
+    // so toggling in Settings is reflected immediately without a reload
+    const onFocus = () => loadFeatures()
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') loadFeatures()
+    })
+
+    // Instant same-tab signal from settings page
+    const onSettingsUpdated = () => loadFeatures()
+    window.addEventListener('settings_updated', onSettingsUpdated)
+
+    // Cross-tab signal via localStorage
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'settings_updated') loadFeatures()
+    }
+    window.addEventListener('storage', onStorage)
+
+    // Poll every 5 s as a final fallback
+    const interval = setInterval(loadFeatures, 5000)
+
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('settings_updated', onSettingsUpdated)
+      window.removeEventListener('storage', onStorage)
+      clearInterval(interval)
+    }
   }, [])
 
   const visibleMenuItems = menuItems.filter(item => {
-    // Admin/Owner sees all items
-    if (userType === 'user') {
-      return true
-    }
-    
-    // Staff members: check adminOnly flag and permissions
+    // Check feature flag — if the item requires a flag and it is off, hide it
+    if (item.featureFlag && !features[item.featureFlag as keyof FeatureFlags]) return false
+
+    // Owners see everything that passes the feature flag check
+    if (userType === 'user') return true
+
+    // While auth is loading, show all non-admin items so sidebar isn't blank
+    if (userType === null) return !item.adminOnly
+
+    // Staff: hide admin-only items
     if (userType === 'staff') {
-      // Admin-only items hidden from staff
-      if (item.adminOnly) {
-        return false
-      }
-      // Check specific permission
-      if (item.permission) {
-        return permissions[item.permission] === true
-      }
-      return false
+      if (item.adminOnly) return false
+      // If no permission required, show it
+      if (!item.permission) return true
+      // Otherwise check the specific permission
+      return permissions[item.permission] === true
     }
-    
+
     return false
   })
+
+  // Items that should show a live indicator dot
+  const liveItems = new Set(['/dashboard/kds', '/dashboard/bar'])
 
   return (
     <>
@@ -136,13 +152,13 @@ export function Sidebar() {
           isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         )}
       >
-        <div className="p-6">
+        <div className="p-6 flex flex-col h-full">
+
+          {/* Shop branding */}
           <div className="flex flex-col items-center gap-3 mb-8 mt-12 lg:mt-0">
-            {/* Shop Logo Placeholder - can be replaced with actual logo */}
             <div className="w-16 h-16 rounded-full bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] flex items-center justify-center font-bold text-2xl">
               {shopName.charAt(0).toUpperCase()}
             </div>
-            {/* Shop Name */}
             <div className="text-center">
               <h2 className="font-bold text-lg">{shopName}</h2>
               <p className="text-xs text-[hsl(var(--sidebar-foreground))]/70 mt-1">
@@ -151,13 +167,20 @@ export function Sidebar() {
             </div>
           </div>
 
-          <nav className="space-y-2">
-            {isLoading ? (
-              <div className="text-sm text-muted-foreground p-4">Loading menu...</div>
+          {/* Nav items */}
+          <nav className="space-y-1 flex-1 overflow-y-auto">
+            {!mounted ? (
+              // Skeleton during SSR / hydration to avoid layout shift
+              <div className="space-y-2">
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="h-11 rounded-lg bg-[hsl(var(--sidebar-accent))]/20 animate-pulse" />
+                ))}
+              </div>
             ) : (
               visibleMenuItems.map((item) => {
-                const Icon = item.icon
-                const isActive = pathname === item.href
+                const Icon    = item.icon
+                const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                const showDot  = liveItems.has(item.href) && isActive
 
                 return (
                   <Link
@@ -165,7 +188,7 @@ export function Sidebar() {
                     href={item.href}
                     onClick={() => setIsOpen(false)}
                     className={cn(
-                      'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors',
+                      'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors relative',
                       isActive
                         ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]'
                         : 'text-[hsl(var(--sidebar-foreground))] hover:bg-[hsl(var(--sidebar-accent))]/50 hover:text-[hsl(var(--sidebar-accent-foreground))]'
@@ -173,26 +196,29 @@ export function Sidebar() {
                   >
                     <Icon size={20} />
                     <span>{item.label}</span>
+                    {/* Live pulse dot — shown for KDS and Bar when active */}
+                    {showDot && (
+                      <span className="ml-auto w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
+                    )}
                   </Link>
                 )
               })
             )}
           </nav>
 
-          <div className="absolute bottom-6 left-6 right-6">
-            <Link
-              href="/api/auth/logout"
-              onClick={(e) => {
-                e.preventDefault()
+          {/* Logout */}
+          <div className="pt-4 mt-auto border-t border-[hsl(var(--sidebar-foreground))]/10">
+            <button
+              onClick={() => {
                 fetch('/api/auth/logout', { method: 'POST' }).then(() => {
                   window.location.href = '/auth/login'
                 })
               }}
-              className="flex items-center gap-3 px-4 py-3 rounded-lg text-[hsl(var(--sidebar-foreground))] hover:bg-red-500/20 transition-colors"
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-[hsl(var(--sidebar-foreground))] hover:bg-red-500/20 transition-colors"
             >
               <LogOut size={20} />
               <span>Logout</span>
-            </Link>
+            </button>
           </div>
         </div>
       </aside>
