@@ -18,6 +18,13 @@ const expenseSchema = new mongoose.Schema(
     notes: { type: String, default: '' },
     amount: { type: Number, required: true },
     date: { type: Date, default: Date.now },
+    status: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending',
+    },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    approvedAt: { type: Date },
     createdAt: { type: Date, default: Date.now },
   },
   { collection: 'expenses' }

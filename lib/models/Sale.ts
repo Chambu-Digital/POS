@@ -16,7 +16,7 @@ const saleSchema = new mongoose.Schema(
         productId: {
           type: mongoose.Schema.Types.ObjectId,
           ref: 'Product',
-          required: true,
+          required: false, // optional — rental orders have no product
         },
         productName: {
           type: String,
@@ -59,8 +59,22 @@ const saleSchema = new mongoose.Schema(
     notes: String,
     source: {
       type: String,
-      enum: ['pos', 'bar', 'kds'],
+      enum: ['pos', 'bar', 'kds', 'rental'],
       default: 'pos',
+    },
+    // Extra metadata for rental orders
+    rentalMeta: {
+      bookingId: { type: mongoose.Schema.Types.ObjectId },
+      serviceName: String,
+      serviceCategory: String,
+      pricingLabel: String,
+      startTime: Date,
+      endTime: Date,
+      guestCount: Number,
+      deposit: Number,
+      customerName: String,
+      customerPhone: String,
+      customerIdNo: String,
     },
     status: {
       type: String,

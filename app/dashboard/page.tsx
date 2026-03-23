@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { UtensilsCrossed, ChefHat, Clock, Table } from 'lucide-react'
+import { UtensilsCrossed, ChefHat, Clock, Table, BedDouble } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -76,41 +76,56 @@ export default function DashboardPage() {
         </Select>
       </div>
 
-      {/* Key Metrics - Compact Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Today's Summary — reconciliation strip */}
+      {stats.todayStats && (
+        <div className="rounded-lg border bg-amber-50 border-amber-200 px-4 py-3">
+          <p className="text-xs font-semibold text-amber-700 mb-2 uppercase tracking-wide">Today's Summary</p>
+          <div className="flex flex-wrap gap-6 text-sm">
+            <span className="text-gray-700">Orders: <strong>{stats.todayStats.totalOrders}</strong></span>
+            <span className="text-gray-700">Revenue: <strong>KES {stats.todayStats.totalRevenue.toLocaleString()}</strong></span>
+            {stats.todayStats.bySource.pos > 0    && <span className="text-gray-600">POS: <strong>KES {stats.todayStats.bySource.pos.toLocaleString()}</strong></span>}
+            {stats.todayStats.bySource.bar > 0    && <span className="text-green-700">Bar: <strong>KES {stats.todayStats.bySource.bar.toLocaleString()}</strong></span>}
+            {stats.todayStats.bySource.kds > 0    && <span className="text-blue-700">Kitchen: <strong>KES {stats.todayStats.bySource.kds.toLocaleString()}</strong></span>}
+            {stats.todayStats.bySource.rental > 0 && <span className="text-purple-700">Rentals: <strong>KES {stats.todayStats.bySource.rental.toLocaleString()}</strong></span>}
+            {Object.entries(stats.todayStats.byPayment as Record<string, number>).map(([method, amt]) => (
+              <span key={method} className="text-gray-500">
+                {method === 'mobile_money' ? 'M-Pesa' : method.charAt(0).toUpperCase() + method.slice(1)}: <strong>KES {amt.toLocaleString()}</strong>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Key Metrics — period-based revenue breakdown */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card>
           <CardContent className="pt-6">
-            <div>
-              <p className="text-sm text-muted-foreground">Total Revenue</p>
-              <p className="text-2xl font-bold">KES {stats.totalRevenue.toLocaleString()}</p>
-            </div>
+            <p className="text-sm text-muted-foreground">Revenue ({period}d)</p>
+            <p className="text-2xl font-bold">KES {stats.recentPeriod.revenue.toLocaleString()}</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="pt-6">
-            <div>
-              <p className="text-sm text-muted-foreground">POS Sales</p>
-              <p className="text-2xl font-bold">KES {(stats.revenueBySource?.pos ?? 0).toLocaleString()}</p>
-            </div>
+            <p className="text-sm text-muted-foreground">POS ({period}d)</p>
+            <p className="text-2xl font-bold">KES {(stats.revenueBySource?.pos ?? 0).toLocaleString()}</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="pt-6">
-            <div>
-              <p className="text-sm text-muted-foreground">Bar Revenue</p>
-              <p className="text-2xl font-bold text-green-700">KES {(stats.revenueBySource?.bar ?? 0).toLocaleString()}</p>
-            </div>
+            <p className="text-sm text-muted-foreground">Bar ({period}d)</p>
+            <p className="text-2xl font-bold text-green-700">KES {(stats.revenueBySource?.bar ?? 0).toLocaleString()}</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="pt-6">
-            <div>
-              <p className="text-sm text-muted-foreground">KDS Revenue</p>
-              <p className="text-2xl font-bold text-blue-700">KES {(stats.revenueBySource?.kds ?? 0).toLocaleString()}</p>
-            </div>
+            <p className="text-sm text-muted-foreground">Kitchen ({period}d)</p>
+            <p className="text-2xl font-bold text-blue-700">KES {(stats.revenueBySource?.kds ?? 0).toLocaleString()}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Rentals ({period}d)</p>
+            <p className="text-2xl font-bold text-purple-700">KES {(stats.revenueBySource?.rental ?? 0).toLocaleString()}</p>
           </CardContent>
         </Card>
       </div>
@@ -295,8 +310,44 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* KDS Section — only shown when KDS is enabled */}
-      {stats.kdsEnabled && stats.kdsStats && (
+      {/* Rental Stats — always shown */}
+      {stats.rentalStats && (stats.rentalStats.totalBookings > 0 || true) && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <BedDouble className="h-5 w-5 text-purple-600" />
+            <h2 className="text-xl font-bold">Rental Services</h2>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">Total Bookings</p>
+                <p className="text-2xl font-bold text-purple-700">{stats.rentalStats.totalBookings}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">Active Now</p>
+                <p className="text-2xl font-bold text-green-600">{stats.rentalStats.activeRentals}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">Completed</p>
+                <p className="text-2xl font-bold">{stats.rentalStats.completedRentals}</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground">Rental Revenue</p>
+                <p className="text-2xl font-bold text-purple-700">KES {stats.rentalStats.rentalRevenue.toLocaleString()}</p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* KDS Section — shown when there are kitchen orders */}
+      {stats.kdsStats && stats.kdsStats.todayTotal > 0 && (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <UtensilsCrossed className="h-5 w-5 text-green-600" />

@@ -22,6 +22,7 @@ export async function GET(request: NextRequest) {
       .populate({
         path: 'items.productId',
         select: 'productName',
+        options: { strictPopulate: false },
       })
       .lean()
 

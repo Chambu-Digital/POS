@@ -25,11 +25,11 @@ function buildDefaults(user: { shopName?: string; email?: string }) {
       termsEnabled:        false,
       termsText:           '',
       discountsEnabled:    true,
-      kdsEnabled:          false,
+      kdsEnabled:          true,
       kdsRestaurantName:   '',
       kdsTableCount:       10,
       shiftsEnabled:       false,
-      barEnabled:          false,
+      barEnabled:          true,
     },
     notifications: {
       emailNotifications:   true,
@@ -59,11 +59,14 @@ function buildDefaults(user: { shopName?: string; email?: string }) {
 export async function GET(request: NextRequest) {
   try {
     const payload = await getAuthPayload()
-    if (!payload)              return NextResponse.json({ error: 'Unauthorized' },   { status: 401 })
-    if (payload.type !== 'user') return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+    if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     await connectDB()
-    const user = await User.findById(payload.userId).lean() as {
+
+    // Staff members read their admin's settings
+    const userId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+
+    const user = await User.findById(userId).lean() as {
       shopName?: string; email?: string; settings?: Record<string, unknown>
     } | null
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
@@ -90,7 +93,7 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const payload = await getAuthPayload()
-    if (!payload)              return NextResponse.json({ error: 'Unauthorized' },   { status: 401 })
+    if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     if (payload.type !== 'user') return NextResponse.json({ error: 'Access denied' }, { status: 403 })
 
     await connectDB()

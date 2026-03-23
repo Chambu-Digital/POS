@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { Plus, Minus, X, Search, ShoppingCart, AlertCircle } from 'lucide-react'
+import { Plus, Minus, X, Search, AlertCircle } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
@@ -37,6 +37,7 @@ interface Product {
   brand?: string
   model?: string
   variant?: string
+  images?: string[]
 }
 
 interface CartItem {
@@ -92,7 +93,9 @@ function SalesPageContent() {
       if (cachedSessionProducts) {
         try {
           prods = JSON.parse(cachedSessionProducts)
-          if (prods.length > 0) {
+          // Invalidate cache if products don't have images field yet (stale cache)
+          const hasImagesField = prods.length === 0 || 'images' in prods[0]
+          if (prods.length > 0 && hasImagesField) {
             setProducts(prods)
             const cats = Array.from(new Set(prods.map((p: Product) => p.category))).sort()
             setCategories(cats as string[])
@@ -322,9 +325,12 @@ function SalesPageContent() {
         <Card className="w-full max-w-md">
           <CardContent className="pt-6">
             <div className="text-center space-y-4">
-              <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
-                <ShoppingCart className="h-8 w-8 text-primary animate-pulse" />
-              </div>
+              <div className="mx-auto w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="animate-pulse">
+                    <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="#059669" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M5 10h14l-1.5 9.5a2 2 0 0 1-2 1.5H8.5a2 2 0 0 1-2-1.5L5 10z" fill="#d1fae5" stroke="#059669" strokeWidth="2" strokeLinejoin="round"/>
+                  </svg>
+                </div>
               <div>
                 <h3 className="font-semibold text-lg">Loading Products</h3>
                 <p className="text-sm text-muted-foreground">
@@ -401,6 +407,16 @@ function SalesPageContent() {
                   onClick={() => addToCart(product)}
                 >
                   <CardContent className="p-4">
+                    {/* Product image */}
+                    {product.images?.[0] && (
+                      <div className="w-full h-32 rounded-md overflow-hidden mb-3 bg-gray-100">
+                        <img
+                          src={product.images[0]}
+                          alt={product.productName}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    )}
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex-1">
                         <h3 className="font-semibold text-sm">{product.productName}</h3>
@@ -449,7 +465,12 @@ function SalesPageContent() {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="flex items-center gap-2">
-                <ShoppingCart size={20} />
+                <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-100">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="#059669" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M5 10h14l-1.5 9.5a2 2 0 0 1-2 1.5H8.5a2 2 0 0 1-2-1.5L5 10z" fill="#d1fae5" stroke="#059669" strokeWidth="2" strokeLinejoin="round"/>
+                  </svg>
+                </span>
                 Cart ({cart.length})
               </CardTitle>
               {cart.length > 0 && (

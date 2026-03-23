@@ -155,7 +155,8 @@ function ReportsPageContent() {
     if (sb) {
       csv += '\nSOURCE BREAKDOWN\n'
       csv += 'Source,Orders,Revenue\n'
-      ;[['POS', sb.pos], ['Bar', sb.bar], ['KDS', sb.kds]].forEach(([label, d]: any) => {
+      ;[['POS', sb.pos], ['Bar', sb.bar], ['KDS', sb.kds], ['Rentals', sb.rental]].forEach(([label, d]: any) => {
+        if (!d) return
         csv += `${label},${d.count},KES ${d.revenue.toLocaleString()}\n`
       })
     }
@@ -235,21 +236,12 @@ function ReportsPageContent() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="sales">
-                    <div className="flex items-center gap-2">
-                      Sales Report
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="inventory">
-                    <div className="flex items-center gap-2">
-                      Inventory Report
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="profit">
-                    <div className="flex items-center gap-2">
-                      Profit Report
-                    </div>
-                  </SelectItem>
+                  <SelectItem value="sales">Sales Report</SelectItem>
+                  <SelectItem value="inventory">Inventory Report</SelectItem>
+                  <SelectItem value="profit">Profit Report</SelectItem>
+                  <SelectItem value="kitchen">Kitchen Report</SelectItem>
+                  <SelectItem value="bar">Bar Report</SelectItem>
+                  <SelectItem value="rental">Rental Services Report</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -306,38 +298,49 @@ function ReportsPageContent() {
               <div className="space-y-6">
                 {/* Summary Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {Object.entries(selectedReport.data.summary).map(([key, value]) => (
-                    <Card key={key}>
-                      <CardContent className="pt-6">
-                        <div className="text-2xl font-bold">
-                          {typeof value === 'number'
-                            ? key.toLowerCase().includes('revenue') ||
-                              key.toLowerCase().includes('profit') ||
-                              key.toLowerCase().includes('value') ||
-                              key.toLowerCase().includes('cost')
-                              ? `KSh ${value.toLocaleString()}`
-                              : value.toLocaleString()
-                            : String(value)}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {key.replace(/([A-Z])/g, ' $1').trim()}
-                        </p>
-                      </CardContent>
-                    </Card>
-                  ))}
+                  {Object.entries(selectedReport.data.summary).map(([key, value]) => {
+                    const LABELS: Record<string, string> = {
+                      totalSales: 'Total Orders', totalRevenue: 'Total Revenue', totalDiscount: 'Total Discounts',
+                      averageSaleValue: 'Avg Order Value', posRevenue: 'POS Revenue', barRevenue: 'Bar Revenue',
+                      kdsRevenue: 'Kitchen Revenue', rentalRevenue: 'Rental Revenue',
+                      totalProducts: 'Total Products', totalStockValue: 'Stock Value',
+                      lowStockItems: 'Low Stock Items', outOfStockItems: 'Out of Stock',
+                      totalCost: 'Total Cost', totalProfit: 'Net Profit', profitMargin: 'Profit Margin (%)',
+                      totalOrders: 'Total Orders', completedOrders: 'Completed', pendingOrders: 'Pending',
+                      tablesServed: 'Tables Served', avgPrepMins: 'Avg Prep (min)',
+                      averageOrderValue: 'Avg Order Value',
+                      totalBookings: 'Total Bookings', completedBookings: 'Completed', activeBookings: 'Active',
+                      cancelledBookings: 'Cancelled', totalDeposits: 'Total Deposits',
+                    }
+                    const label = LABELS[key] || key.replace(/([A-Z])/g, ' $1').trim()
+                    const isMonetary = ['revenue','profit','cost','value','discount','deposit'].some(k => key.toLowerCase().includes(k))
+                    const formatted = typeof value === 'number'
+                      ? isMonetary ? `KES ${(value as number).toLocaleString()}` : (value as number).toLocaleString()
+                      : String(value)
+                    return (
+                      <Card key={key}>
+                        <CardContent className="pt-6">
+                          <div className="text-2xl font-bold">{formatted}</div>
+                          <p className="text-xs text-muted-foreground mt-1">{label}</p>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
                 </div>
 
                 {/* Source breakdown */}
                 {(selectedReport.data as any).sourceBreakdown && (
                   <div>
                     <p className="text-sm font-semibold text-gray-700 mb-2">Revenue by Source</p>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       {[
-                        { key: 'pos', label: 'POS', color: 'text-gray-800' },
-                        { key: 'bar', label: 'Bar', color: 'text-green-700' },
-                        { key: 'kds', label: 'Kitchen', color: 'text-blue-700' },
+                        { key: 'pos',    label: 'POS',     color: 'text-gray-800'   },
+                        { key: 'bar',    label: 'Bar',     color: 'text-green-700'  },
+                        { key: 'kds',    label: 'Kitchen', color: 'text-blue-700'   },
+                        { key: 'rental', label: 'Rentals', color: 'text-purple-700' },
                       ].map(({ key, label, color }) => {
                         const d = (selectedReport.data as any).sourceBreakdown[key]
+                        if (!d) return null
                         return (
                           <Card key={key}>
                             <CardContent className="pt-4 pb-4">

@@ -4,6 +4,8 @@ import Product from '@/lib/models/Product'
 import Staff from '@/lib/models/Staff'
 import KitchenOrder from '@/lib/models/KitchenOrder'
 import User from '@/lib/models/User'
+import RentalBooking from '@/lib/models/RentalBooking'
+import Expense from '@/lib/models/Expense'
 import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -50,11 +52,32 @@ export async function GET(request: NextRequest) {
     const totalDiscount = allSales.reduce((sum, sale) => sum + (sale.discount || 0), 0)
     const averageSaleValue = totalSales > 0 ? totalRevenue / totalSales : 0
 
-    // Revenue breakdown by source
+    // Revenue breakdown by source — uses the selected period (recentSales)
     const revenueBySource = {
-      pos: allSales.filter((s: any) => !s.source || s.source === 'pos').reduce((sum, s) => sum + s.total, 0),
-      bar: allSales.filter((s: any) => s.source === 'bar').reduce((sum, s) => sum + s.total, 0),
-      kds: allSales.filter((s: any) => s.source === 'kds').reduce((sum, s) => sum + s.total, 0),
+      pos:    recentSales.filter((s: any) => !s.source || s.source === 'pos').reduce((sum, s) => sum + s.total, 0),
+      bar:    recentSales.filter((s: any) => s.source === 'bar').reduce((sum, s) => sum + s.total, 0),
+      kds:    recentSales.filter((s: any) => s.source === 'kds').reduce((sum, s) => sum + s.total, 0),
+      rental: recentSales.filter((s: any) => s.source === 'rental').reduce((sum, s) => sum + s.total, 0),
+    }
+
+    // Today's summary — for daily reconciliation
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
+    const todayEnd   = new Date(); todayEnd.setHours(23, 59, 59, 999)
+    const todaySales = await Sale.find({ userId: ownerId, createdAt: { $gte: todayStart, $lte: todayEnd } }).lean()
+    const todayStats = {
+      totalOrders: todaySales.length,
+      totalRevenue: todaySales.reduce((s, x) => s + x.total, 0),
+      bySource: {
+        pos:    todaySales.filter((s: any) => !s.source || s.source === 'pos').reduce((sum, s) => sum + s.total, 0),
+        bar:    todaySales.filter((s: any) => s.source === 'bar').reduce((sum, s) => sum + s.total, 0),
+        kds:    todaySales.filter((s: any) => s.source === 'kds').reduce((sum, s) => sum + s.total, 0),
+        rental: todaySales.filter((s: any) => s.source === 'rental').reduce((sum, s) => sum + s.total, 0),
+      },
+      byPayment: todaySales.reduce((acc: Record<string, number>, s: any) => {
+        const m = s.paymentMethod || 'cash'
+        acc[m] = (acc[m] || 0) + s.total
+        return acc
+      }, {}),
     }
 
     // Recent period stats
@@ -125,24 +148,31 @@ export async function GET(request: NextRequest) {
       .populate('staffId', 'name')
       .lean()
 
-    // ── KDS stats (today) — only if feature is enabled ───────────────────────
+    // ── Rental stats ─────────────────────────────────────────────────────────
+    const rentalBookings = await RentalBooking.find({ userId: ownerId }).lean()
+    const activeRentals = rentalBookings.filter((b: any) => b.status === 'active' || b.status === 'overdue').length
+    const completedRentals = rentalBookings.filter((b: any) => b.status === 'completed').length
+    const rentalRevenue = rentalBookings
+      .filter((b: any) => b.status === 'completed' && b.totalAmount)
+      .reduce((sum: number, b: any) => sum + (b.totalAmount || 0), 0)
+
+    // ── KDS stats (today) — always computed ──────────────────────────────────
     const user = await User.findById(ownerId).lean() as { settings?: { features?: { kdsEnabled?: boolean } } } | null
     const kdsEnabled = user?.settings?.features?.kdsEnabled === true
 
     let kdsStats = null
-    if (kdsEnabled) {
-      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
-      const todayEnd   = new Date(); todayEnd.setHours(23, 59, 59, 999)
+    {
+      const kStart = new Date(); kStart.setHours(0, 0, 0, 0)
+      const kEnd   = new Date(); kEnd.setHours(23, 59, 59, 999)
 
       const todayOrders = await KitchenOrder.find({
         userId: ownerId,
-        createdAt: { $gte: todayStart, $lte: todayEnd },
+        createdAt: { $gte: kStart, $lte: kEnd },
       }).lean()
 
       const completed = todayOrders.filter(o => o.status === 'collected')
       const active    = todayOrders.filter(o => o.status !== 'collected')
 
-      // Avg prep time (preparingAt → readyAt)
       const prepTimes = completed
         .filter(o => o.preparingAt && o.readyAt)
         .map(o => (new Date(o.readyAt!).getTime() - new Date(o.preparingAt!).getTime()) / 60000)
@@ -150,13 +180,9 @@ export async function GET(request: NextRequest) {
         ? Math.round(prepTimes.reduce((a, b) => a + b, 0) / prepTimes.length)
         : 0
 
-      // Unique tables served today
       const tablesServed = new Set(todayOrders.map(o => o.tableNumber)).size
-
-      // Revenue from collected orders
       const kdsRevenue = completed.reduce((s, o) => s + (o.totalAmount ?? 0), 0)
 
-      // Recent 5 kitchen orders
       const recentKitchenOrders = await KitchenOrder.find({ userId: ownerId })
         .sort({ createdAt: -1 })
         .limit(5)
@@ -215,9 +241,20 @@ export async function GET(request: NextRequest) {
         // Recent orders
         recentOrders,
 
-        // KDS stats (null if KDS not enabled)
+        // KDS stats (null if no kitchen orders)
         kdsEnabled,
         kdsStats,
+
+        // Today's summary for reconciliation
+        todayStats,
+
+        // Rental stats
+        rentalStats: {
+          totalBookings: rentalBookings.length,
+          activeRentals,
+          completedRentals,
+          rentalRevenue,
+        },
       },
     })
   } catch (error) {

@@ -32,6 +32,10 @@ const productSchema = new mongoose.Schema(
       default: 0,
     },
     description: String,
+    images: {
+      type: [String], // base64 data URLs
+      default: [],
+    },
     stock: {
       type: Number,
       required: true,

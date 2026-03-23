@@ -1,10 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
-  <!-- Shield outline -->
-  <path d="M100 15L35 40v60c0 45 30 75 65 85 35-10 65-40 65-85V40L100 15z" fill="#1A3A4A"/>
-  
-  <!-- Teal accent -->
-  <path d="M100 15v170c35-10 65-40 65-85V40L100 15z" fill="#2A9D8F"/>
-  
-  <!-- Letter C -->
-  <path d="M115 80c0-19.33-15.67-35-35-35s-35 15.67-35 35 15.67 35 35 35c10.5 0 19.95-4.61 26.46-11.96M80 55c13.81 0 25 11.19 25 25s-11.19 25-25 25-25-11.19-25-25 11.19-25 25-25z" stroke="white" stroke-width="10" fill="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Background rounded rect (for maskable / adaptive icon) -->
+  <rect width="512" height="512" rx="112" fill="#0f172a"/>
+
+  <!-- Green accent bar top-left -->
+  <rect x="56" y="56" width="8" height="80" rx="4" fill="#10b981"/>
+  <rect x="56" y="56" width="80" height="8" rx="4" fill="#10b981"/>
+
+  <!-- Green accent bar bottom-right -->
+  <rect x="448" y="376" width="8" height="80" rx="4" fill="#10b981"/>
+  <rect x="368" y="448" width="80" height="8" rx="4" fill="#10b981"/>
+
+  <!-- Main "C" letterform — bold, modern -->
+  <path d="M320 168
+    C320 168 290 140 256 140
+    C196 140 148 188 148 256
+    C148 324 196 372 256 372
+    C290 372 320 344 320 344"
+    stroke="#10b981" stroke-width="52" stroke-linecap="round" fill="none"/>
+
+  <!-- Small dot accent -->
+  <circle cx="336" cy="256" r="18" fill="#10b981" opacity="0.35"/>
 </svg>

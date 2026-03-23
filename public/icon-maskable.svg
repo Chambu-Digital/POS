@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Full bleed background for maskable -->
+  <rect width="512" height="512" fill="#0f172a"/>
+
+  <!-- Subtle grid texture -->
+  <line x1="0" y1="256" x2="512" y2="256" stroke="#1e293b" stroke-width="1"/>
+  <line x1="256" y1="0" x2="256" y2="512" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Green accent corners (safe zone: 80px inset) -->
+  <rect x="80" y="80" width="6" height="60" rx="3" fill="#10b981"/>
+  <rect x="80" y="80" width="60" height="6" rx="3" fill="#10b981"/>
+  <rect x="426" y="372" width="6" height="60" rx="3" fill="#10b981"/>
+  <rect x="372" y="426" width="60" height="6" rx="3" fill="#10b981"/>
+
+  <!-- Bold C -->
+  <path d="M316 172
+    C316 172 288 144 256 144
+    C198 144 152 194 152 256
+    C152 318 198 368 256 368
+    C288 368 316 340 316 340"
+    stroke="#10b981" stroke-width="56" stroke-linecap="round" fill="none"/>
+
+  <!-- POS text below C -->
+  <text x="256" y="430" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="700" fill="#10b981" text-anchor="middle" letter-spacing="8">POS</text>
+</svg>

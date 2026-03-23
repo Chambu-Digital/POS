@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,7 +19,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { toast } from 'sonner'
-import { Check, ChevronsUpDown } from 'lucide-react'
+import { Check, ChevronsUpDown, ImagePlus, X, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface Product {
@@ -35,6 +35,7 @@ interface Product {
   wholeSale?: number
   description?: string
   stock: number
+  images?: string[]
 }
 
 interface ProductFormProps {
@@ -46,6 +47,10 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
   const [loading, setLoading] = useState(false)
   const [categories, setCategories] = useState<string[]>([])
   const [categoryOpen, setCategoryOpen] = useState(false)
+  const [images, setImages] = useState<string[]>(product?.images || [])
+  const [uploadingImages, setUploadingImages] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [formData, setFormData] = useState<Product>(
     product || {
       productName: '',
@@ -59,12 +64,18 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
       wholeSale: 0,
       description: '',
       stock: 0,
+      images: [],
     }
   )
 
   useEffect(() => {
     fetchCategories()
   }, [])
+
+  // Sync images when product prop changes (e.g. switching edit targets)
+  useEffect(() => {
+    setImages(product?.images || [])
+  }, [product?._id])
 
   async function fetchCategories() {
     try {
@@ -75,6 +86,62 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
       }
     } catch (error) {
       console.error('Failed to load categories:', error)
+    }
+  }
+
+  async function uploadImages(files: FileList | File[]) {
+    // For new products, store as local previews until saved
+    if (!product?._id) {
+      const previews: string[] = []
+      for (const file of Array.from(files)) {
+        if (file.size > 2 * 1024 * 1024) { toast.error(`"${file.name}" exceeds 2MB`); continue }
+        const reader = new FileReader()
+        await new Promise<void>(res => {
+          reader.onload = () => { previews.push(reader.result as string); res() }
+          reader.readAsDataURL(file)
+        })
+      }
+      setImages(prev => [...prev, ...previews])
+      setFormData(prev => ({ ...prev, images: [...(prev.images || []), ...previews] }))
+      return
+    }
+
+    // For existing products — upload immediately
+    setUploadingImages(true)
+    try {
+      const fd = new FormData()
+      Array.from(files).forEach(f => fd.append('images', f))
+      const res = await fetch(`/api/products/${product._id}/images`, { method: 'POST', body: fd })
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error) }
+      const data = await res.json()
+      setImages(data.images)
+      toast.success('Images uploaded')
+    } catch (err: any) {
+      toast.error(err.message || 'Upload failed')
+    } finally {
+      setUploadingImages(false)
+    }
+  }
+
+  async function removeImage(index: number) {
+    if (product?._id) {
+      try {
+        const res = await fetch(`/api/products/${product._id}/images`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ index }),
+        })
+        if (!res.ok) throw new Error('Failed')
+        const data = await res.json()
+        setImages(data.images)
+        toast.success('Image removed')
+      } catch {
+        toast.error('Failed to remove image')
+      }
+    } else {
+      const updated = images.filter((_, i) => i !== index)
+      setImages(updated)
+      setFormData(prev => ({ ...prev, images: updated }))
     }
   }
 
@@ -97,7 +164,7 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
       const response = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, images }),
       })
 
       if (!response.ok) {
@@ -297,6 +364,69 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             disabled={loading}
             className="min-h-[60px]"
           />
+        </div>
+
+        {/* ── Image Upload ── */}
+        <div className="col-span-3 space-y-2">
+          <Label>Product Images <span className="text-xs text-muted-foreground">(max 2MB each)</span></Label>
+
+          {/* Drop zone */}
+          <div
+            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={e => {
+              e.preventDefault(); setDragOver(false)
+              if (e.dataTransfer.files.length) uploadImages(e.dataTransfer.files)
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            className={cn(
+              'border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors',
+              dragOver ? 'border-green-500 bg-green-50' : 'border-gray-300 hover:border-gray-400'
+            )}
+          >
+            {uploadingImages ? (
+              <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
+                <Loader2 className="h-4 w-4 animate-spin" /> Uploading…
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-1 text-sm text-gray-500">
+                <ImagePlus className="h-8 w-8 text-gray-400" />
+                <span>Drop images here or click to browse</span>
+                <span className="text-xs">PNG, JPG, WEBP</span>
+              </div>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={e => { if (e.target.files?.length) uploadImages(e.target.files); e.target.value = '' }}
+          />
+
+          {/* Preview grid */}
+          {images.length > 0 && (
+            <div className="grid grid-cols-4 gap-2 mt-2">
+              {images.map((src, i) => (
+                <div key={i} className="relative group aspect-square rounded-lg overflow-hidden border border-gray-200">
+                  <img src={src} alt={`Product image ${i + 1}`} className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => removeImage(i)}
+                    className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                  {i === 0 && (
+                    <span className="absolute bottom-1 left-1 bg-green-600 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded">
+                      Main
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

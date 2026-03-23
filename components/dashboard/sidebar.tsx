@@ -16,7 +16,8 @@ import {
   Settings,
   Receipt,
   UtensilsCrossed,
-  Wine,           // ← Bar Tabs icon
+  Wine,
+  BedDouble,      // ← Rental Services icon
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -28,6 +29,7 @@ const menuItems = [
   { icon: Wine,            label: 'Bar',        href: '/dashboard/bar',       adminOnly: false, permission: null,                  featureFlag: 'barEnabled' },
   { icon: Package,         label: 'Inventory',       href: '/dashboard/inventory', adminOnly: false, permission: 'canViewInventory',     featureFlag: null        },
   { icon: BarChart3,       label: 'Reports',         href: '/dashboard/reports',   adminOnly: false, permission: 'canViewSalesReports',  featureFlag: null        },
+  { icon: BedDouble,       label: 'Rental Services', href: '/dashboard/rental-services', adminOnly: false, permission: null,            featureFlag: null        },
   { icon: Receipt,         label: 'Expenses',        href: '/dashboard/expenses',  adminOnly: false, permission: null,                  featureFlag: null        },
   { icon: Users,           label: 'Staff',           href: '/dashboard/staff',     adminOnly: true,  permission: null,                  featureFlag: null        },
   { icon: Settings,        label: 'Settings',        href: '/dashboard/settings',  adminOnly: true,  permission: null,                  featureFlag: null        },
@@ -39,16 +41,29 @@ type FeatureFlags = {
   barEnabled: boolean
 }
 
+const FEATURES_CACHE_KEY = 'sidebar_features'
+
+function readCachedFeatures(): FeatureFlags {
+  try {
+    const raw = localStorage.getItem(FEATURES_CACHE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return { kdsEnabled: true, barEnabled: true }
+}
+
 export function Sidebar() {
   const pathname = usePathname()
-  const [isOpen, setIsOpen]         = useState(false)
-  const [mounted, setMounted]       = useState(false)
-  const [userType, setUserType]     = useState<'user' | 'staff' | null>(null)
-  const [shopName, setShopName]     = useState<string>('My Shop')
+  const [isOpen, setIsOpen]           = useState(false)
+  const [mounted, setMounted]         = useState(false)
+  const [userType, setUserType]       = useState<'user' | 'staff' | null>(null)
+  const [shopName, setShopName]       = useState<string>('My Shop')
   const [permissions, setPermissions] = useState<Record<string, boolean>>({})
-  const [features, setFeatures]     = useState<FeatureFlags>({ kdsEnabled: false, barEnabled: false })
+  // Initialise from cache so flags are correct immediately on refresh
+  const [features, setFeatures]       = useState<FeatureFlags>({ kdsEnabled: true, barEnabled: true })
 
   useEffect(() => {
+    // Hydrate from cache before any network call
+    setFeatures(readCachedFeatures())
     setMounted(true)
 
     function loadUser() {
@@ -68,12 +83,18 @@ export function Sidebar() {
 
     function loadFeatures() {
       fetch('/api/settings')
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) throw new Error('settings fetch failed')
+          return res.json()
+        })
         .then(data => {
-          setFeatures({
+          const flags: FeatureFlags = {
             kdsEnabled: data.settings?.features?.kdsEnabled === true,
             barEnabled: data.settings?.features?.barEnabled === true,
-          })
+          }
+          setFeatures(flags)
+          // Persist so next refresh is instant
+          try { localStorage.setItem(FEATURES_CACHE_KEY, JSON.stringify(flags)) } catch {}
         })
         .catch(() => {})
     }
@@ -81,25 +102,20 @@ export function Sidebar() {
     loadUser()
     loadFeatures()
 
-    // Re-fetch feature flags whenever the tab regains focus
-    // so toggling in Settings is reflected immediately without a reload
     const onFocus = () => loadFeatures()
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') loadFeatures()
     })
 
-    // Instant same-tab signal from settings page
     const onSettingsUpdated = () => loadFeatures()
     window.addEventListener('settings_updated', onSettingsUpdated)
 
-    // Cross-tab signal via localStorage
     const onStorage = (e: StorageEvent) => {
       if (e.key === 'settings_updated') loadFeatures()
     }
     window.addEventListener('storage', onStorage)
 
-    // Poll every 5 s as a final fallback
     const interval = setInterval(loadFeatures, 5000)
 
     return () => {
@@ -179,7 +195,9 @@ export function Sidebar() {
             ) : (
               visibleMenuItems.map((item) => {
                 const Icon    = item.icon
-                const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                const isActive = item.href === '/dashboard'
+                  ? pathname === '/dashboard'
+                  : pathname === item.href || pathname.startsWith(item.href + '/')
                 const showDot  = liveItems.has(item.href) && isActive
 
                 return (

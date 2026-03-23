@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Search, ChevronLeft, ChevronRight, UtensilsCrossed, ShoppingCart, Beer } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, UtensilsCrossed, ShoppingCart, Beer, BedDouble, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { OrderDetailsDialog } from '@/components/orders/order-details-dialog'
@@ -29,11 +29,22 @@ interface Sale {
   discount: number
   paymentMethod: string
   status?: 'completed' | 'pending' | 'held' | 'refunded'
-  source?: 'pos' | 'bar' | 'kds'
+  source?: 'pos' | 'bar' | 'kds' | 'rental'
   createdAt: string
   notes?: string
   staffId?: {
     name: string
+  }
+  rentalMeta?: {
+    serviceName?: string
+    serviceCategory?: string
+    pricingLabel?: string
+    startTime?: string
+    endTime?: string
+    guestCount?: number
+    deposit?: number
+    customerName?: string
+    customerPhone?: string
   }
 }
 
@@ -69,34 +80,27 @@ export default function OrdersPage() {
 }
 
 function OrdersPageContent() {
-  const [kdsEnabled, setKdsEnabled] = useState(false)
-
-  useEffect(() => {
-    fetch('/api/settings')
-      .then(r => r.json())
-      .then(d => setKdsEnabled(d.settings?.features?.kdsEnabled === true))
-      .catch(() => {})
-  }, [])
-
   return (
     <div className="space-y-4">
       <Tabs defaultValue="sales">
         <TabsList>
           <TabsTrigger value="sales" className="flex items-center gap-2">
-            <ShoppingCart className="h-4 w-4" /> Sales Orders
+            Sales Orders
           </TabsTrigger>
           <TabsTrigger value="bar" className="flex items-center gap-2">
-            <Beer className="h-4 w-4" /> Bar Orders
+             Bar Orders
           </TabsTrigger>
-          {kdsEnabled && (
-            <TabsTrigger value="kitchen" className="flex items-center gap-2">
-              <UtensilsCrossed className="h-4 w-4" /> Kitchen Orders
-            </TabsTrigger>
-          )}
+          <TabsTrigger value="rental" className="flex items-center gap-2">
+            Rental Orders
+          </TabsTrigger>
+          <TabsTrigger value="kitchen" className="flex items-center gap-2">
+            Kitchen Orders
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="sales" className="mt-4"><SalesOrdersTab source="pos" /></TabsContent>
         <TabsContent value="bar" className="mt-4"><SalesOrdersTab source="bar" /></TabsContent>
-        {kdsEnabled && <TabsContent value="kitchen" className="mt-4"><KitchenOrdersTab /></TabsContent>}
+        <TabsContent value="rental" className="mt-4"><SalesOrdersTab source="rental" /></TabsContent>
+        <TabsContent value="kitchen" className="mt-4"><KitchenOrdersTab /></TabsContent>
       </Tabs>
     </div>
   )
@@ -124,7 +128,7 @@ function StatusDot({ status }: { status: 'completed' | 'pending' | 'held' | 'ref
 }
 
 // ── Sales Orders Tab ──────────────────────────────────────────────────────────
-function SalesOrdersTab({ source }: { source: 'pos' | 'bar' }) {
+function SalesOrdersTab({ source }: { source: 'pos' | 'bar' | 'rental' }) {
   const [sales, setSales]           = useState<Sale[]>([])
   const [filteredSales, setFiltered] = useState<Sale[]>([])
   const [loading, setLoading]       = useState(true)
@@ -159,7 +163,7 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'bar' }) {
 
   function applyFilters() {
     let f = [...sales]
-    // Filter by source: pos = no source (legacy) or source === 'pos'; bar = source === 'bar'
+    // Filter by source: pos = no source (legacy) or source === 'pos'; bar = source === 'bar'; rental = source === 'rental'
     if (source === 'pos') {
       f = f.filter(s => !s.source || s.source === 'pos')
     } else {
@@ -167,7 +171,9 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'bar' }) {
     }
     if (search) f = f.filter(s =>
       s._id.toLowerCase().includes(search.toLowerCase()) ||
-      s.items.some(i => (i.productId?.name || (i as any).productName || '').toLowerCase().includes(search.toLowerCase()))
+      s.items.some(i => (i.productId?.name || (i as any).productName || '').toLowerCase().includes(search.toLowerCase())) ||
+      (s.rentalMeta?.customerName || '').toLowerCase().includes(search.toLowerCase()) ||
+      (s.rentalMeta?.serviceName || '').toLowerCase().includes(search.toLowerCase())
     )
     if (dateRange.start) f = f.filter(s => new Date(s.createdAt) >= new Date(dateRange.start))
     if (dateRange.end)   f = f.filter(s => new Date(s.createdAt) <= new Date(dateRange.end + 'T23:59:59'))
@@ -194,6 +200,37 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'bar' }) {
     if (method === 'mobile_money') return 'M-Pesa'
     return method.charAt(0).toUpperCase() + method.slice(1)
   }
+
+  function exportCSV() {
+    const rows = filteredSales
+    let csv = `Order ID,Date,Time,Amount (KES),Payment,Status,Customer,Notes\n`
+    rows.forEach(s => {
+      const customer = s.rentalMeta?.customerName || (s.staffId as any)?.name || ''
+      csv += [
+        `"${s._id}"`,
+        fmtOrderDate(s.createdAt),
+        fmtOrderTime(s.createdAt),
+        s.total.toFixed(2),
+        payLabel(s.paymentMethod),
+        s.status || 'completed',
+        `"${customer}"`,
+        `"${(s.notes || '').replace(/"/g, '""')}"`,
+      ].join(',') + '\n'
+    })
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${source}-orders-${dateRange.start || 'all'}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // Summary totals for filtered view
+  const summaryTotal   = filteredSales.reduce((s, x) => s + x.total, 0)
+  const summaryByCash  = filteredSales.filter(s => s.paymentMethod === 'cash').reduce((s, x) => s + x.total, 0)
+  const summaryByMpesa = filteredSales.filter(s => s.paymentMethod === 'mobile_money').reduce((s, x) => s + x.total, 0)
+  const summaryByCard  = filteredSales.filter(s => s.paymentMethod === 'card').reduce((s, x) => s + x.total, 0)
 
   const paginated  = filteredSales.slice((currentPage - 1) * PER_PAGE, currentPage * PER_PAGE)
   const totalPages = Math.ceil(filteredSales.length / PER_PAGE)
@@ -226,7 +263,23 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'bar' }) {
         <input type="date" value={dateRange.end}
           onChange={e => setDateRange(p => ({ ...p, end: e.target.value }))}
           className="px-2 py-2 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-green-500" />
+
+        <button onClick={exportCSV}
+          className="flex items-center gap-1 px-3 py-2 text-sm border border-gray-300 rounded bg-white hover:bg-gray-50 transition-colors text-gray-700">
+          <Download className="h-4 w-4" /> CSV
+        </button>
       </div>
+
+      {/* ── Summary bar ── */}
+      {!loading && filteredSales.length > 0 && (
+        <div className="flex flex-wrap gap-4 bg-green-50 border border-green-200 rounded px-4 py-2 text-sm">
+          <span className="text-gray-700">Orders: <strong>{filteredSales.length}</strong></span>
+          <span className="text-gray-900">Total: <strong>KES {summaryTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong></span>
+          {summaryByCash  > 0 && <span className="text-gray-600">Cash: <strong>KES {summaryByCash.toLocaleString()}</strong></span>}
+          {summaryByMpesa > 0 && <span className="text-blue-700">M-Pesa: <strong>KES {summaryByMpesa.toLocaleString()}</strong></span>}
+          {summaryByCard  > 0 && <span className="text-purple-700">Card: <strong>KES {summaryByCard.toLocaleString()}</strong></span>}
+        </div>
+      )}
 
       {/* ── Table — flat, no card wrapper ── */}
       <div className="bg-white">
@@ -262,6 +315,9 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'bar' }) {
                   <span className="text-sm text-gray-900 truncate">{orderNum}</span>
                   {staffName && (
                     <span className="text-xs text-gray-400 shrink-0">{staffName}</span>
+                  )}
+                  {sale.rentalMeta?.customerName && (
+                    <span className="text-xs text-blue-500 shrink-0">{sale.rentalMeta.customerName}</span>
                   )}
                 </div>
                 {/* Time */}
@@ -420,7 +476,6 @@ function KitchenOrdersTab() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <UtensilsCrossed className="h-4 w-4 text-green-600" />
             Kitchen Orders ({filtered.length})
           </CardTitle>
         </CardHeader>
@@ -428,7 +483,6 @@ function KitchenOrdersTab() {
           {loading ? <div className="text-center py-8">Loading...</div>
           : filtered.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              <UtensilsCrossed className="h-10 w-10 mx-auto mb-3 opacity-30" />
               No kitchen orders found
             </div>
           ) : (
@@ -469,7 +523,7 @@ function KitchenOrdersTab() {
                         ))}
                         {order.specialInstructions && (
                           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mt-2">
-                            📝 {order.specialInstructions}
+                             {order.specialInstructions}
                           </p>
                         )}
                         {order.collectedAt && (

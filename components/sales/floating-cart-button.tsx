@@ -1,8 +1,5 @@
 'use client'
 
-import { ShoppingCart } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-
 interface FloatingCartButtonProps {
   itemCount: number
   onClick: () => void
@@ -12,48 +9,62 @@ export function FloatingCartButton({ itemCount, onClick }: FloatingCartButtonPro
   return (
     <button
       onClick={onClick}
-      className="fixed bottom-20 right-6 z-40 md:hidden"
-      aria-label={`Shopping cart with ${itemCount} items`}
+      aria-label={`Cart — ${itemCount} item${itemCount !== 1 ? 's' : ''}`}
+      className="fixed bottom-20 right-5 z-40 md:hidden focus:outline-none"
     >
-      {/* Red Cart SVG */}
-      <div className="relative flex flex-col items-center">
-        {/* Badge with item count - Above the cart */}
+      <div className="relative">
+        {/* Glow ring when cart has items */}
         {itemCount > 0 && (
-          <Badge
-            className="absolute -top-6 left-1/2 transform -translate-x-1/2 bg-green-600 text-white hover:bg-green-700 font-bold text-xs w-6 h-6 flex items-center justify-center p-0 rounded-full"
-          >
-            {itemCount > 99 ? '99+' : itemCount}
-          </Badge>
+          <span className="absolute inset-0 rounded-2xl bg-emerald-400 opacity-20 animate-ping" />
         )}
 
-        <svg
-          width="56"
-          height="56"
-          viewBox="0 0 56 56"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-          className="drop-shadow-lg"
+        {/* Main pill button */}
+        <div
+          className="relative flex items-center gap-2.5 px-4 py-3 rounded-2xl text-white"
+          style={{
+            background: 'linear-gradient(135deg, #059669 0%, #10b981 60%, #34d399 100%)',
+            boxShadow: '0 8px 24px rgba(16,185,129,0.45), 0 2px 8px rgba(0,0,0,0.15)',
+          }}
         >
-          {/* Red background circle */}
-          <circle cx="28" cy="28" r="28" fill="#ef4444" />
-          
-          {/* Cart icon */}
-          <g transform="translate(28, 28)">
-            {/* Cart body */}
+          {/* Shopping bag SVG */}
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            {/* Bag handle */}
             <path
-              d="M-12 -4L-10 8C-10 9.1 -9.1 10 -8 10H10C11.1 10 12 9.1 12 8L14 -4M-12 -4H14M-4 10V14M4 10V14"
+              d="M8 10V7a4 4 0 0 1 8 0v3"
               stroke="white"
-              strokeWidth="1.5"
+              strokeWidth="1.8"
               strokeLinecap="round"
               strokeLinejoin="round"
-              fill="none"
             />
-            
-            {/* Wheels */}
-            <circle cx="-4" cy="16" r="1.5" fill="white" />
-            <circle cx="4" cy="16" r="1.5" fill="white" />
-          </g>
-        </svg>
+            {/* Bag body */}
+            <path
+              d="M5 10h14l-1.5 9.5a2 2 0 0 1-2 1.5H8.5a2 2 0 0 1-2-1.5L5 10z"
+              fill="rgba(255,255,255,0.2)"
+              stroke="white"
+              strokeWidth="1.8"
+              strokeLinejoin="round"
+            />
+            {/* Subtle shine line on bag */}
+            <path
+              d="M9 14h6"
+              stroke="rgba(255,255,255,0.6)"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
+          </svg>
+
+          {/* Count */}
+          {itemCount > 0 && (
+            <span className="text-sm font-bold leading-none tabular-nums">
+              {itemCount > 99 ? '99+' : itemCount}
+            </span>
+          )}
+        </div>
+
+        {/* Dot indicator when empty */}
+        {itemCount === 0 && (
+          <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-gray-300 border-2 border-white" />
+        )}
       </div>
     </button>
   )

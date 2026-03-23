@@ -30,6 +30,7 @@ interface Product {
   buyingPrice: number
   sellingPrice: number
   description?: string
+  images?: string[]
 }
 
 export default function InventoryPage() {
@@ -215,6 +216,7 @@ function InventoryPageContent() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Image</TableHead>
                     <TableHead>Item</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Variant</TableHead>
@@ -240,6 +242,16 @@ function InventoryPageContent() {
                         setIsViewOpen(true)
                       }}
                     >
+                      <TableCell>
+                        {product.images?.[0] ? (
+                          <img src={product.images[0]} alt={product.productName}
+                            className="w-10 h-10 rounded object-cover border border-gray-200" />
+                        ) : (
+                          <div className="w-10 h-10 rounded bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-300 text-xs">
+                            No img
+                          </div>
+                        )}
+                      </TableCell>
                       <TableCell className="font-medium">{product.productName}</TableCell>
                       <TableCell>{product.category}</TableCell>
                       <TableCell>{(product as any).variant || '-'}</TableCell>
@@ -296,7 +308,7 @@ function InventoryPageContent() {
           setSelectedProduct(null)
         }
       }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {selectedProduct ? 'Edit Product' : 'Create Product'}
@@ -324,7 +336,7 @@ function InventoryPageContent() {
           setSelectedProduct(null)
         }
       }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Product Details</DialogTitle>
             <DialogDescription>
@@ -333,6 +345,17 @@ function InventoryPageContent() {
           </DialogHeader>
           {selectedProduct && (
             <div className="space-y-6">
+              {/* Image gallery */}
+              {selectedProduct.images && selectedProduct.images.length > 0 && (
+                <div className="grid grid-cols-4 gap-2">
+                  {selectedProduct.images.map((src, i) => (
+                    <div key={i} className={`rounded-lg overflow-hidden border border-gray-200 ${i === 0 ? 'col-span-2 row-span-2' : ''}`}>
+                      <img src={src} alt={`${selectedProduct.productName} ${i + 1}`}
+                        className="w-full h-full object-cover aspect-square" />
+                    </div>
+                  ))}
+                </div>
+              )}
               {/* Product Information Grid */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
