@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { resolveMediaUrl } from '@/lib/media-url'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface GeneralSettings {
@@ -223,13 +224,22 @@ export default function SettingsPage() {
     }
   }
 
-  function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    if (file.size > 1024 * 1024) { toast.error('Image must be under 1MB'); return }
-    const reader = new FileReader()
-    reader.onload = ev => upGeneral({ logo: ev.target?.result as string })
-    reader.readAsDataURL(file)
+    try {
+      const fd = new FormData()
+      fd.append('media', file)
+      const res = await fetch('/api/media/upload', { method: 'POST', body: fd })
+      if (!res.ok) throw new Error((await res.json()).error)
+      const { url } = await res.json()
+      upGeneral({ logo: url })
+      // Auto-save so logo persists immediately
+      await autoSave({ general: { logo: url } })
+      toast.success('Logo updated')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to upload logo')
+    }
   }
 
   if (loading) return (
@@ -311,7 +321,7 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 rounded-full bg-green-100 border-2 border-green-300 flex items-center justify-center overflow-hidden shrink-0">
                       {general.logo
-                        ? <img src={general.logo} alt="logo" className="w-full h-full object-cover" />
+                        ? <img src={resolveMediaUrl(general.logo)} alt="logo" className="w-full h-full object-cover" />
                         : <span className="text-green-700 font-bold text-lg">{general.shopName?.charAt(0)?.toUpperCase() || 'S'}</span>
                       }
                     </div>

@@ -348,3 +348,10 @@ export async function deleteCachedCategory(id: string) {
   const database = await initDB()
   await database.delete('categories', id)
 }
+
+// Barcode lookup — searches cached products by barcode field
+export async function getProductByBarcode(barcode: string): Promise<any | undefined> {
+  const database = await initDB()
+  const all = await database.getAll('products')
+  return all.find((p) => p.barcode && p.barcode === barcode)
+}

@@ -20,10 +20,11 @@ import {
   BedDouble,      // ← Rental Services icon
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { resolveMediaUrl } from '@/lib/media-url'
 
 const menuItems = [
   { icon: LayoutDashboard, label: 'Dashboard',       href: '/dashboard',           adminOnly: false, permission: null,                  featureFlag: null        },
-  { icon: ShoppingCart,    label: 'Make Order Sale', href: '/dashboard/sales',     adminOnly: false, permission: 'canMakeSales',         featureFlag: null        },
+  { icon: ShoppingCart,    label: 'Make Sale', href: '/dashboard/sales',     adminOnly: false, permission: 'canMakeSales',         featureFlag: null        },
   { icon: FileText,        label: 'Orders',          href: '/dashboard/orders',    adminOnly: false, permission: 'canViewOrders',        featureFlag: null        },
   { icon: UtensilsCrossed, label: 'Kitchen Display', href: '/dashboard/kds',       adminOnly: false, permission: null,                  featureFlag: 'kdsEnabled' },
   { icon: Wine,            label: 'Bar',        href: '/dashboard/bar',       adminOnly: false, permission: null,                  featureFlag: 'barEnabled' },
@@ -42,6 +43,7 @@ type FeatureFlags = {
 }
 
 const FEATURES_CACHE_KEY = 'sidebar_features'
+const LOGO_CACHE_KEY     = 'sidebar_logo'
 
 function readCachedFeatures(): FeatureFlags {
   try {
@@ -57,13 +59,14 @@ export function Sidebar() {
   const [mounted, setMounted]         = useState(false)
   const [userType, setUserType]       = useState<'user' | 'staff' | null>(null)
   const [shopName, setShopName]       = useState<string>('My Shop')
+  const [shopLogo, setShopLogo]       = useState<string>('')
   const [permissions, setPermissions] = useState<Record<string, boolean>>({})
-  // Initialise from cache so flags are correct immediately on refresh
   const [features, setFeatures]       = useState<FeatureFlags>({ kdsEnabled: true, barEnabled: true })
 
   useEffect(() => {
     // Hydrate from cache before any network call
     setFeatures(readCachedFeatures())
+    try { const l = localStorage.getItem(LOGO_CACHE_KEY); if (l) setShopLogo(l) } catch {}
     setMounted(true)
 
     function loadUser() {
@@ -93,8 +96,11 @@ export function Sidebar() {
             barEnabled: data.settings?.features?.barEnabled === true,
           }
           setFeatures(flags)
-          // Persist so next refresh is instant
           try { localStorage.setItem(FEATURES_CACHE_KEY, JSON.stringify(flags)) } catch {}
+
+          const logo = data.settings?.general?.logo || ''
+          setShopLogo(logo)
+          try { localStorage.setItem(LOGO_CACHE_KEY, logo) } catch {}
         })
         .catch(() => {})
     }
@@ -172,8 +178,11 @@ export function Sidebar() {
 
           {/* Shop branding */}
           <div className="flex flex-col items-center gap-3 mb-8 mt-12 lg:mt-0">
-            <div className="w-16 h-16 rounded-full bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] flex items-center justify-center font-bold text-2xl">
-              {shopName.charAt(0).toUpperCase()}
+            <div className="w-16 h-16 rounded-full bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] flex items-center justify-center font-bold text-2xl overflow-hidden">
+              {shopLogo
+                ? <img src={resolveMediaUrl(shopLogo)} alt={shopName} className="w-full h-full object-cover" />
+                : shopName.charAt(0).toUpperCase()
+              }
             </div>
             <div className="text-center">
               <h2 className="font-bold text-lg">{shopName}</h2>
@@ -184,7 +193,7 @@ export function Sidebar() {
           </div>
 
           {/* Nav items */}
-          <nav className="space-y-1 flex-1 overflow-y-auto">
+          <nav className="space-y-1 flex-1 overflow-y-auto scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             {!mounted ? (
               // Skeleton during SSR / hydration to avoid layout shift
               <div className="space-y-2">

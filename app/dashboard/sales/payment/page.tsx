@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -279,6 +280,20 @@ function PaymentPageContent() {
     router.push('/dashboard/sales')
   }
 
+  function holdOrder() {
+    if (cart.length === 0) return
+    const held = JSON.parse(localStorage.getItem('heldOrders') || '[]')
+    held.push({
+      id: `hold-${Date.now()}`,
+      cart,
+      cartDiscount,
+      heldAt: new Date().toISOString(),
+    })
+    localStorage.setItem('heldOrders', JSON.stringify(held))
+    sessionStorage.removeItem('pendingSale')
+    router.push('/dashboard/sales')
+  }
+
   const subtotal = cart.reduce(
     (sum, item) => sum + item.sellingPrice * item.quantity - item.discount,
     0
@@ -416,6 +431,7 @@ function PaymentPageContent() {
             <Button
               variant="secondary"
               disabled={processing}
+              onClick={holdOrder}
               className="w-full"
             >
               Hold Order
@@ -540,6 +556,7 @@ function PaymentPageContent() {
                 Balance - KES {Math.max(0, total).toFixed(2)}
               </DialogTitle>
             </div>
+            <DialogDescription className="sr-only">Select a payment method to complete the sale.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">

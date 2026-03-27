@@ -1,11 +1,9 @@
 import { connectDB } from '@/lib/db'
 import Product from '@/lib/models/Product'
 import { getAuthPayload } from '@/lib/jwt'
+import { uploadMediaFile } from '@/lib/media-upload'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
-
-// Max ~2MB per image as base64
-const MAX_SIZE = 2 * 1024 * 1024
 
 export async function POST(
   request: NextRequest,
@@ -23,29 +21,23 @@ export async function POST(
     if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
 
     const formData = await request.formData()
-    const files = formData.getAll('images') as File[]
-
+    const files = formData.getAll('media') as File[]
     if (!files.length) return NextResponse.json({ error: 'No images provided' }, { status: 400 })
 
-    const newImages: string[] = []
+    const urls: string[] = []
     for (const file of files) {
-      if (file.size > MAX_SIZE) {
-        return NextResponse.json({ error: `Image "${file.name}" exceeds 2MB limit` }, { status: 400 })
-      }
-      const buffer = await file.arrayBuffer()
-      const base64 = Buffer.from(buffer).toString('base64')
-      const dataUrl = `data:${file.type};base64,${base64}`
-      newImages.push(dataUrl)
+      const result = await uploadMediaFile(file)
+      urls.push(result.path)
     }
 
-    product.images = [...(product.images || []), ...newImages]
+    product.images = [...(product.images || []), ...urls]
     product.updatedAt = new Date()
     await product.save()
 
     return NextResponse.json({ images: product.images })
-  } catch (error) {
+  } catch (error: any) {
     console.error('[Product Images POST]', error)
-    return NextResponse.json({ error: 'Failed to upload images' }, { status: 500 })
+    return NextResponse.json({ error: error.message ?? 'Failed to upload images' }, { status: 500 })
   }
 }
 

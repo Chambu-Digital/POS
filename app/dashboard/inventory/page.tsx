@@ -21,6 +21,7 @@ import { PermissionGuard } from '@/components/auth/permission-guard'
 import { ProductForm } from '@/components/inventory/product-form'
 import { ImportModal } from '@/components/inventory/import-modal'
 import { CategoryManager } from '@/components/inventory/category-manager'
+import { ProductImage } from '@/components/ui/product-image'
 
 interface Product {
   _id: string
@@ -243,14 +244,11 @@ function InventoryPageContent() {
                       }}
                     >
                       <TableCell>
-                        {product.images?.[0] ? (
-                          <img src={product.images[0]} alt={product.productName}
-                            className="w-10 h-10 rounded object-cover border border-gray-200" />
-                        ) : (
-                          <div className="w-10 h-10 rounded bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-300 text-xs">
-                            No img
-                          </div>
-                        )}
+                        <ProductImage
+                          src={product.images?.[0]}
+                          alt={product.productName}
+                          size="sm"
+                        />
                       </TableCell>
                       <TableCell className="font-medium">{product.productName}</TableCell>
                       <TableCell>{product.category}</TableCell>
@@ -350,8 +348,12 @@ function InventoryPageContent() {
                 <div className="grid grid-cols-4 gap-2">
                   {selectedProduct.images.map((src, i) => (
                     <div key={i} className={`rounded-lg overflow-hidden border border-gray-200 ${i === 0 ? 'col-span-2 row-span-2' : ''}`}>
-                      <img src={src} alt={`${selectedProduct.productName} ${i + 1}`}
-                        className="w-full h-full object-cover aspect-square" />
+                      <ProductImage
+                        src={src}
+                        alt={`${selectedProduct.productName} ${i + 1}`}
+                        size="lg"
+                        className="aspect-square w-full h-full"
+                      />
                     </div>
                   ))}
                 </div>

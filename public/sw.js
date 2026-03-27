@@ -1,11 +1,12 @@
 // Chambu Digital POS Service Worker
 // Handles offline caching, background sync, and automatic updates
 
-// Generate cache version from timestamp to ensure fresh caches on each deployment
 const CACHE_VERSION = 'chambu-pos-' + (self.registration?.scope || 'v1')
 const CACHE_NAME = CACHE_VERSION + '-precache'
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime'
 const API_CACHE = CACHE_VERSION + '-api'
+// Image cache is stable across deployments — product images shouldn't be re-fetched on every deploy
+const IMAGE_CACHE = 'chambu-pos-images-v1'
 
 // Assets to cache on install (excluding large images)
 const PRECACHE_ASSETS = [
@@ -80,7 +81,26 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Strategy 2: Cache-first for static assets (JS, CSS, images)
+  // Strategy 2: Cache-first for product images from fecy.co.ke (cross-origin)
+  // These are cached permanently so they work offline after first load
+  if (url.hostname === 'fecy.co.ke') {
+    event.respondWith(
+      caches.open(IMAGE_CACHE).then((cache) => {
+        return cache.match(request).then((cached) => {
+          if (cached) return cached
+          return fetch(request).then((response) => {
+            if (response && response.status === 200) {
+              cache.put(request, response.clone())
+            }
+            return response
+          }).catch(() => cached || new Response('', { status: 404 }))
+        })
+      })
+    )
+    return
+  }
+
+  // Strategy 3: Cache-first for static assets (JS, CSS, local images)
   if (
     url.pathname.match(/\.(js|css|woff2|woff|ttf|eot|svg|png|jpg|jpeg|gif|webp)$/i) &&
     !url.pathname.includes('placeholder')
@@ -110,7 +130,7 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Strategy 3: Network-first for API calls
+  // Strategy 4: Network-first for API calls
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(request)

@@ -27,6 +27,12 @@ import {
   isOnline,
 } from '@/lib/indexeddb'
 import { initAutoSync } from '@/lib/sync'
+import { useBarcodeScanner } from '@/hooks/use-barcode-scanner'
+import { ScannerFeedback } from '@/components/barcode/scanner-feedback'
+import { ManualBarcodeEntry } from '@/components/barcode/manual-barcode-entry'
+import { HeldOrders } from '@/components/sales/held-orders'
+import { ProductImage } from '@/components/ui/product-image'
+import type { ScanResult } from '@/lib/barcode-scanner/types'
 
 interface Product {
   _id: string
@@ -37,6 +43,7 @@ interface Product {
   brand?: string
   model?: string
   variant?: string
+  barcode?: string
   images?: string[]
 }
 
@@ -63,22 +70,66 @@ function SalesPageContent() {
   const router = useRouter()
   const [products, setProducts] = useState<Product[]>([])
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
-  const [cart, setCart] = useState<CartItem[]>([])
+  const [cart, setCart] = useState<CartItem[]>(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const saved = sessionStorage.getItem('activeCart')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [categories, setCategories] = useState<string[]>([])
-  const [cartDiscount, setCartDiscount] = useState(0)
+  const [cartDiscount, setCartDiscount] = useState<number>(() => {
+    if (typeof window === 'undefined') return 0
+    try {
+      const saved = sessionStorage.getItem('activeCartDiscount')
+      return saved ? parseFloat(saved) : 0
+    } catch { return 0 }
+  })
   const [loading, setLoading] = useState(true)
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
   const isOffline = useOffline()
   const cartRef = useRef<HTMLDivElement>(null)
   const productsRef = useRef<HTMLDivElement>(null)
+  const productsRef2 = useRef<Product[]>([])
+
+  // Keep a ref to products so the scanner callback always has the latest list
+  useEffect(() => { productsRef2.current = products }, [products])
+
+  // ── Barcode Scanner ──────────────────────────────────────────────────────────
+  function handleScanResult(result: ScanResult) {
+    if (result.action === 'not_found' || !result.product) {
+      toast.error(`Barcode not found: ${result.input.code}`)
+      return
+    }
+    // Find the product in the local list (may have stock info)
+    const local = productsRef2.current.find((p) => p._id === result.product._id) ?? result.product
+    addToCart(local)
+  }
+
+  const { state: scannerState, lastResult, submitManual, enterEditing, exitEditing } =
+    useBarcodeScanner({
+      context: 'sales',
+      onResult: handleScanResult,
+    })
+  // ────────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    sessionStorage.removeItem('sessionProducts') // always fetch fresh so images are current
     fetchProducts()
     fetchUserInfo()
     initAutoSync()
   }, [])
+
+  // Persist cart to sessionStorage on every change so navigation doesn't wipe it
+  useEffect(() => {
+    sessionStorage.setItem('activeCart', JSON.stringify(cart))
+  }, [cart])
+
+  useEffect(() => {
+    sessionStorage.setItem('activeCartDiscount', String(cartDiscount))
+  }, [cartDiscount])
 
   useEffect(() => {
     filterProducts()
@@ -221,6 +272,11 @@ function SalesPageContent() {
     setFilteredProducts(filtered)
   }
 
+  // Structured name: [Variant] [Brand] [ProductName]
+  function formatProductName(p: { productName: string; brand?: string; variant?: string }) {
+    return [p.variant, p.brand, p.productName].filter(Boolean).join(' ')
+  }
+
   function addToCart(product: Product) {
     if (product.stock <= 0) {
       toast.error('Product out of stock')
@@ -303,13 +359,12 @@ function SalesPageContent() {
       return
     }
 
-    // Save cart data to sessionStorage
-    sessionStorage.setItem('pendingSale', JSON.stringify({
-      cart,
-      cartDiscount
-    }))
+    // Save cart data to sessionStorage for payment page
+    sessionStorage.setItem('pendingSale', JSON.stringify({ cart, cartDiscount }))
+    // Clear the active cart — payment page takes over from here
+    sessionStorage.removeItem('activeCart')
+    sessionStorage.removeItem('activeCartDiscount')
 
-    // Redirect to payment page
     router.push('/dashboard/sales/payment')
   }
 
@@ -361,9 +416,15 @@ function SalesPageContent() {
           </Alert>
         )}
 
-        <div>
-          <h1 className="text-3xl font-bold">Make Sale</h1>
-          <p className="text-muted-foreground">Search and add products to cart</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">Make Sale</h1>
+            <p className="text-muted-foreground">Search and add products to cart</p>
+          </div>
+          <HeldOrders onRecall={(order) => {
+            setCart(order.cart)
+            setCartDiscount(order.cartDiscount)
+          }} />
         </div>
 
         {/* Search and Filter */}
@@ -374,6 +435,8 @@ function SalesPageContent() {
               placeholder="Search by name, brand, model, variant..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onFocus={enterEditing}
+              onBlur={exitEditing}
               className="pl-10"
             />
           </div>
@@ -392,6 +455,13 @@ function SalesPageContent() {
           </Select>
         </div>
 
+        {/* Manual barcode entry */}
+        <ManualBarcodeEntry
+          onSubmit={submitManual}
+          onFocus={enterEditing}
+          onBlur={exitEditing}
+        />
+
         {/* Products Grid */}
         <div className="flex-1 overflow-y-auto">
           {filteredProducts.length === 0 ? (
@@ -399,58 +469,44 @@ function SalesPageContent() {
               No products found
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {filteredProducts.map((product) => (
                 <Card
                   key={product._id}
-                  className="hover:shadow-lg hover:ring-2 hover:ring-green-500 transition-all cursor-pointer"
+                  className="hover:shadow-md hover:ring-2 hover:ring-green-500 transition-all cursor-pointer"
                   onClick={() => addToCart(product)}
                 >
-                  <CardContent className="p-4">
-                    {/* Product image */}
-                    {product.images?.[0] && (
-                      <div className="w-full h-32 rounded-md overflow-hidden mb-3 bg-gray-100">
-                        <img
-                          src={product.images[0]}
-                          alt={product.productName}
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                    )}
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-sm">{product.productName}</h3>
-                        <div className="space-y-0.5 mt-1">
-                          {product.brand && (
-                            <p className="text-xs text-muted-foreground">
-                              <span className="font-medium">Brand:</span> {product.brand}
-                            </p>
-                          )}
-                          {product.model && (
-                            <p className="text-xs text-muted-foreground">
-                              <span className="font-medium">Model:</span> {product.model}
-                            </p>
-                          )}
-                          {product.variant && (
-                            <p className="text-xs text-muted-foreground">
-                              <span className="font-medium">Variant:</span> {product.variant}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <Badge variant={product.stock > 0 ? 'default' : 'destructive'}>
-                        {product.stock > 0 ? `${product.stock} in stock` : 'Out of stock'}
-                      </Badge>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">{product.category}</p>
-                      <div className="flex items-center justify-between">
-                        <p className="text-lg font-bold text-primary">
+                  <CardContent className="p-3 flex gap-3 items-center">
+                    {/* Thumbnail */}
+                    <ProductImage
+                      src={product.images?.[0]}
+                      alt={formatProductName(product)}
+                      size="md"
+                      className="shrink-0"
+                    />
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm truncate leading-tight">
+                        {formatProductName(product)}
+                      </p>
+                      {product.model && (
+                        <p className="text-xs text-muted-foreground truncate">{product.model}</p>
+                      )}
+                      <div className="flex items-center justify-between mt-1">
+                        <p className="text-sm font-bold text-primary">
                           KSh {product.sellingPrice.toLocaleString()}
                         </p>
-                        <span className="text-2xl font-bold text-green-600">+</span>
+                        <Badge
+                          variant={product.stock > 0 ? 'default' : 'destructive'}
+                          className="text-[10px] px-1.5 py-0"
+                        >
+                          {product.stock > 0 ? `${product.stock}` : '0'}
+                        </Badge>
                       </div>
                     </div>
+
+                    <span className="text-xl font-bold text-green-600 shrink-0">+</span>
                   </CardContent>
                 </Card>
               ))}
@@ -490,75 +546,68 @@ function SalesPageContent() {
               <p className="text-center text-muted-foreground py-8">Cart is empty</p>
             ) : (
               cart.map((item) => (
-                <div key={item.productId} className="border rounded-lg p-3">
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex-1">
-                      <p className="font-medium text-sm">{item.productName}</p>
-                      <div className="space-y-0.5 mt-1">
-                        {item.brand && (
-                          <p className="text-xs text-muted-foreground">Brand: {item.brand}</p>
-                        )}
-                        {item.model && (
-                          <p className="text-xs text-muted-foreground">Model: {item.model}</p>
-                        )}
-                        {item.variant && (
-                          <p className="text-xs text-muted-foreground">Variant: {item.variant}</p>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        KSh {item.sellingPrice.toLocaleString()} each
+                <div key={item.productId} className="border rounded-lg p-2.5 flex gap-2.5">
+
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-start">
+                      <p className="font-medium text-sm truncate leading-tight pr-1">
+                        {formatProductName(item)}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 w-6 p-0 shrink-0"
+                        onClick={() => removeFromCart(item.productId)}
+                      >
+                        <X size={14} />
+                      </Button>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      KSh {item.sellingPrice.toLocaleString()} each
+                    </p>
+
+                    <div className="flex items-center gap-1.5 mt-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 w-6 p-0"
+                        onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                      >
+                        <Minus size={12} />
+                      </Button>
+                      <Input
+                        type="number"
+                        value={item.quantity}
+                        onChange={(e) =>
+                          updateQuantity(item.productId, parseInt(e.target.value) || 0)
+                        }
+                        onFocus={enterEditing}
+                        onBlur={exitEditing}
+                        className="w-10 h-6 text-center text-xs p-0"
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 w-6 p-0"
+                        onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                      >
+                        <Plus size={12} />
+                      </Button>
+                      <Input
+                        type="number"
+                        placeholder="Disc."
+                        value={item.discount || ''}
+                        onChange={(e) =>
+                          updateDiscount(item.productId, parseFloat(e.target.value) || 0)
+                        }
+                        className="w-16 h-6 text-xs"
+                      />
+                      <p className="text-xs font-semibold ml-auto whitespace-nowrap">
+                        KSh {(item.sellingPrice * item.quantity - item.discount).toLocaleString()}
                       </p>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => removeFromCart(item.productId)}
-                    >
-                      <X size={16} />
-                    </Button>
-                  </div>
-
-                  <div className="flex gap-2 mb-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => updateQuantity(item.productId, item.quantity - 1)}
-                    >
-                      <Minus size={14} />
-                    </Button>
-                    <Input
-                      type="number"
-                      value={item.quantity}
-                      onChange={(e) =>
-                        updateQuantity(item.productId, parseInt(e.target.value) || 0)
-                      }
-                      className="w-12 h-8 text-center"
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => updateQuantity(item.productId, item.quantity + 1)}
-                    >
-                      <Plus size={14} />
-                    </Button>
-                  </div>
-
-                  <div className="space-y-1 text-xs">
-                    <Input
-                      type="number"
-                      placeholder="Discount"
-                      value={item.discount || ''}
-                      onChange={(e) =>
-                        updateDiscount(item.productId, parseFloat(e.target.value) || 0)
-                      }
-                      className="h-7"
-                    />
-                    <p className="text-right font-semibold">
-                      KSh{' '}
-                      {(
-                        item.sellingPrice * item.quantity - item.discount
-                      ).toLocaleString()}
-                    </p>
                   </div>
                 </div>
               ))
@@ -612,6 +661,9 @@ function SalesPageContent() {
 
     {/* Floating Cart Button - Mobile Only */}
     <FloatingCartButton itemCount={cart.length} onClick={scrollToCart} />
+
+    {/* Scanner feedback overlay */}
+    <ScannerFeedback state={scannerState} lastResult={lastResult} />
 
     {/* Powered by Footer - Mobile Only */}
     <div className="fixed bottom-0 left-0 right-0 bg-white border-t md:hidden py-2 px-4 text-center text-xs text-muted-foreground">

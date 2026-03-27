@@ -4,17 +4,17 @@ import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
 
 // Default settings shape — always merged with whatever is stored
-function buildDefaults(user: { shopName?: string; email?: string }) {
+function buildDefaults(user: { shopName?: string; email?: string; phone?: string; kraPin?: string }) {
   return {
     general: {
       shopName:     user.shopName || '',
       logo:         '',
-      phone:        '',
-      email:        user.email   || '',
+      phone:        user.phone    || '',
+      email:        user.email    || '',
       country:      '',
       address:      '',
       businessType: '',
-      kraPin:       '',
+      kraPin:       user.kraPin   || '',
       currency:     'KES',
       timezone:     'Africa/Nairobi',
       receiptFooter:'Thank you for your business!',
@@ -67,20 +67,33 @@ export async function GET(request: NextRequest) {
     const userId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
 
     const user = await User.findById(userId).lean() as {
-      shopName?: string; email?: string; settings?: Record<string, unknown>
+      shopName?: string; email?: string; phone?: string; kraPin?: string
+      settings?: Record<string, unknown>
     } | null
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
     const defaults = buildDefaults(user)
     const stored   = (user.settings || {}) as Record<string, unknown>
 
-    // Deep-merge: stored values win, but missing keys fall back to defaults
+    // Deep-merge: stored non-empty values win, missing/empty keys fall back to defaults
+    function mergeSection<T extends object>(def: T, saved: Partial<T> = {}): T {
+      const result = { ...def }
+      for (const key of Object.keys(saved) as (keyof T)[]) {
+        const v = saved[key]
+        // Only override default if stored value is meaningfully set
+        if (v !== undefined && v !== null && v !== '') {
+          result[key] = v as T[keyof T]
+        }
+      }
+      return result
+    }
+
     const settings = {
-      general:       { ...defaults.general,       ...(stored.general       as object || {}), ...(stored.shop as object || {}) },
-      features:      { ...defaults.features,      ...(stored.features      as object || {}) },
-      notifications: { ...defaults.notifications, ...(stored.notifications as object || {}) },
-      payment:       { ...defaults.payment,       ...(stored.payment       as object || {}) },
-      receipt:       { ...defaults.receipt,       ...(stored.receipt       as object || {}) },
+      general:       mergeSection(defaults.general,       (stored.general       || stored.shop || {}) as object),
+      features:      mergeSection(defaults.features,      (stored.features      || {}) as object),
+      notifications: mergeSection(defaults.notifications, (stored.notifications || {}) as object),
+      payment:       mergeSection(defaults.payment,       (stored.payment       || {}) as object),
+      receipt:       mergeSection(defaults.receipt,       (stored.receipt       || {}) as object),
     }
 
     return NextResponse.json({ settings })

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -123,6 +124,7 @@ export function OrderCompletionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md w-[95vw] sm:w-full">
         <DialogTitle className="sr-only">Order Completed</DialogTitle>
+        <DialogDescription className="sr-only">Order summary and receipt options.</DialogDescription>
         <div className="flex flex-col items-center justify-center py-6 space-y-5">
 
           {/* Order Completed Text */}

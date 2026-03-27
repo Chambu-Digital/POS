@@ -21,6 +21,7 @@ import {
 import { toast } from 'sonner'
 import { Check, ChevronsUpDown, ImagePlus, X, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ProductImage } from '@/components/ui/product-image'
 
 interface Product {
   _id?: string
@@ -29,6 +30,7 @@ interface Product {
   variant?: string
   brand?: string
   model?: string
+  barcode?: string
   unit?: string
   buyingPrice: number
   sellingPrice: number
@@ -58,6 +60,7 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
       variant: '',
       brand: '',
       model: '',
+      barcode: '',
       unit: 'piece',
       buyingPrice: 0,
       sellingPrice: 0,
@@ -90,32 +93,44 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
   }
 
   async function uploadImages(files: FileList | File[]) {
-    // For new products, store as local previews until saved
-    if (!product?._id) {
-      const previews: string[] = []
-      for (const file of Array.from(files)) {
-        if (file.size > 2 * 1024 * 1024) { toast.error(`"${file.name}" exceeds 2MB`); continue }
-        const reader = new FileReader()
-        await new Promise<void>(res => {
-          reader.onload = () => { previews.push(reader.result as string); res() }
-          reader.readAsDataURL(file)
-        })
-      }
-      setImages(prev => [...prev, ...previews])
-      setFormData(prev => ({ ...prev, images: [...(prev.images || []), ...previews] }))
-      return
-    }
-
-    // For existing products — upload immediately
     setUploadingImages(true)
     try {
-      const fd = new FormData()
-      Array.from(files).forEach(f => fd.append('images', f))
-      const res = await fetch(`/api/products/${product._id}/images`, { method: 'POST', body: fd })
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error) }
-      const data = await res.json()
-      setImages(data.images)
-      toast.success('Images uploaded')
+      const newUrls: string[] = []
+
+      for (const file of Array.from(files)) {
+        const fd = new FormData()
+        fd.append('media', file)
+
+        // Use product-specific route if we have an _id, generic route otherwise
+        const endpoint = product?._id
+          ? `/api/products/${product._id}/images`
+          : '/api/media/upload'
+
+        const res = await fetch(endpoint, { method: 'POST', body: fd })
+        if (!res.ok) {
+          const d = await res.json()
+          toast.error(d.error ?? `Failed to upload "${file.name}"`)
+          continue
+        }
+        const data = await res.json()
+
+        if (product?._id) {
+          // Route returns full updated images array
+          setImages(data.images)
+          setFormData(prev => ({ ...prev, images: data.images }))
+          return // already updated in one shot
+        } else {
+          newUrls.push(data.url)
+        }
+      }
+
+      if (newUrls.length) {
+        setImages(prev => {
+          const updated = [...prev, ...newUrls]
+          setFormData(p => ({ ...p, images: updated }))
+          return updated
+        })
+      }
     } catch (err: any) {
       toast.error(err.message || 'Upload failed')
     } finally {
@@ -290,6 +305,19 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
         </div>
 
         <div className="space-y-2">
+          <Label htmlFor="barcode">Barcode</Label>
+          <Input
+            id="barcode"
+            name="barcode"
+            value={formData.barcode ?? ''}
+            onChange={handleChange}
+            disabled={loading}
+            placeholder="Scan or type barcode..."
+            autoComplete="off"
+          />
+        </div>
+
+        <div className="space-y-2">
           <Label htmlFor="unit">Unit</Label>
           <Input
             id="unit"
@@ -368,7 +396,7 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
 
         {/* ── Image Upload ── */}
         <div className="col-span-3 space-y-2">
-          <Label>Product Images <span className="text-xs text-muted-foreground">(max 2MB each)</span></Label>
+          <Label>Product Images <span className="text-xs text-muted-foreground">(max 20MB each)</span></Label>
 
           {/* Drop zone */}
           <div
@@ -410,7 +438,7 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             <div className="grid grid-cols-4 gap-2 mt-2">
               {images.map((src, i) => (
                 <div key={i} className="relative group aspect-square rounded-lg overflow-hidden border border-gray-200">
-                  <img src={src} alt={`Product image ${i + 1}`} className="w-full h-full object-cover" />
+                  <ProductImage src={src} alt={`Product image ${i + 1}`} size="lg" className="w-full h-full aspect-square" />
                   <button
                     type="button"
                     onClick={() => removeImage(i)}
