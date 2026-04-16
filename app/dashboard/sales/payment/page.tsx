@@ -530,6 +530,7 @@ function PaymentPageContent() {
         <Receipt
           ref={receiptRef}
           shopName={userInfo.shopName}
+          shopLogo={shopSettings?.general?.logo}
           cashierName={userInfo.name}
           items={lastSale.items}
           subtotal={lastSale.subtotal}
@@ -538,9 +539,9 @@ function PaymentPageContent() {
           paymentMethod={lastSale.paymentMethod}
           date={lastSale.date}
           receiptNumber={lastSale.receiptNumber}
-          shopPhone={shopSettings?.shop?.phone}
-          shopEmail={shopSettings?.shop?.email}
-          shopAddress={shopSettings?.shop?.address}
+          shopPhone={shopSettings?.general?.phone}
+          shopEmail={shopSettings?.general?.email}
+          shopAddress={shopSettings?.general?.address}
           mpesaPaybill={shopSettings?.payment?.mpesaPaybill}
           mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}
           paperSize={shopSettings?.receipt?.paperSize || '58mm'}

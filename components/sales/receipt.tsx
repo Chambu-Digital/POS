@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useImperativeHandle, forwardRef } from 'react'
+import { resolveMediaUrl } from '@/lib/media-url'
 
 interface ReceiptItem {
   productName: string
@@ -16,6 +17,7 @@ interface ReceiptItem {
 
 interface ReceiptProps {
   shopName: string
+  shopLogo?: string
   cashierName: string
   items: ReceiptItem[]
   subtotal: number
@@ -47,6 +49,7 @@ export interface ReceiptRef {
 
 export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
   shopName,
+  shopLogo,
   cashierName,
   items,
   subtotal,
@@ -108,6 +111,7 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
                   line-height: 1.4;
                 }
                 .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 15px; }
+                .logo { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; margin: 0 auto 8px; display: block; }
                 .company-name { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
                 .company-details { font-size: 11px; line-height: 1.4; }
                 .doc-type { font-size: 14px; font-weight: bold; text-transform: uppercase; margin: 8px 0 0; letter-spacing: 1px; }
@@ -154,6 +158,9 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
     <div ref={receiptRef} style={{ display: 'none' }}>
       {/* Header */}
       <div className="header">
+        {shopLogo && (
+          <img src={resolveMediaUrl(shopLogo)} alt={shopName} className="logo" />
+        )}
         <div className="company-name">{shopName}</div>
         <div className="company-details">
           {shopPhone && <div>Phone: {shopPhone}</div>}

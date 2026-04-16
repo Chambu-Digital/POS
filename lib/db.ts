@@ -1,47 +1,28 @@
 import mongoose from 'mongoose'
 import dns from 'dns'
 
-// Force IPv4 DNS resolution to fix MongoDB Atlas connection issues
 dns.setDefaultResultOrder('ipv4first')
 
-let isConnected = false
-
-export async function connectDB() {
-  if (isConnected) {
-    return
-  }
-
-  const mongoUrl = process.env.MONGODB_URI
-
-  if (!mongoUrl) {
-    throw new Error('MONGODB_URI is not defined in environment variables')
-  }
-
-  try {
-    await mongoose.connect(mongoUrl, {
-      family: 4, // Force IPv4
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
-    })
-    isConnected = true
-    console.log('[v0] Connected to MongoDB')
-  } catch (error) {
-    console.error('[v0] MongoDB connection error:', error)
-    throw error
-  }
+// Cache connection on the global object so it survives hot reloads in dev
+// and is reused across requests within the same Vercel function instance.
+declare global {
+  // eslint-disable-next-line no-var
+  var _mongooseConn: typeof mongoose | undefined
 }
 
-export async function disconnectDB() {
-  if (!isConnected) {
+export async function connectDB() {
+  if (global._mongooseConn && mongoose.connection.readyState === 1) {
     return
   }
 
-  try {
-    await mongoose.disconnect()
-    isConnected = false
-    console.log('[v0] Disconnected from MongoDB')
-  } catch (error) {
-    console.error('[v0] MongoDB disconnection error:', error)
-    throw error
-  }
+  const uri = process.env.MONGODB_URI
+  if (!uri) throw new Error('MONGODB_URI is not defined')
+
+  await mongoose.connect(uri, {
+    family: 4,
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+  })
+
+  global._mongooseConn = mongoose
 }

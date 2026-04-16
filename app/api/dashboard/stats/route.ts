@@ -1,11 +1,4 @@
-import { connectDB } from '@/lib/db'
-import Sale from '@/lib/models/Sale'
-import Product from '@/lib/models/Product'
-import Staff from '@/lib/models/Staff'
-import KitchenOrder from '@/lib/models/KitchenOrder'
-import User from '@/lib/models/User'
-import RentalBooking from '@/lib/models/RentalBooking'
-import Expense from '@/lib/models/Expense'
+import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -16,9 +9,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    await connectDB()
-
-    // Use adminId for staff members, userId for admin/owner
+    const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
 
     // Get date range from query params (default to last 30 days)
@@ -28,12 +19,12 @@ export async function GET(request: NextRequest) {
     startDate.setDate(startDate.getDate() - days)
 
     // Fetch all sales for the owner
-    const allSales = await Sale.find({ userId: ownerId })
+    const allSales = await models.Sale.find({ userId: ownerId })
       .populate('items.productId')
       .lean()
 
     // Fetch sales within date range
-    const recentSales = await Sale.find({
+    const recentSales = await models.Sale.find({
       userId: ownerId,
       createdAt: { $gte: startDate },
     })
@@ -41,10 +32,10 @@ export async function GET(request: NextRequest) {
       .lean()
 
     // Fetch products
-    const products = await Product.find({ userId: ownerId }).lean()
+    const products = await models.Product.find({ userId: ownerId }).lean()
 
     // Fetch staff count
-    const staffCount = await Staff.countDocuments({ userId: ownerId, active: true })
+    const staffCount = await models.Staff.countDocuments({ userId: ownerId, active: true })
 
     // Calculate statistics
     const totalSales = allSales.length
@@ -63,7 +54,7 @@ export async function GET(request: NextRequest) {
     // Today's summary — for daily reconciliation
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
     const todayEnd   = new Date(); todayEnd.setHours(23, 59, 59, 999)
-    const todaySales = await Sale.find({ userId: ownerId, createdAt: { $gte: todayStart, $lte: todayEnd } }).lean()
+    const todaySales = await models.Sale.find({ userId: ownerId, createdAt: { $gte: todayStart, $lte: todayEnd } }).lean()
     const todayStats = {
       totalOrders: todaySales.length,
       totalRevenue: todaySales.reduce((s, x) => s + x.total, 0),
@@ -94,7 +85,7 @@ export async function GET(request: NextRequest) {
     // Sales by day (last 7 days)
     const last7Days = new Date()
     last7Days.setDate(last7Days.getDate() - 7)
-    const salesLast7Days = await Sale.find({
+    const salesLast7Days = await models.Sale.find({
       userId: ownerId,
       createdAt: { $gte: last7Days },
     }).lean()
@@ -141,7 +132,7 @@ export async function GET(request: NextRequest) {
     })
 
     // Recent orders (last 10)
-    const recentOrders = await Sale.find({ userId: ownerId })
+    const recentOrders = await models.Sale.find({ userId: ownerId })
       .sort({ createdAt: -1 })
       .limit(10)
       .populate('items.productId')
@@ -149,7 +140,7 @@ export async function GET(request: NextRequest) {
       .lean()
 
     // ── Rental stats ─────────────────────────────────────────────────────────
-    const rentalBookings = await RentalBooking.find({ userId: ownerId }).lean()
+    const rentalBookings = await models.RentalBooking.find({ userId: ownerId }).lean()
     const activeRentals = rentalBookings.filter((b: any) => b.status === 'active' || b.status === 'overdue').length
     const completedRentals = rentalBookings.filter((b: any) => b.status === 'completed').length
     const rentalRevenue = rentalBookings
@@ -157,7 +148,7 @@ export async function GET(request: NextRequest) {
       .reduce((sum: number, b: any) => sum + (b.totalAmount || 0), 0)
 
     // ── KDS stats (today) — always computed ──────────────────────────────────
-    const user = await User.findById(ownerId).lean() as { settings?: { features?: { kdsEnabled?: boolean } } } | null
+    const user = await models.User.findById(ownerId).lean() as { settings?: { features?: { kdsEnabled?: boolean } } } | null
     const kdsEnabled = user?.settings?.features?.kdsEnabled === true
 
     let kdsStats = null
@@ -165,7 +156,7 @@ export async function GET(request: NextRequest) {
       const kStart = new Date(); kStart.setHours(0, 0, 0, 0)
       const kEnd   = new Date(); kEnd.setHours(23, 59, 59, 999)
 
-      const todayOrders = await KitchenOrder.find({
+      const todayOrders = await models.KitchenOrder.find({
         userId: ownerId,
         createdAt: { $gte: kStart, $lte: kEnd },
       }).lean()
@@ -183,7 +174,7 @@ export async function GET(request: NextRequest) {
       const tablesServed = new Set(todayOrders.map(o => o.tableNumber)).size
       const kdsRevenue = completed.reduce((s, o) => s + (o.totalAmount ?? 0), 0)
 
-      const recentKitchenOrders = await KitchenOrder.find({ userId: ownerId })
+      const recentKitchenOrders = await models.KitchenOrder.find({ userId: ownerId })
         .sort({ createdAt: -1 })
         .limit(5)
         .lean()
@@ -265,3 +256,5 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+
+

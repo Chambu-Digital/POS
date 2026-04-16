@@ -1,36 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/jwt'
-import { connectDB } from '@/lib/db'
-import Report from '@/lib/models/Report'
-import Sale from '@/lib/models/Sale'
-import Product from '@/lib/models/Product'
-import KitchenOrder from '@/lib/models/KitchenOrder'
-import RentalBooking from '@/lib/models/RentalBooking'
+import { getTenantDB } from '@/lib/tenant/get-db'
 
 export async function GET(request: NextRequest) {
   try {
     const payload = await getAuthPayload()
-    if (!payload) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+    const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
-
-    await connectDB()
-
-    const { searchParams } = new URL(request.url)
-    const reportType = searchParams.get('type')
+    const reportType = new URL(request.url).searchParams.get('type')
 
     const query: any = { userId: ownerId }
-    if (reportType) {
-      query.reportType = reportType
-    }
+    if (reportType) query.reportType = reportType
 
-    const reports = await Report.find(query)
-      .sort({ createdAt: -1 })
-      .limit(50)
-      .lean()
-
+    const reports = await models.Report.find(query).sort({ createdAt: -1 }).limit(50).lean()
     return NextResponse.json({ reports })
   } catch (error) {
     console.error('Error fetching reports:', error)
@@ -41,54 +25,43 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const payload = await getAuthPayload()
-    if (!payload) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+    const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
-
-    await connectDB()
-
     const body = await request.json()
     const { reportType, startDate, endDate } = body
 
     if (!reportType || !startDate || !endDate) {
-      return NextResponse.json(
-        { error: 'Report type and date range are required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Report type and date range are required' }, { status: 400 })
     }
 
-    console.log('[Reports API] Generating report:', {
-      reportType,
-      ownerId,
-      startDate,
-      endDate,
+    let reportData: any = {}
+    if (reportType === 'sales')     reportData = await generateSalesReport(models, ownerId, new Date(startDate), new Date(endDate))
+    else if (reportType === 'inventory') reportData = await generateInventoryReport(models, ownerId)
+    else if (reportType === 'profit')    reportData = await generateProfitReport(models, ownerId, new Date(startDate), new Date(endDate))
+    else if (reportType === 'kitchen')   reportData = await generateKitchenReport(models, ownerId, new Date(startDate), new Date(endDate))
+    else if (reportType === 'bar')       reportData = await generateBarReport(models, ownerId, new Date(startDate), new Date(endDate))
+    else if (reportType === 'rental')    reportData = await generateRentalReport(models, ownerId, new Date(startDate), new Date(endDate))
+
+    const report = await models.Report.create({
+      userId: ownerId, reportType, title: reportData.title, description: reportData.description,
+      dateRange: { startDate: new Date(startDate), endDate: new Date(endDate) },
+      data: reportData.data, generatedAt: new Date(),
     })
 
-    // Check if there are any sales at all for this user
-    const totalSalesCount = await Sale.countDocuments({ userId: ownerId })
-    console.log('[Reports API] Total sales in database for user:', totalSalesCount)
-
-    // Generate report based on type
-    let reportData: any = {}
-
-    if (reportType === 'sales') {
-      reportData = await generateSalesReport(ownerId, new Date(startDate), new Date(endDate))
-    } else if (reportType === 'inventory') {
-      reportData = await generateInventoryReport(ownerId)
-    } else if (reportType === 'profit') {
-      reportData = await generateProfitReport(ownerId, new Date(startDate), new Date(endDate))
-    } else if (reportType === 'kitchen') {
-      reportData = await generateKitchenReport(ownerId, new Date(startDate), new Date(endDate))
-    } else if (reportType === 'bar') {
-      reportData = await generateBarReport(ownerId, new Date(startDate), new Date(endDate))
+    return NextResponse.json({ report, message: 'Report generated successfully' })
+  } catch (error) {
+    console.error('Error generating report:', error)
+    return NextResponse.json({ error: 'Failed to generate report' }, { status: 500 })
+  }
+}
     } else if (reportType === 'rental') {
       reportData = await generateRentalReport(ownerId, new Date(startDate), new Date(endDate))
     }
 
     // Save report to database
-    const report = await Report.create({
+    const report = await models.Report.create({
       userId: ownerId,
       reportType,
       title: reportData.title,
@@ -110,7 +83,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function generateSalesReport(userId: string, startDate: Date, endDate: Date) {
+async function generateSalesReport(models: any, userId: string, startDate: Date, endDate: Date) {
   // Set start date to beginning of day
   const adjustedStartDate = new Date(startDate)
   adjustedStartDate.setHours(0, 0, 0, 0)
@@ -125,7 +98,7 @@ async function generateSalesReport(userId: string, startDate: Date, endDate: Dat
     endDate: adjustedEndDate.toISOString(),
   })
 
-  const sales = await Sale.find({
+  const sales = await models.Sale.find({
     userId,
     createdAt: { $gte: adjustedStartDate, $lte: adjustedEndDate },
   }).lean()
@@ -136,7 +109,7 @@ async function generateSalesReport(userId: string, startDate: Date, endDate: Dat
   let allSales = sales
   if (sales.length === 0) {
     console.log('[Sales Report] No sales in date range, fetching all sales')
-    allSales = await Sale.find({ userId }).lean()
+    allSales = await models.Sale.find({ userId }).lean()
     console.log('[Sales Report] Total sales for user:', allSales.length)
   }
 
@@ -197,8 +170,8 @@ async function generateSalesReport(userId: string, startDate: Date, endDate: Dat
   }
 }
 
-async function generateInventoryReport(userId: string) {
-  const products = await Product.find({ userId }).lean() as any[]
+async function generateInventoryReport(models: any, userId: string) {
+  const products = await models.Product.find({ userId }).lean() as any[]
 
   const totalProducts = products.length
   const totalStockValue = products.reduce(
@@ -237,8 +210,8 @@ async function generateInventoryReport(userId: string) {
   }
 }
 
-async function generateProfitReport(userId: string, startDate: Date, endDate: Date) {
-  const sales = await Sale.find({
+async function generateProfitReport(models: any, userId: string, startDate: Date, endDate: Date) {
+  const sales = await models.Sale.find({
     userId,
     createdAt: { $gte: startDate, $lte: endDate },
   })
@@ -291,11 +264,11 @@ async function generateProfitReport(userId: string, startDate: Date, endDate: Da
 }
 
 
-async function generateKitchenReport(userId: string, startDate: Date, endDate: Date) {
+async function generateKitchenReport(models: any, userId: string, startDate: Date, endDate: Date) {
   const start = new Date(startDate); start.setHours(0, 0, 0, 0)
   const end   = new Date(endDate);   end.setHours(23, 59, 59, 999)
 
-  const orders = await KitchenOrder.find({
+  const orders = await models.KitchenOrder.find({
     userId,
     createdAt: { $gte: start, $lte: end },
   }).lean() as any[]
@@ -346,11 +319,11 @@ async function generateKitchenReport(userId: string, startDate: Date, endDate: D
   }
 }
 
-async function generateBarReport(userId: string, startDate: Date, endDate: Date) {
+async function generateBarReport(models: any, userId: string, startDate: Date, endDate: Date) {
   const start = new Date(startDate); start.setHours(0, 0, 0, 0)
   const end   = new Date(endDate);   end.setHours(23, 59, 59, 999)
 
-  const sales = await Sale.find({
+  const sales = await models.Sale.find({
     userId,
     source: 'bar',
     createdAt: { $gte: start, $lte: end },
@@ -401,11 +374,11 @@ async function generateBarReport(userId: string, startDate: Date, endDate: Date)
   }
 }
 
-async function generateRentalReport(userId: string, startDate: Date, endDate: Date) {
+async function generateRentalReport(models: any, userId: string, startDate: Date, endDate: Date) {
   const start = new Date(startDate); start.setHours(0, 0, 0, 0)
   const end   = new Date(endDate);   end.setHours(23, 59, 59, 999)
 
-  const bookings = await RentalBooking.find({
+  const bookings = await models.RentalBooking.find({
     userId,
     createdAt: { $gte: start, $lte: end },
   }).lean() as any[]
@@ -455,3 +428,4 @@ async function generateRentalReport(userId: string, startDate: Date, endDate: Da
     },
   }
 }
+

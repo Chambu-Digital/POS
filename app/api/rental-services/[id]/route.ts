@@ -1,5 +1,4 @@
-import { connectDB } from '@/lib/db'
-import RentalService from '@/lib/models/RentalService'
+import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
@@ -9,12 +8,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+    const { models } = await getTenantDB(request)
     const { id } = await params
-    await connectDB()
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
     const data = await request.json()
 
-    const service = await RentalService.findOneAndUpdate(
+    const service = await models.RentalService.findOneAndUpdate(
       { _id: new Types.ObjectId(id), userId: ownerId },
       { $set: data },
       { new: true }
@@ -31,11 +30,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+    const { models } = await getTenantDB(request)
     const { id } = await params
-    await connectDB()
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
 
-    const service = await RentalService.findOneAndDelete({ _id: new Types.ObjectId(id), userId: ownerId })
+    const service = await models.RentalService.findOneAndDelete({ _id: new Types.ObjectId(id), userId: ownerId })
     if (!service) return NextResponse.json({ error: 'Service not found' }, { status: 404 })
     return NextResponse.json({ message: 'Service deleted' })
   } catch (error) {

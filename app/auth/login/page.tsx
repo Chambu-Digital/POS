@@ -172,11 +172,8 @@ export default function LoginPage() {
               {loading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
-          <div className="mt-4 text-center text-sm">
-            <span className="text-muted-foreground">Don't have an account? </span>
-            <Link href="/auth/register" className="text-primary hover:underline font-medium">
-              Create one
-            </Link>
+          <div className="mt-4 text-center text-sm text-muted-foreground">
+            Contact Chambu Digital to get access.
           </div>
           <div className="mt-2 text-center text-sm">
             <span className="text-muted-foreground">Want to explore first? </span>

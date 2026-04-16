@@ -682,6 +682,7 @@ function RentalsPageContent() {
           ref={slipReceiptRef}
           receiptType="rental_slip"
           shopName={userInfo.shopName}
+          shopLogo={shopSettings?.general?.logo}
           cashierName={userInfo.name}
           receiptNumber={formatReceiptNumber(createdRental._id)}
           date={new Date(createdRental.startTime)}
@@ -702,9 +703,9 @@ function RentalsPageContent() {
           paymentMethod=""
           deposit={createdRental.deposit}
           depositPaymentMethod={createdRental.depositPaymentMethod}
-          shopPhone={shopSettings?.shop?.phone}
-          shopEmail={shopSettings?.shop?.email}
-          shopAddress={shopSettings?.shop?.address}
+          shopPhone={shopSettings?.general?.phone}
+          shopEmail={shopSettings?.general?.email}
+          shopAddress={shopSettings?.general?.address}
           paperSize={shopSettings?.receipt?.paperSize || '58mm'}
         />
       )}
@@ -715,6 +716,7 @@ function RentalsPageContent() {
           ref={returnReceiptRef}
           receiptType="rental_return"
           shopName={userInfo.shopName}
+          shopLogo={shopSettings?.general?.logo}
           cashierName={userInfo.name}
           receiptNumber={formatReceiptNumber(returnedRental.rental._id)}
           date={new Date()}
@@ -736,9 +738,9 @@ function RentalsPageContent() {
           paymentMethod={returnedRental.paymentMethod}
           deposit={returnedRental.rental.deposit}
           depositPaymentMethod={returnedRental.rental.depositPaymentMethod}
-          shopPhone={shopSettings?.shop?.phone}
-          shopEmail={shopSettings?.shop?.email}
-          shopAddress={shopSettings?.shop?.address}
+          shopPhone={shopSettings?.general?.phone}
+          shopEmail={shopSettings?.general?.email}
+          shopAddress={shopSettings?.general?.address}
           mpesaPaybill={shopSettings?.payment?.mpesaPaybill}
           mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}
           paperSize={shopSettings?.receipt?.paperSize || '58mm'}
