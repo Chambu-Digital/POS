@@ -8,20 +8,20 @@ export interface TokenPayload {
   email: string
   role: string
   type: 'user' | 'staff'
-  adminId?: string // For staff members, this is the owner's userId
+  adminId?: string          // For staff: the owner's userId
+  mongoUri?: string         // Tenant DB URI — embedded at login, no subdomain lookup needed
+  tenantFeatures?: Record<string, boolean>  // Tenant feature flags
+  permissions?: Record<string, boolean>     // Staff permissions (staff only)
   isDemo?: boolean
 }
 
 export async function createToken(payload: TokenPayload): Promise<string> {
-  return jwt.sign(payload, secret, {
-    expiresIn: '7d',
-  })
+  return jwt.sign(payload, secret, { expiresIn: '7d' })
 }
 
 export async function verifyToken(token: string): Promise<TokenPayload | null> {
   try {
-    const decoded = jwt.verify(token, secret)
-    return decoded as TokenPayload
+    return jwt.verify(token, secret) as TokenPayload
   } catch {
     return null
   }
@@ -33,7 +33,7 @@ export async function setAuthCookie(token: string) {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60, // 7 days
+    maxAge: 7 * 24 * 60 * 60,
   })
 }
 

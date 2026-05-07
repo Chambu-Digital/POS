@@ -9,16 +9,28 @@ export default function EditTenantPage() {
   const router = useRouter()
   const { id } = useParams<{ id: string }>()
   const [tenant, setTenant] = useState<any>(null)
+  const [ownerEmail, setOwnerEmail] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch(`/api/admin/tenants/${id}`)
-      .then(res => {
-        if (res.status === 401) { router.push('/admin/login'); return null }
-        return res.json()
-      })
-      .then(data => { if (data) { setTenant(data.tenant); setLoading(false) } })
-  }, [id])
+    async function load() {
+      // Fetch tenant
+      const tenantRes = await fetch(`/api/admin/tenants/${id}`)
+      if (tenantRes.status === 401) { router.push('/admin/login'); return }
+      const tenantData = await tenantRes.json()
+      setTenant(tenantData.tenant)
+
+      // Fetch owner email
+      const ownerRes = await fetch(`/api/admin/tenants/${id}/owner`)
+      if (ownerRes.ok) {
+        const ownerData = await ownerRes.json()
+        setOwnerEmail(ownerData.email || '')
+      }
+
+      setLoading(false)
+    }
+    load()
+  }, [id, router])
 
   return (
     <div className="min-h-screen">
@@ -34,7 +46,7 @@ export default function EditTenantPage() {
         {loading ? (
           <p className="text-sm text-gray-500">Loading...</p>
         ) : (
-          <TenantForm initial={tenant} />
+          <TenantForm initial={tenant} ownerEmail={ownerEmail} />
         )}
       </main>
     </div>

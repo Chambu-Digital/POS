@@ -164,7 +164,7 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
     const { name, value } = e.target
     setFormData((prev) => ({
       ...prev,
-      [name]: name.includes('Price') || name === 'stock' ? parseFloat(value) || 0 : value,
+      [name]: name.includes('Price') || name === 'stock' || name === 'lowStockThreshold' ? parseFloat(value) || 0 : value,
     }))
   }
 
@@ -339,6 +339,20 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             required
             disabled={loading}
           />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="lowStockThreshold">Low Stock Alert Threshold</Label>
+          <Input
+            id="lowStockThreshold"
+            name="lowStockThreshold"
+            type="number"
+            value={(formData as any).lowStockThreshold ?? 10}
+            onChange={handleChange}
+            disabled={loading}
+            placeholder="e.g. 10"
+          />
+          <p className="text-xs text-gray-400">Alert when stock falls at or below this number</p>
         </div>
 
         <div className="space-y-2">

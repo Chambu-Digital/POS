@@ -1,6 +1,7 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
+import { normalisePermissions } from '@/lib/modules'
 
 export async function GET(request: NextRequest) {
   try {
@@ -32,7 +33,8 @@ export async function GET(request: NextRequest) {
         user: {
           id: staff._id, email: staff.email, name: staff.name,
           shopName: adminUser?.shopName || 'Shop',
-          role: staff.role, type: 'staff', permissions: staff.permissions,
+          role: staff.role, type: 'staff',
+          permissions: normalisePermissions(staff.permissions || {}),
         },
       })
     }

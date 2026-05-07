@@ -23,6 +23,7 @@ export const productSchema = new mongoose.Schema(
     barcode:      { type: String, default: '' },
     images:       { type: [String], default: [] },
     stock:        { type: Number, required: true, default: 0 },
+    lowStockThreshold: { type: Number, default: 10 },
     createdAt:    { type: Date, default: Date.now },
     updatedAt:    { type: Date, default: Date.now },
   },
@@ -36,6 +37,9 @@ export const saleSchema = new mongoose.Schema(
   {
     userId:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     staffId:       { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    orderNumber:   { type: String, index: true },
+    customerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
+    customerName:  { type: String, default: '' },
     items: [{
       productId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: false },
       productName: { type: String, required: true },
@@ -46,9 +50,11 @@ export const saleSchema = new mongoose.Schema(
     subtotal:      Number,
     discount:      { type: Number, default: 0 },
     total:         { type: Number, required: true },
-    paymentMethod: { type: String, enum: ['cash', 'card', 'mobile_money'], required: true },
+    amountPaid:    { type: Number, default: 0 },
+    paymentMethod: { type: String, enum: ['cash', 'card', 'mobile_money', 'credit'], required: true },
     mpesaCode:     String,
     mpesaPhone:    String,
+    creditApplied: { type: Number, default: 0 },
     notes:         String,
     source:        { type: String, enum: ['pos', 'bar', 'kds', 'rental'], default: 'pos' },
     rentalMeta: {
@@ -71,6 +77,30 @@ export const saleSchema = new mongoose.Schema(
   { collection: 'sales' }
 )
 saleSchema.index({ userId: 1, createdAt: -1 })
+saleSchema.index({ userId: 1, orderNumber: 1 })
+
+// ── Customer ──────────────────────────────────────────────────────────────────
+export const customerSchema = new mongoose.Schema(
+  {
+    userId:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    name:          { type: String, required: true, trim: true },
+    phone:         { type: String, default: '', trim: true },
+    email:         { type: String, default: '' },
+    creditBalance: { type: Number, default: 0 }, // positive = owes us, negative = we owe them
+    ledger: [{
+      date:        { type: Date, default: Date.now },
+      type:        { type: String, enum: ['purchase', 'payment', 'adjustment'] },
+      amount:      Number,   // positive = debt added, negative = debt reduced
+      balance:     Number,   // running balance after this entry
+      saleId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' },
+      note:        String,
+    }],
+    createdAt:     { type: Date, default: Date.now },
+  },
+  { collection: 'customers' }
+)
+customerSchema.index({ userId: 1, name: 1 })
+customerSchema.index({ userId: 1, phone: 1 })
 
 // ── Category ──────────────────────────────────────────────────────────────────
 export const categorySchema = new mongoose.Schema(
@@ -113,20 +143,18 @@ export const staffSchema = new mongoose.Schema(
     password:            { type: String, required: true, select: false },
     role:                { type: String, enum: ['cashier', 'manager', 'supervisor', 'employee'], required: true },
     permissions: {
-      canMakeSales:        { type: Boolean, default: true },
-      canViewOrders:       { type: Boolean, default: true },
-      canViewInventory:    { type: Boolean, default: true },
-      canEditInventory:    { type: Boolean, default: false },
-      canAddProducts:      { type: Boolean, default: false },
-      canDeleteProducts:   { type: Boolean, default: false },
-      canViewSalesReports: { type: Boolean, default: false },
-      canViewDashboard:    { type: Boolean, default: true },
-      canManageStaff:      { type: Boolean, default: false },
-      canEditSettings:     { type: Boolean, default: false },
-      canProcessRefunds:   { type: Boolean, default: false },
-      canApplyDiscounts:   { type: Boolean, default: true },
-      canDeleteOrders:     { type: Boolean, default: false },
-      canExportData:       { type: Boolean, default: false },
+      type: mongoose.Schema.Types.Mixed,
+      default: () => ({
+        'pos.sales': true,
+        'pos.orders': true,
+        'pos.inventory': true,
+        'pos.reports': false,
+        'pos.expenses': false,
+        'kds.display': false,
+        'bar.tabs': false,
+        'rentals.bookings': false,
+        'rentals.manage': false,
+      }),
     },
     active:    { type: Boolean, default: true },
     createdAt: { type: Date, default: Date.now },

@@ -270,6 +270,7 @@ export function ImportModal({ open, onOpenChange, onSuccess }: ImportModalProps)
 
       const response = await fetch('/api/products/import', {
         method: 'POST',
+        credentials: 'include',
         body: formData,
       })
 

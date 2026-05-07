@@ -42,7 +42,9 @@ function mergeSection<T extends object>(def: T, saved: Partial<T> = {}): T {
 export async function GET(request: NextRequest) {
   try {
     const payload = await getAuthPayload()
-    if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Return empty settings gracefully for unauthenticated requests
+    // (sidebar calls this for logo — should not 401 spam the logs)
+    if (!payload) return NextResponse.json({ settings: null }, { status: 200 })
 
     const { models } = await getTenantDB(request)
     const userId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId

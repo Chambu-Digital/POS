@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -12,6 +12,9 @@ import {
   TrendingDown, Wallet, Calendar,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  MODULES, DEFAULT_STAFF_PERMISSIONS, DEFAULT_MANAGER_PERMISSIONS, normalisePermissions,
+} from '@/lib/modules'
 
 interface Staff {
   _id: string
@@ -43,33 +46,8 @@ const ROLE_LABELS: Record<string, string> = {
   supervisor: 'Supervisor', manager: 'Manager', admin: 'Admin',
 }
 
-const DEFAULT_PERMS = {
-  canMakeSales: true, canViewOrders: true, canViewInventory: true,
-  canEditInventory: false, canAddProducts: false, canDeleteProducts: false,
-  canViewSalesReports: false, canViewDashboard: true, canManageStaff: false,
-  canEditSettings: false, canProcessRefunds: false, canApplyDiscounts: true,
-  canDeleteOrders: false, canExportData: false,
-}
-
-const MANAGER_PERMS = {
-  ...DEFAULT_PERMS,
-  canEditInventory: true, canAddProducts: true, canDeleteProducts: true,
-  canViewSalesReports: true, canProcessRefunds: true,
-}
-
-const PERM_LABELS: { key: keyof typeof DEFAULT_PERMS; label: string }[] = [
-  { key: 'canMakeSales',        label: 'Make Sales' },
-  { key: 'canViewOrders',       label: 'View Orders' },
-  { key: 'canViewInventory',    label: 'View Inventory' },
-  { key: 'canEditInventory',    label: 'Edit Inventory' },
-  { key: 'canAddProducts',      label: 'Add Products' },
-  { key: 'canDeleteProducts',   label: 'Delete Products' },
-  { key: 'canViewSalesReports', label: 'View Sales Reports' },
-  { key: 'canProcessRefunds',   label: 'Process Refunds' },
-  { key: 'canApplyDiscounts',   label: 'Apply Discounts' },
-  { key: 'canManageStaff',      label: 'Manage Staff' },
-  { key: 'canEditSettings',     label: 'Edit Settings' },
-]
+const DEFAULT_PERMS = DEFAULT_STAFF_PERMISSIONS
+const MANAGER_PERMS = DEFAULT_MANAGER_PERMISSIONS
 
 // ── Inline editable field ────────────────────────────────────────────────────
 function InlineField({ label, value, display, editable, onSave }: {
@@ -295,8 +273,7 @@ export default function StaffPage() {
       leaveDays: s.leaveDays ?? 14, salary: s.salary ?? 0,
       commissionStructure: s.commissionStructure || '', employmentType: s.employmentType || '',
       password: '', role: s.role,
-      permissions: { ...DEFAULT_PERMS, ...(s.permissions || {}) },
-    })
+      permissions: { ...DEFAULT_PERMS, ...(s.permissions || {}) },    })
     setShowPwd(false)
     setViewOpen(false)
     setFormOpen(true)
@@ -370,9 +347,14 @@ export default function StaffPage() {
           body: JSON.stringify(form),
         })
         if (!res.ok) { const d = await res.json(); throw new Error(d.error) }
+        const created: Staff = await res.json()
         toast.success('Employee created')
         setFormOpen(false)
-        await fetchStaff()
+        setStaff(s => [created, ...s])
+        // Auto-open permissions modal for the newly created staff
+        setViewStaff(created)
+        setEditPerms(normalisePermissions(created.permissions || {}))
+        setPermsOpen(true)
       }
     } catch (err: any) {
       toast.error(err.message || 'Failed to save employee')
@@ -525,6 +507,7 @@ export default function StaffPage() {
       {/* ── VIEW EMPLOYEE MODAL ─────────────────────────────────────────────── */}
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
         <DialogContent className="max-w-3xl w-full p-0 overflow-hidden gap-0 max-h-[85vh] flex flex-col">
+          <DialogTitle className="sr-only">{viewStaff?.name || 'Employee'} Details</DialogTitle>
           {viewStaff && (
             <>
               {/* Top bar — no manual X, DialogContent provides its own */}
@@ -540,7 +523,7 @@ export default function StaffPage() {
                   <ActionMenu
                     onChangeRole={() => { setNewRole(viewStaff.role); setRoleOpen(true) }}
                     onChangePassword={() => { setNewPassword(''); setPwdOpen(true) }}
-                    onPermissions={() => { setEditPerms({ ...DEFAULT_PERMS, ...(viewStaff.permissions || {}) }); setPermsOpen(true) }}
+                    onPermissions={() => { setEditPerms(normalisePermissions(viewStaff.permissions || {})); setPermsOpen(true) }}
                     onEdit={() => openEdit(viewStaff)}
                     onDelete={() => handleDelete(viewStaff._id)}
                   />
@@ -607,6 +590,7 @@ export default function StaffPage() {
       {/* ── CHANGE ROLE SUB-MODAL ───────────────────────────────────────────── */}
       <Dialog open={roleOpen} onOpenChange={setRoleOpen}>
         <DialogContent className="max-w-sm">
+          <DialogTitle className="sr-only">Change User Role</DialogTitle>
           <h3 className="font-bold text-gray-900 mb-4">Change User Role</h3>
           <Select value={newRole} onValueChange={v => setNewRole(v as Staff['role'])}>
             <SelectTrigger><SelectValue /></SelectTrigger>
@@ -624,6 +608,7 @@ export default function StaffPage() {
       {/* ── CHANGE PASSWORD SUB-MODAL ───────────────────────────────────────── */}
       <Dialog open={pwdOpen} onOpenChange={setPwdOpen}>
         <DialogContent className="max-w-sm">
+          <DialogTitle className="sr-only">Change Password</DialogTitle>
           <h3 className="font-bold text-gray-900 mb-4">Change Password</h3>
           <Input type="password" placeholder="New password" value={newPassword}
             onChange={e => setNewPassword(e.target.value)} className="focus-visible:ring-green-500" />
@@ -636,16 +621,32 @@ export default function StaffPage() {
 
       {/* ── PERMISSIONS SUB-MODAL ──────────────────────────────────────────── */}
       <Dialog open={permsOpen} onOpenChange={setPermsOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-md">
+          <DialogTitle className="sr-only">Add / Revoke Permissions</DialogTitle>
           <h3 className="font-bold text-gray-900 mb-4">Add / Revoke Permissions</h3>
-          <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto">
-            {PERM_LABELS.map(({ key, label }) => (
-              <label key={key} className="flex items-center gap-2 cursor-pointer">
-                <Checkbox checked={!!editPerms[key]}
-                  onCheckedChange={v => setEditPerms(p => ({ ...p, [key]: !!v }))} />
-                <span className="text-xs text-gray-700">{label}</span>
-              </label>
-            ))}
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+            {MODULES.map(mod => {
+              const ModIcon = mod.icon
+              return (
+                <div key={mod.key} className="border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border-b border-gray-100">
+                    <ModIcon size={14} className="text-gray-500" />
+                    <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">{mod.label}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 py-2.5">
+                    {mod.features.map(f => (
+                      <label key={f.key} className="flex items-center gap-2 cursor-pointer">
+                        <Checkbox
+                          checked={!!editPerms[f.key]}
+                          onCheckedChange={v => setEditPerms(p => ({ ...p, [f.key]: !!v }))}
+                        />
+                        <span className="text-xs text-gray-700">{f.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
           </div>
           <button onClick={savePerms}
             className="mt-4 w-full py-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors">
@@ -657,6 +658,7 @@ export default function StaffPage() {
       {/* ── CREATE / EDIT FORM MODAL ────────────────────────────────────────── */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="max-w-lg p-0 overflow-hidden gap-0">
+          <DialogTitle className="sr-only">{editingStaff ? 'Edit Employee' : 'New Employee'}</DialogTitle>
           <div className="px-6 pt-5 pb-4 border-b border-gray-100 text-center">
             <h2 className="text-lg font-bold text-gray-900">
               {editingStaff ? `Edit ${editingStaff.name}'s Details` : 'New Employee'}

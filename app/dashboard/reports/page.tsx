@@ -44,7 +44,7 @@ interface Report {
 
 export default function ReportsPage() {
   return (
-    <PermissionGuard requiredPermission="canViewSalesReports">
+    <PermissionGuard requiredPermission="pos.reports">
       <ReportsPageContent />
     </PermissionGuard>
   )

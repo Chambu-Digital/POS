@@ -60,7 +60,7 @@ interface CartItem {
 
 export default function SalesPage() {
   return (
-    <PermissionGuard requiredPermission="canMakeSales">
+    <PermissionGuard requiredPermission="pos.sales">
       <SalesPageContent />
     </PermissionGuard>
   )

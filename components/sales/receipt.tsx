@@ -180,12 +180,16 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
         {rentalDuration && <div><strong>Duration:</strong> {rentalDuration}</div>}
       </div>
 
-      {/* Customer info — rentals only */}
-      {isRental && customerName && (
+      {/* Customer info — show for all sale types */}
+      {customerName ? (
         <div className="customer-info">
           <div><strong>Customer:</strong> {customerName}</div>
           {customerPhone && <div><strong>Phone:</strong> {customerPhone}</div>}
           {customerIdNo && <div><strong>ID:</strong> {customerIdNo}</div>}
+        </div>
+      ) : !isRental && (
+        <div className="customer-info">
+          <div><strong>Customer:</strong> Cash Sale</div>
         </div>
       )}
 

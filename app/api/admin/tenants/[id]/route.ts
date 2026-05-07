@@ -1,28 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { connectDB } from '@/lib/db'
-import Tenant from '@/lib/models/Tenant'
+import { getAdminModels } from '@/lib/admin-models'
 import { verifyAdminSession } from '../../auth/route'
+import { normaliseFeatures } from '@/lib/modules'
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!await verifyAdminSession(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  await connectDB()
-  const tenant = await Tenant.findById(params.id).lean()
+  const { id } = await params
+  const { Tenant } = await getAdminModels()
+  const tenant = await Tenant.findById(id).lean()
   if (!tenant) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   return NextResponse.json({ tenant })
 }
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!await verifyAdminSession(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  await connectDB()
+  const { id } = await params
+  const { Tenant } = await getAdminModels()
   const data = await request.json()
-  const tenant = await Tenant.findByIdAndUpdate(params.id, { $set: data }, { new: true })
+  // Normalise feature keys if features are being updated
+  if (data.features) data.features = normaliseFeatures(data.features)
+  const tenant = await Tenant.findByIdAndUpdate(id, { $set: data }, { new: true })
   if (!tenant) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   return NextResponse.json({ tenant })
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!await verifyAdminSession(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  await connectDB()
-  await Tenant.findByIdAndDelete(params.id)
+  const { id } = await params
+  const { Tenant } = await getAdminModels()
+  await Tenant.findByIdAndDelete(id)
   return NextResponse.json({ ok: true })
 }

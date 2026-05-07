@@ -36,8 +36,9 @@ export async function POST(request: NextRequest) {
         return obj
       })
     } else {
+      const text = await file.text()
       await new Promise<void>((resolve, reject) => {
-        Papa.parse(await file.text() as any, {
+        Papa.parse(text, {
           header: true, skipEmptyLines: true,
           complete: (r) => { rows = r.data as any[]; resolve() },
           error: reject,

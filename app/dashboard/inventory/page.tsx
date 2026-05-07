@@ -36,7 +36,7 @@ interface Product {
 
 export default function InventoryPage() {
   return (
-    <PermissionGuard requiredPermission="canViewInventory">
+    <PermissionGuard requiredPermission="pos.inventory">
       <InventoryPageContent />
     </PermissionGuard>
   )

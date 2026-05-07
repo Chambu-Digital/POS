@@ -56,32 +56,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to generate report' }, { status: 500 })
   }
 }
-    } else if (reportType === 'rental') {
-      reportData = await generateRentalReport(ownerId, new Date(startDate), new Date(endDate))
-    }
-
-    // Save report to database
-    const report = await models.Report.create({
-      userId: ownerId,
-      reportType,
-      title: reportData.title,
-      description: reportData.description,
-      dateRange: {
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-      },
-      data: reportData.data,
-      generatedAt: new Date(),
-    })
-
-    console.log('[Reports API] Report created:', report._id)
-
-    return NextResponse.json({ report, message: 'Report generated successfully' })
-  } catch (error) {
-    console.error('Error generating report:', error)
-    return NextResponse.json({ error: 'Failed to generate report' }, { status: 500 })
-  }
-}
 
 async function generateSalesReport(models: any, userId: string, startDate: Date, endDate: Date) {
   // Set start date to beginning of day

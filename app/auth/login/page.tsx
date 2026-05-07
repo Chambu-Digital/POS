@@ -17,10 +17,12 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [error, setError] = useState('')
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
+    setError('')
 
     try {
       const response = await fetch('/api/auth/login', {
@@ -40,7 +42,9 @@ export default function LoginPage() {
           return
         }
         
-        toast.error(data.error || 'Login failed')
+        const errorMsg = data.error || 'Login failed'
+        toast.error(errorMsg)
+        setError(errorMsg)
         return
       }
 
@@ -70,6 +74,7 @@ export default function LoginPage() {
       }
       
       toast.error('An error occurred during login')
+      setError('An error occurred during login')
       console.error(error)
     } finally {
       setLoading(false)
@@ -164,6 +169,11 @@ export default function LoginPage() {
                 </button>
               </div>
             </div>
+            {error && (
+              <div className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+                {error}
+              </div>
+            )}
             <Button
               type="submit"
               className="w-full"

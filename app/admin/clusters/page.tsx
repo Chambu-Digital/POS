@@ -69,22 +69,16 @@ export default function ClustersPage() {
   }
 
   return (
-    <div className="min-h-screen">
-      <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <Link href="/admin/tenants" className="hover:text-gray-700">Admin</Link>
-          <span>/</span>
-          <span className="text-gray-900 font-medium">Clusters</span>
-        </div>
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-xl font-bold text-gray-900">Clusters</h1>
         <button
           onClick={() => setShowForm(v => !v)}
           className="bg-green-600 hover:bg-green-700 text-white text-sm font-medium px-4 py-2 rounded-lg"
         >
           + Add Cluster
         </button>
-      </header>
-
-      <main className="max-w-4xl mx-auto px-6 py-8 space-y-6">
+      </div>
 
         {/* Add cluster form */}
         {showForm && (
@@ -179,7 +173,6 @@ export default function ClustersPage() {
             </table>
           </div>
         )}
-      </main>
     </div>
   )
 }

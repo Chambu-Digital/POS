@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { ModuleGuard } from '@/components/auth/module-guard'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -109,7 +110,7 @@ function statusBadge(status: string) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-export default function RentalServicesPage() {
+function RentalServicesPageContent() {
   const [activeTab, setActiveTab] = useState('services')
 
   return (
@@ -1248,5 +1249,13 @@ function ServiceFormDialog({
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+export default function RentalServicesPage() {
+  return (
+    <ModuleGuard featureKey="rentals.bookings">
+      <RentalServicesPageContent />
+    </ModuleGuard>
   )
 }

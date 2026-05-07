@@ -7,6 +7,8 @@ const secret = new TextEncoder().encode(
   process.env.JWT_SECRET || 'your-secret-key-change-in-production'
 )
 
+const ADMIN_HOSTNAME = process.env.ADMIN_HOSTNAME || 'adminpos.chambudigital.co.ke'
+
 const AUTH_PASSTHROUGH = [
   '/api/auth/login',
   '/api/auth/logout',
@@ -16,27 +18,34 @@ const AUTH_PASSTHROUGH = [
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+  const hostname = request.headers.get('host') || ''
 
-  // ── Pass subdomain to API routes via header (Edge-safe — no DB call) ──────
-  // getTenantDB() in each API route does the actual DB lookup (Node.js runtime)
-  if (!pathname.startsWith('/_next') && !pathname.startsWith('/admin')) {
-    const hostname = request.nextUrl.hostname
-    const subdomain = hostname.split('.')[0]
-    const isLocal = hostname === 'localhost' || hostname.startsWith('127.')
+  // ── Admin route protection ────────────────────────────────────────────────
+  // In production, only allow /admin routes from the designated admin hostname.
+  // In development (localhost), always allow.
+  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
+    const isLocalhost = hostname.includes('localhost') || hostname.includes('127.0.0.1')
+    const isAdminHost = hostname === ADMIN_HOSTNAME
 
-    if (!isLocal && subdomain !== 'www' && subdomain !== 'admin') {
-      const requestHeaders = new Headers(request.headers)
-      requestHeaders.set('x-tenant-subdomain', subdomain)
-      const response = NextResponse.next({ request: { headers: requestHeaders } })
-      return response
+    if (!isLocalhost && !isAdminHost) {
+      // Redirect to home — don't reveal the admin exists
+      return NextResponse.redirect(new URL('/', request.url))
     }
   }
 
-  // ── Demo mode ─────────────────────────────────────────────────────────────
+  // On the admin subdomain, redirect root to /admin/login
+  if (hostname === ADMIN_HOSTNAME && pathname === '/') {
+    return NextResponse.redirect(new URL('/admin/login', request.url))
+  }
+  // Pass through static assets
+  if (pathname.startsWith('/_next')) return NextResponse.next()
+
+  // Pass through non-API routes and auth endpoints
   if (!pathname.startsWith('/api/')) return NextResponse.next()
   if (AUTH_PASSTHROUGH.some(p => pathname.startsWith(p))) return NextResponse.next()
   if (pathname.startsWith('/api/demo/')) return NextResponse.next()
 
+  // ── Demo mode interception ────────────────────────────────────────────────
   const token = request.cookies.get('auth_token')?.value
   if (!token) return NextResponse.next()
 
@@ -53,7 +62,7 @@ export async function middleware(request: NextRequest) {
     const now = new Date().toISOString()
     let body: any = { success: true, _demo: true }
 
-    if (pathname.includes('/rentals'))  body.rental  = { _id: fakeId, customer: { name: 'Demo Customer', phone: '0700000000' }, items: [], startTime: now, deposit: 0, status: 'active', createdAt: now }
+    if (pathname.includes('/rentals'))       body.rental  = { _id: fakeId, customer: { name: 'Demo Customer', phone: '0700000000' }, items: [], startTime: now, deposit: 0, status: 'active', createdAt: now }
     else if (pathname.includes('/sales'))    body.sale    = { _id: fakeId, createdAt: now }
     else if (pathname.includes('/products')) body.product = { _id: fakeId }
     else if (pathname.includes('/staff'))    body.staff   = { _id: fakeId }

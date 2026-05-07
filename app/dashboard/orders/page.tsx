@@ -73,13 +73,39 @@ interface KitchenOrder {
 
 export default function OrdersPage() {
   return (
-    <PermissionGuard requiredPermission="canViewOrders">
+    <PermissionGuard requiredPermission="pos.orders">
       <OrdersPageContent />
     </PermissionGuard>
   )
 }
 
 function OrdersPageContent() {
+  const [userType, setUserType]       = useState<'user' | 'staff' | null>(null)
+  const [permissions, setPermissions] = useState<Record<string, boolean>>({})
+  const [features, setFeatures]       = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/auth/me').then(r => r.ok ? r.json() : null),
+      fetch('/api/tenant/config').then(r => r.ok ? r.json() : null),
+    ]).then(([meData, configData]) => {
+      if (meData?.user) {
+        setUserType(meData.user.type)
+        if (meData.user.type === 'staff') setPermissions(meData.user.permissions || {})
+      }
+      if (configData?.features) setFeatures(configData.features)
+    })
+  }, [])
+
+  function can(key: string) {
+    if (userType === 'user') return features[key] === true
+    return features[key] === true && permissions[key] === true
+  }
+
+  const showBar     = can('bar.tabs')
+  const showRentals = can('rentals.bookings') || can('rentals.manage')
+  const showKds     = can('kds.display')
+
   return (
     <div className="space-y-4">
       <Tabs defaultValue="sales">
@@ -87,20 +113,26 @@ function OrdersPageContent() {
           <TabsTrigger value="sales" className="flex items-center gap-2">
             Sales Orders
           </TabsTrigger>
-          <TabsTrigger value="bar" className="flex items-center gap-2">
-             Bar Orders
-          </TabsTrigger>
-          <TabsTrigger value="rental" className="flex items-center gap-2">
-            Rental Orders
-          </TabsTrigger>
-          <TabsTrigger value="kitchen" className="flex items-center gap-2">
-            Kitchen Orders
-          </TabsTrigger>
+          {showBar && (
+            <TabsTrigger value="bar" className="flex items-center gap-2">
+              Bar Orders
+            </TabsTrigger>
+          )}
+          {showRentals && (
+            <TabsTrigger value="rental" className="flex items-center gap-2">
+              Rental Orders
+            </TabsTrigger>
+          )}
+          {showKds && (
+            <TabsTrigger value="kitchen" className="flex items-center gap-2">
+              Kitchen Orders
+            </TabsTrigger>
+          )}
         </TabsList>
         <TabsContent value="sales" className="mt-4"><SalesOrdersTab source="pos" /></TabsContent>
-        <TabsContent value="bar" className="mt-4"><SalesOrdersTab source="bar" /></TabsContent>
-        <TabsContent value="rental" className="mt-4"><SalesOrdersTab source="rental" /></TabsContent>
-        <TabsContent value="kitchen" className="mt-4"><KitchenOrdersTab /></TabsContent>
+        {showBar     && <TabsContent value="bar"     className="mt-4"><SalesOrdersTab source="bar" /></TabsContent>}
+        {showRentals && <TabsContent value="rental"  className="mt-4"><SalesOrdersTab source="rental" /></TabsContent>}
+        {showKds     && <TabsContent value="kitchen" className="mt-4"><KitchenOrdersTab /></TabsContent>}
       </Tabs>
     </div>
   )
@@ -298,7 +330,7 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'bar' | 'rental' }) {
           <div className="py-16 text-center text-sm text-gray-400">No orders found</div>
         ) : (
           paginated.map((sale) => {
-            const orderNum  = `SALE-${sale._id.slice(-5).toUpperCase()}-${fmtOrderDate(sale.createdAt).replace(/ /g, '-')}`
+            const orderNum  = (sale as any).orderNumber || `ORD-${sale._id.slice(-5).toUpperCase()}`
             const staffName = (sale.staffId as any)?.firstName
               ? `${(sale.staffId as any).firstName} ${(sale.staffId as any).lastName ?? ''}`.trim()
               : (sale.staffId as any)?.name || null

@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Search, Plus, Minus, X, CalendarClock, User, CheckCircle2, Printer } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
+import { ModuleGuard } from '@/components/auth/module-guard'
 import { FloatingCartButton } from '@/components/sales/floating-cart-button'
 import { Receipt, ReceiptRef } from '@/components/sales/receipt'
 
@@ -53,9 +54,11 @@ interface Rental {
 
 export default function RentalsPage() {
   return (
-    <PermissionGuard requiredPermission="canManageRentals">
-      <RentalsPageContent />
-    </PermissionGuard>
+    <ModuleGuard featureKey="rentals.manage">
+      <PermissionGuard requiredPermission="rentals.manage">
+        <RentalsPageContent />
+      </PermissionGuard>
+    </ModuleGuard>
   )
 }
 

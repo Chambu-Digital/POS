@@ -1,6 +1,7 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
+import { DEFAULT_STAFF_PERMISSIONS, DEFAULT_MANAGER_PERMISSIONS, normalisePermissions } from '@/lib/modules'
 
 export async function GET(request: NextRequest) {
   try {
@@ -42,8 +43,8 @@ export async function POST(request: NextRequest) {
     if (existing) return NextResponse.json({ error: 'Email already in use' }, { status: 409 })
 
     const defaultPermissions = role === 'manager'
-      ? { canMakeSales: true, canViewInventory: true, canEditInventory: true, canAddProducts: true, canDeleteProducts: true, canViewSalesReports: true, canManageStaff: false, canEditSettings: false, canProcessRefunds: true, canApplyDiscounts: true }
-      : { canMakeSales: true, canViewInventory: true, canEditInventory: false, canAddProducts: false, canDeleteProducts: false, canViewSalesReports: false, canManageStaff: false, canEditSettings: false, canProcessRefunds: false, canApplyDiscounts: true }
+      ? { ...DEFAULT_MANAGER_PERMISSIONS }
+      : { ...DEFAULT_STAFF_PERMISSIONS }
 
     const staff = new models.Staff({
       userId: payload.userId, name: displayName, email, password, role,
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
       nationalId: nationalId || '', kraPin: kraPin || '', nhifNo: nhifNo || '', nssfNo: nssfNo || '',
       leaveDays: leaveDays ?? 14, salary: salary ?? 0,
       commissionStructure: commissionStructure || '', employmentType: employmentType || '',
-      permissions: permissions || defaultPermissions,
+      permissions: permissions ? normalisePermissions(permissions) : defaultPermissions,
     })
     await staff.save()
 

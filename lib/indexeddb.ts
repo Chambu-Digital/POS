@@ -96,7 +96,7 @@ let db: IDBPDatabase<POS_DB> | null = null
 export async function initDB(): Promise<IDBPDatabase<POS_DB>> {
   if (db) return db
 
-  db = await openDB<POS_DB>('pos-system', 3, {
+  db = await openDB<POS_DB>('pos-system', 5, {
     upgrade(db, oldVersion) {
       if (!db.objectStoreNames.contains('products')) {
         db.createObjectStore('products', { keyPath: '_id' })

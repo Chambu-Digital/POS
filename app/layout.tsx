@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { ServiceWorkerRegister } from '@/components/pwa/service-worker-register'
 import { PWADebug } from '@/components/pwa/pwa-debug'
+import { Toaster } from 'sonner'
 
 import './globals.css'
 
@@ -69,6 +70,7 @@ export default function RootLayout({
       </head>
       <body className="font-sans antialiased">
         {children}
+        <Toaster position="top-center" richColors />
         <ServiceWorkerRegister />
         <PWADebug />
       </body>

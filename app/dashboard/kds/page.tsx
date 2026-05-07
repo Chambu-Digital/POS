@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { ModuleGuard } from '@/components/auth/module-guard'
 import {
   ChefHat, UtensilsCrossed, BookOpen, Plus, Trash2, Edit3,
   ShoppingCart, CheckCheck, Clock, Flame, Crown,
@@ -1453,7 +1454,7 @@ function TableManagementTab() {
 // ─────────────────────────────────────────────────────────────────────────────
 let orderCounter = 44
 
-export default function KDSPage() {
+function KDSPageContent() {
   const [tab, setTab] = useState<Tab>('order')
   const [menu, setMenu] = useState<MenuItem[]>(INITIAL_MENU)
   const [kitchenOrders, setKitchenOrders] = useState<KitchenOrder[]>(SEED_KITCHEN_ORDERS)
@@ -1666,5 +1667,13 @@ export default function KDSPage() {
         <ToastStack toasts={toasts} dismiss={id => setToasts(prev => prev.filter(t => t.id !== id))} />
       </div>
     </>
+  )
+}
+
+export default function KDSPage() {
+  return (
+    <ModuleGuard featureKey="kds.display">
+      <KDSPageContent />
+    </ModuleGuard>
   )
 }
