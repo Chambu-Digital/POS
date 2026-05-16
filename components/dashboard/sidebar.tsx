@@ -3,18 +3,18 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Users, LogOut, Menu, X, Settings, ChevronDown } from 'lucide-react'
+import { Menu, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { resolveMediaUrl } from '@/lib/media-url'
 import { MODULES, DEFAULT_MODULE_FEATURES, normaliseFeatures } from '@/lib/modules'
 import type { ModuleFeature } from '@/lib/modules'
 
 const STATIC_TOP = [
-  { icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard', adminOnly: false, permission: null },
+  { label: 'Dashboard', href: '/dashboard', adminOnly: false, permission: null },
 ]
 const STATIC_BOTTOM = [
-  { icon: Users,    label: 'Staff',    href: '/dashboard/staff',    adminOnly: true,  permission: null },
-  { icon: Settings, label: 'Settings', href: '/dashboard/settings', adminOnly: true,  permission: null },
+  { label: 'Staff',    href: '/dashboard/staff',    adminOnly: true,  permission: null },
+  { label: 'Settings', href: '/dashboard/settings', adminOnly: true,  permission: null },
 ]
 
 const FEATURES_CACHE_KEY = 'sidebar_tenant_features'
@@ -129,8 +129,7 @@ export function Sidebar() {
 
   // ── Render helpers ───────────────────────────────────────────────────────────
 
-  function renderNavItem(item: { icon: any; label: string; href: string }) {
-    const Icon = item.icon
+  function renderNavItem(item: { label: string; href: string }) {
     const isActive = item.href === '/dashboard'
       ? pathname === '/dashboard'
       : pathname === item.href || pathname.startsWith(item.href + '/')
@@ -142,15 +141,14 @@ export function Sidebar() {
         href={item.href}
         onClick={() => setIsOpen(false)}
         className={cn(
-          'flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors relative text-sm',
+          'flex items-center justify-between px-4 py-2.5 transition-colors relative text-sm font-medium',
           isActive
             ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]'
             : 'text-[hsl(var(--sidebar-foreground))] hover:bg-[hsl(var(--sidebar-accent))]/50 hover:text-[hsl(var(--sidebar-accent-foreground))]'
         )}
       >
-        <Icon size={18} />
         <span>{item.label}</span>
-        {showDot && <span className="ml-auto w-2 h-2 rounded-full bg-orange-400 animate-pulse" />}
+        {showDot && <span className="w-2 h-2 bg-orange-400 animate-pulse" />}
       </Link>
     )
   }
@@ -161,7 +159,6 @@ export function Sidebar() {
     if (visibleFeatures.length === 0) return null
 
     const isCollapsed = collapsed[mod.key] ?? false
-    const ModIcon = mod.icon
     // Module header is "active" if any child is active
     const anyChildActive = visibleFeatures.some(f =>
       pathname === f.href || pathname.startsWith(f.href + '/')
@@ -178,25 +175,20 @@ export function Sidebar() {
         <button
           onClick={() => setCollapsed(prev => ({ ...prev, [mod.key]: !prev[mod.key] }))}
           className={cn(
-            'w-full flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors text-sm font-medium',
+            'w-full flex items-center justify-between px-4 py-2.5 transition-colors text-sm font-medium',
             anyChildActive
               ? 'text-[hsl(var(--sidebar-accent-foreground))]'
               : 'text-[hsl(var(--sidebar-foreground))]/70 hover:text-[hsl(var(--sidebar-foreground))]'
           )}
         >
-          <ModIcon size={18} />
-          <span className="flex-1 text-left">{mod.label}</span>
-          <ChevronDown
-            size={14}
-            className={cn('transition-transform', isCollapsed ? '-rotate-90' : 'rotate-0')}
-          />
+          <span className="text-left">{mod.label}</span>
+          <span className="text-xs">{isCollapsed ? '▸' : '▾'}</span>
         </button>
 
         {/* Child features */}
         {!isCollapsed && (
           <div className="ml-4 pl-3 border-l border-[hsl(var(--sidebar-foreground))]/10 space-y-0.5 mt-0.5">
             {visibleFeatures.map(f => {
-              const Icon = f.icon
               const isActive = pathname === f.href || pathname.startsWith(f.href + '/')
               const showDot = LIVE_HREFS.has(f.href) && isActive
               return (
@@ -205,15 +197,14 @@ export function Sidebar() {
                   href={f.href}
                   onClick={() => setIsOpen(false)}
                   className={cn(
-                    'flex items-center gap-3 px-3 py-2 rounded-lg transition-colors relative text-sm',
+                    'flex items-center justify-between px-3 py-2 transition-colors relative text-sm',
                     isActive
                       ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]'
                       : 'text-[hsl(var(--sidebar-foreground))]/80 hover:bg-[hsl(var(--sidebar-accent))]/50 hover:text-[hsl(var(--sidebar-accent-foreground))]'
                   )}
                 >
-                  <Icon size={16} />
                   <span>{f.label}</span>
-                  {showDot && <span className="ml-auto w-2 h-2 rounded-full bg-orange-400 animate-pulse" />}
+                  {showDot && <span className="w-2 h-2 bg-orange-400 animate-pulse" />}
                 </Link>
               )
             })}
@@ -227,7 +218,7 @@ export function Sidebar() {
     <>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-primary text-primary-foreground"
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-primary text-primary-foreground"
       >
         {isOpen ? <X size={24} /> : <Menu size={24} />}
       </button>
@@ -240,7 +231,7 @@ export function Sidebar() {
 
           {/* Shop branding */}
           <div className="flex flex-col items-center gap-3 mb-8 mt-12 lg:mt-0">
-            <div className="w-16 h-16 rounded-full bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] flex items-center justify-center font-bold text-2xl overflow-hidden">
+            <div className="w-16 h-16 bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] flex items-center justify-center font-bold text-2xl overflow-hidden">
               {shopLogo
                 ? <img src={resolveMediaUrl(shopLogo)} alt={shopName} className="w-full h-full object-cover" />
                 : shopName.charAt(0).toUpperCase()
@@ -257,7 +248,7 @@ export function Sidebar() {
             {!mounted ? (
               <div className="space-y-2">
                 {[...Array(6)].map((_, i) => (
-                  <div key={i} className="h-10 rounded-lg bg-[hsl(var(--sidebar-accent))]/20 animate-pulse" />
+                  <div key={i} className="h-10 bg-[hsl(var(--sidebar-accent))]/20 animate-pulse" />
                 ))}
               </div>
             ) : (
@@ -278,10 +269,10 @@ export function Sidebar() {
           <div className="pt-4 mt-auto border-t border-[hsl(var(--sidebar-foreground))]/10">
             <button
               onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => { window.location.href = '/auth/login' })}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-[hsl(var(--sidebar-foreground))] hover:bg-red-500/20 transition-colors"
+              className="w-full flex items-center justify-between px-4 py-3 text-[hsl(var(--sidebar-foreground))] hover:bg-red-500/20 transition-colors text-sm font-medium"
             >
-              <LogOut size={20} />
               <span>Logout</span>
+              <span>→</span>
             </button>
           </div>
         </div>

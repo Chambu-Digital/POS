@@ -15,13 +15,17 @@ export async function GET(req: NextRequest) {
     const view   = searchParams.get('view')
 
     const query: Record<string, unknown> = { userId: ownerId }
-    if (!status || status !== 'collected') {
+    if (!status || (status !== 'served' && status !== 'cancelled')) {
       const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
-      query.$or = [{ status: { $ne: 'collected' } }, { collectedAt: { $gte: twoHoursAgo } }]
+      query.$or = [
+        { status: { $nin: ['served', 'cancelled'] } },
+        { servedAt: { $gte: twoHoursAgo } },
+        { cancelledAt: { $gte: twoHoursAgo } }
+      ]
     }
     if (status) query.status = status
-    if (view === 'chef') query.status = { $in: ['pending', 'acknowledged', 'preparing', 'ready'] }
-    else if (view === 'waiter') query.status = { $in: ['preparing', 'ready', 'collected'] }
+    if (view === 'chef') query.status = { $in: ['pending', 'preparing', 'ready'] }
+    else if (view === 'waiter') query.status = { $in: ['preparing', 'ready', 'served'] }
 
     const orders = await models.KitchenOrder.find(query).sort({ createdAt: -1 }).lean()
     const pw: Record<string, number> = { vip: 0, rush: 1, normal: 2 }
@@ -69,8 +73,11 @@ export async function PATCH(req: NextRequest) {
     if (!orderId || !status) return NextResponse.json({ error: 'orderId and status are required' }, { status: 400 })
 
     const validTransitions: Record<string, string[]> = {
-      pending: ['acknowledged'], acknowledged: ['preparing'],
-      preparing: ['ready'], ready: ['collected'], collected: [],
+      pending: ['preparing', 'cancelled'],
+      preparing: ['ready', 'cancelled'],
+      ready: ['served', 'cancelled'],
+      served: [],
+      cancelled: [],
     }
 
     const order = await models.KitchenOrder.findOne({ _id: orderId, userId: ownerId })
@@ -82,11 +89,10 @@ export async function PATCH(req: NextRequest) {
 
     const now = new Date()
     order.status = status
-    if (status === 'acknowledged') order.acknowledgedAt = now
-    if (status === 'preparing')    order.preparingAt    = now
-    if (status === 'ready')        order.readyAt        = now
-    if (status === 'collected') {
-      order.collectedAt = now
+    if (status === 'preparing') order.preparingAt = now
+    if (status === 'ready')     order.readyAt     = now
+    if (status === 'served') {
+      order.servedAt = now
       if (totalAmount) order.totalAmount = totalAmount
       try {
         const KDS_PLACEHOLDER_ID = new mongoose.Types.ObjectId('000000000000000000000002')
@@ -104,6 +110,7 @@ export async function PATCH(req: NextRequest) {
         })
       } catch (saleErr) { console.error('KDS: failed to create Sale record:', saleErr) }
     }
+    if (status === 'cancelled') order.cancelledAt = now
 
     await order.save()
     return NextResponse.json({ order: { ...order.toObject(), id: order._id.toString() } })

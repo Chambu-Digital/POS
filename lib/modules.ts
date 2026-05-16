@@ -7,19 +7,12 @@
 //   - Admin tenant feature toggles (grouped)
 //   - Step 2: staff permission checkboxes (grouped)
 
-import {
-  ShoppingCart, UtensilsCrossed, Wine, BedDouble,
-  FileText, Package, BarChart3, Receipt, LayoutDashboard, Settings, Users,
-} from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
-
 export interface ModuleFeature {
   /** Dotted key: 'module.feature', e.g. 'pos.sales' */
   key: string
   label: string
   description: string
   href: string
-  icon: LucideIcon
   /** If true, only the business owner (type:'user') can see this */
   adminOnly: boolean
   /** Whether this feature is on by default for new tenants */
@@ -31,7 +24,6 @@ export interface ModuleDefinition {
   key: string
   label: string
   description: string
-  icon: LucideIcon
   /** If true, this module is enabled by default for new tenants */
   defaultOn: boolean
   features: ModuleFeature[]
@@ -42,42 +34,41 @@ export const MODULES: ModuleDefinition[] = [
     key: 'pos',
     label: 'Point of Sale',
     description: 'Sales, inventory, orders and reports',
-    icon: ShoppingCart,
     defaultOn: true,
     features: [
       {
         key: 'pos.sales', label: 'Make Sale', description: 'POS cart and checkout',
-        href: '/dashboard/sales', icon: ShoppingCart,
+        href: '/dashboard/sales',
         adminOnly: false, defaultOn: true,
       },
       {
         key: 'pos.orders', label: 'Orders', description: 'Order history and management',
-        href: '/dashboard/orders', icon: FileText,
+        href: '/dashboard/orders',
         adminOnly: false, defaultOn: true,
       },
       {
         key: 'pos.inventory', label: 'Inventory', description: 'Product and stock management',
-        href: '/dashboard/inventory', icon: Package,
+        href: '/dashboard/inventory',
         adminOnly: false, defaultOn: true,
       },
       {
         key: 'pos.reports', label: 'Reports', description: 'Sales, inventory and profit reports',
-        href: '/dashboard/reports', icon: BarChart3,
+        href: '/dashboard/reports',
         adminOnly: false, defaultOn: true,
       },
       {
         key: 'pos.expenses', label: 'Expenses', description: 'Expense tracking and approval',
-        href: '/dashboard/expenses', icon: Receipt,
+        href: '/dashboard/expenses',
         adminOnly: false, defaultOn: true,
       },
       {
         key: 'pos.customers', label: 'Customers', description: 'Customer management and credit accounts',
-        href: '/dashboard/customers', icon: Users,
+        href: '/dashboard/customers',
         adminOnly: false, defaultOn: true,
       },
       {
         key: 'pos.settings', label: 'Settings', description: 'Shop settings and configuration',
-        href: '/dashboard/settings', icon: Settings,
+        href: '/dashboard/settings',
         adminOnly: true, defaultOn: true,
       },
     ],
@@ -86,13 +77,37 @@ export const MODULES: ModuleDefinition[] = [
     key: 'kds',
     label: 'Kitchen Display',
     description: 'KDS for restaurant kitchen orders',
-    icon: UtensilsCrossed,
-    defaultOn: false,
+    defaultOn: true,
     features: [
       {
-        key: 'kds.display', label: 'Kitchen Display', description: 'Live kitchen order screen',
-        href: '/dashboard/kds', icon: UtensilsCrossed,
-        adminOnly: false, defaultOn: false,
+        key: 'kds.menu', label: 'Menu Management', description: 'Manage restaurant menu items',
+        href: '/dashboard/kds/menu',
+        adminOnly: true, defaultOn: true,
+      },
+      {
+        key: 'kds.inventory', label: 'Inventory', description: 'Track restaurant stock and supplies',
+        href: '/dashboard/kds/inventory',
+        adminOnly: true, defaultOn: true,
+      },
+      {
+        key: 'kds.orders', label: 'Create Order', description: 'Waiter creates new kitchen orders',
+        href: '/dashboard/kds/orders',
+        adminOnly: false, defaultOn: true,
+      },
+      {
+        key: 'kds.chef', label: 'Chef View', description: 'Kitchen display for chefs',
+        href: '/dashboard/kds/chef',
+        adminOnly: false, defaultOn: true,
+      },
+      {
+        key: 'kds.waiter', label: 'Waiter View', description: 'Order pickup and serving',
+        href: '/dashboard/kds/waiter',
+        adminOnly: false, defaultOn: true,
+      },
+      {
+        key: 'kds.history', label: 'Order History', description: 'View all kitchen orders',
+        href: '/dashboard/kds/history',
+        adminOnly: false, defaultOn: true,
       },
     ],
   },
@@ -100,12 +115,11 @@ export const MODULES: ModuleDefinition[] = [
     key: 'bar',
     label: 'Bar',
     description: 'Bar tab management',
-    icon: Wine,
     defaultOn: false,
     features: [
       {
         key: 'bar.tabs', label: 'Bar Tabs', description: 'Manage bar tabs and orders',
-        href: '/dashboard/bar', icon: Wine,
+        href: '/dashboard/bar',
         adminOnly: false, defaultOn: false,
       },
     ],
@@ -114,17 +128,16 @@ export const MODULES: ModuleDefinition[] = [
     key: 'rentals',
     label: 'Rentals',
     description: 'Room, bike, car and other rentals',
-    icon: BedDouble,
     defaultOn: false,
     features: [
       {
         key: 'rentals.bookings', label: 'Rental Services', description: 'Create and manage rental bookings',
-        href: '/dashboard/rental-services', icon: BedDouble,
+        href: '/dashboard/rental-services',
         adminOnly: false, defaultOn: false,
       },
       {
         key: 'rentals.manage', label: 'Rentals', description: 'View and manage active rentals',
-        href: '/dashboard/rentals', icon: BedDouble,
+        href: '/dashboard/rentals',
         adminOnly: false, defaultOn: false,
       },
     ],
@@ -147,7 +160,7 @@ export const DEFAULT_MODULE_FEATURES: Record<string, boolean> = Object.fromEntri
  */
 export const LEGACY_KEY_MAP: Record<string, string> = {
   pos:            'pos.sales',
-  kitchenDisplay: 'kds.display',
+  kitchenDisplay: 'kds.chef',
   bar:            'bar.tabs',
   rentals:        'rentals.bookings',
   orders:         'pos.orders',
@@ -205,7 +218,10 @@ export const DEFAULT_STAFF_PERMISSIONS: Record<string, boolean> = {
   'pos.reports':      false,
   'pos.expenses':     false,
   'pos.customers':    false,
-  'kds.display':      false,
+  'kds.orders':       true,
+  'kds.chef':         true,
+  'kds.waiter':       true,
+  'kds.history':      true,
   'bar.tabs':         false,
   'rentals.bookings': false,
   'rentals.manage':   false,
@@ -219,7 +235,10 @@ export const DEFAULT_MANAGER_PERMISSIONS: Record<string, boolean> = {
   'pos.reports':      true,
   'pos.expenses':     true,
   'pos.customers':    true,
-  'kds.display':      false,
+  'kds.orders':       true,
+  'kds.chef':         true,
+  'kds.waiter':       true,
+  'kds.history':      true,
   'bar.tabs':         false,
   'rentals.bookings': false,
   'rentals.manage':   false,

@@ -1,7 +1,7 @@
 // Chambu Digital POS Service Worker
 // Handles offline caching, background sync, and automatic updates
 
-const CACHE_VERSION = 'chambu-pos-' + (self.registration?.scope || 'v1')
+const CACHE_VERSION = 'chambu-pos-v2-' + (self.registration?.scope || 'v1')
 const CACHE_NAME = CACHE_VERSION + '-precache'
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime'
 const API_CACHE = CACHE_VERSION + '-api'
@@ -100,9 +100,31 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Strategy 3: Cache-first for static assets (JS, CSS, local images)
+  // Strategy 3: Network-first for JS/CSS to avoid stale code, Cache-first for fonts/images
+  if (url.pathname.match(/\.(js|css)$/i)) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (!response || response.status !== 200) {
+            return response
+          }
+          const responseToCache = response.clone()
+          caches.open(RUNTIME_CACHE).then((cache) => {
+            cache.put(request, responseToCache)
+          })
+          return response
+        })
+        .catch(() => {
+          // Network failed, try cache as fallback
+          return caches.match(request)
+        })
+    )
+    return
+  }
+
+  // Strategy 4: Cache-first for fonts and local images
   if (
-    url.pathname.match(/\.(js|css|woff2|woff|ttf|eot|svg|png|jpg|jpeg|gif|webp)$/i) &&
+    url.pathname.match(/\.(woff2|woff|ttf|eot|svg|png|jpg|jpeg|gif|webp)$/i) &&
     !url.pathname.includes('placeholder')
   ) {
     event.respondWith(
@@ -122,7 +144,6 @@ self.addEventListener('fetch', (event) => {
             return response
           })
           .catch(() => {
-            // Return placeholder or cached version
             return caches.match(request)
           })
       })
@@ -130,7 +151,7 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Strategy 4: Network-first for API calls
+  // Strategy 5: Network-first for API calls
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(request)

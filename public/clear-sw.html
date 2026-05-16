@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Clear Service Worker Cache</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 600px;
+      margin: 50px auto;
+      padding: 20px;
+      text-align: center;
+    }
+    button {
+      background: #ef4444;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      cursor: pointer;
+      border-radius: 6px;
+      margin: 10px;
+    }
+    button:hover {
+      background: #dc2626;
+    }
+    .success {
+      color: #10b981;
+      font-weight: bold;
+      margin-top: 20px;
+    }
+    .info {
+      background: #f3f4f6;
+      padding: 15px;
+      border-radius: 6px;
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧹 Clear Service Worker Cache</h1>
+  
+  <div class="info">
+    <p>If you're seeing stale content or module errors, use this page to completely clear the service worker cache.</p>
+  </div>
+
+  <button onclick="clearEverything()">Clear All Caches & Reload</button>
+  <button onclick="unregisterSW()">Unregister Service Worker</button>
+
+  <div id="status"></div>
+
+  <script>
+    async function clearEverything() {
+      const status = document.getElementById('status');
+      status.innerHTML = 'Clearing...';
+
+      try {
+        // Clear all caches
+        const cacheNames = await caches.keys();
+        await Promise.all(cacheNames.map(name => caches.delete(name)));
+        
+        // Unregister service workers
+        if ('serviceWorker' in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map(reg => reg.unregister()));
+        }
+
+        status.innerHTML = '<div class="success">✅ All caches cleared and service worker unregistered!<br>Reloading in 2 seconds...</div>';
+        
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 2000);
+      } catch (error) {
+        status.innerHTML = '<div style="color: red;">❌ Error: ' + error.message + '</div>';
+      }
+    }
+
+    async function unregisterSW() {
+      const status = document.getElementById('status');
+      status.innerHTML = 'Unregistering...';
+
+      try {
+        if ('serviceWorker' in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map(reg => reg.unregister()));
+          status.innerHTML = '<div class="success">✅ Service worker unregistered!<br>Reload the page to continue without service worker.</div>';
+        } else {
+          status.innerHTML = '<div>No service worker support in this browser.</div>';
+        }
+      } catch (error) {
+        status.innerHTML = '<div style="color: red;">❌ Error: ' + error.message + '</div>';
+      }
+    }
+  </script>
+</body>
+</html>

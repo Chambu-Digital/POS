@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { UtensilsCrossed, ChefHat, Clock, BedDouble } from 'lucide-react'
+import { UtensilsCrossed, Clock, BedDouble } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -340,7 +340,7 @@ export default function DashboardPage() {
             ))}
           </div>
           <Card>
-            <CardHeader><CardTitle className="text-lg flex items-center gap-2"><ChefHat className="h-4 w-4 text-green-600" />Recent Kitchen Orders</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-lg flex items-center gap-2">👨‍🍳 Recent Kitchen Orders</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-3">
                 {stats.kdsStats.recentKitchenOrders.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No kitchen orders yet today</p>}

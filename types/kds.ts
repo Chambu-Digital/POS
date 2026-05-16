@@ -1,11 +1,15 @@
 export type OrderStatus =
   | 'pending'
-  | 'acknowledged'
   | 'preparing'
   | 'ready'
-  | 'collected'
+  | 'served'
+  | 'cancelled'
+
+export type OrderType = 'dine-in' | 'takeaway' | 'delivery'
 
 export type ItemCategory = 'starter' | 'main' | 'dessert' | 'drink' | 'side'
+
+export type KitchenStation = 'grill' | 'drinks' | 'dessert' | 'pizza' | 'all'
 
 export type OrderPriority = 'normal' | 'rush' | 'vip'
 
@@ -21,6 +25,7 @@ export interface KDSOrderItem {
   name: string
   quantity: number
   category: ItemCategory
+  station?: KitchenStation
   notes?: string
   modifications?: string[]
   prepTime?: number
@@ -34,16 +39,17 @@ export interface KDSOrder {
   waiterName: string
   waiterId: string
   coverCount: number
+  orderType: OrderType
   items: KDSOrderItem[]
   status: OrderStatus
   priority: OrderPriority
   notes?: string
   // Timestamps as ISO strings (safe for JSON serialization)
   createdAt: string
-  acknowledgedAt?: string
   preparingAt?: string
   readyAt?: string
-  collectedAt?: string
+  servedAt?: string
+  cancelledAt?: string
   // Chef assignment
   assignedChefId?: string
   assignedChefName?: string
@@ -51,9 +57,9 @@ export interface KDSOrder {
 
 export interface KDSStats {
   pending: number
-  acknowledged: number
   preparing: number
   ready: number
-  collected: number
+  served: number
+  cancelled: number
   avgPrepTime: number
 }

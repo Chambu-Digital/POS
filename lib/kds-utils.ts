@@ -35,18 +35,18 @@ export function getUrgencyLevel(order: KDSOrder): 'normal' | 'warning' | 'critic
 
 export function computeStats(orders: KDSOrder[]): KDSStats {
   const stats: KDSStats = {
-    pending: 0, acknowledged: 0, preparing: 0, ready: 0, collected: 0, avgPrepTime: 0,
+    pending: 0, preparing: 0, ready: 0, served: 0, cancelled: 0, avgPrepTime: 0,
   }
   let totalPrepSeconds = 0
   let prepCount = 0
 
   for (const o of orders) {
     switch (o.status) {
-      case 'pending':      stats.pending++;      break
-      case 'acknowledged': stats.acknowledged++; break
-      case 'preparing':    stats.preparing++;    break
-      case 'ready':        stats.ready++;        break
-      case 'collected':    stats.collected++;    break
+      case 'pending':   stats.pending++;   break
+      case 'preparing': stats.preparing++; break
+      case 'ready':     stats.ready++;     break
+      case 'served':    stats.served++;    break
+      case 'cancelled': stats.cancelled++; break
     }
     if (o.readyAt && o.preparingAt) {
       totalPrepSeconds += (new Date(o.readyAt).getTime() - new Date(o.preparingAt).getTime()) / 1000

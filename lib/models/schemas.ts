@@ -150,7 +150,12 @@ export const staffSchema = new mongoose.Schema(
         'pos.inventory': true,
         'pos.reports': false,
         'pos.expenses': false,
-        'kds.display': false,
+        'kds.menu': false,
+        'kds.inventory': false,
+        'kds.orders': false,
+        'kds.chef': false,
+        'kds.waiter': false,
+        'kds.history': false,
         'bar.tabs': false,
         'rentals.bookings': false,
         'rentals.manage': false,
@@ -293,12 +298,14 @@ rentalBookingSchema.index({ userId: 1, status: 1 })
 // ── KitchenOrder ──────────────────────────────────────────────────────────────
 const kitchenOrderItemSchema = new mongoose.Schema(
   {
-    itemId:   { type: String, required: true },
+    id:       { type: String, required: true },
+    menuItemId: String,
     name:     { type: String, required: true },
     quantity: { type: Number, required: true },
     notes:    String,
     category: { type: String, required: true },
-    prepTime: { type: Number, required: true },
+    station:  String,
+    prepTime: { type: Number, default: 15 },
   },
   { _id: false }
 )
@@ -308,17 +315,18 @@ export const kitchenOrderSchema = new mongoose.Schema(
     userId:              { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     orderNumber:         { type: String, required: true },
     tableNumber:         { type: String, required: true },
+    tableSection:        String,
     waiterName:          { type: String, required: true },
     waiterId:            String,
     coverCount:          { type: Number, default: 1 },
     items:               { type: [kitchenOrderItemSchema], required: true },
-    status:              { type: String, enum: ['pending', 'acknowledged', 'preparing', 'ready', 'collected'], default: 'pending' },
+    status:              { type: String, enum: ['pending', 'preparing', 'ready', 'served'], default: 'pending' },
     priority:            { type: String, enum: ['normal', 'rush', 'vip'], default: 'normal' },
+    orderType:           { type: String, enum: ['dine-in', 'takeaway', 'delivery'], default: 'dine-in' },
     specialInstructions: String,
-    acknowledgedAt:      Date,
     preparingAt:         Date,
     readyAt:             Date,
-    collectedAt:         Date,
+    servedAt:            Date,
     totalAmount:         { type: Number, default: 0 },
   },
   { timestamps: true, collection: 'kitchen_orders' }
@@ -326,6 +334,36 @@ export const kitchenOrderSchema = new mongoose.Schema(
 kitchenOrderSchema.index({ userId: 1, createdAt: -1 })
 kitchenOrderSchema.index({ userId: 1, status: 1 })
 kitchenOrderSchema.index({ userId: 1, tableNumber: 1, status: 1 })
+
+// ── MenuItem ──────────────────────────────────────────────────────────────────
+export const menuItemSchema = new mongoose.Schema(
+  {
+    userId:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    name:        { type: String, required: true },
+    description: { type: String, default: '' },
+    category:    { type: String, required: true, enum: ['starter', 'main', 'side', 'dessert', 'drink'], default: 'main' },
+    price:       { type: Number, required: true, min: 0 },
+    prepTime:    { type: Number, default: 15 },
+    station:     { type: String, enum: ['grill', 'drinks', 'dessert', 'pizza', 'all'], default: 'all' },
+    available:   { type: Boolean, default: true },
+    popular:     { type: Boolean, default: false },
+    image:       { type: String, default: '' },
+    productId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+    ingredients: [{
+      productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+      quantity:  { type: Number, default: 1 },
+      unit:      { type: String, default: 'unit' }
+    }],
+    allergens:    [{ type: String }],
+    spicyLevel:   { type: Number, min: 0, max: 5, default: 0 },
+    vegetarian:   { type: Boolean, default: false },
+    vegan:        { type: Boolean, default: false },
+    glutenFree:   { type: Boolean, default: false },
+  },
+  { timestamps: true, collection: 'menu_items' }
+)
+menuItemSchema.index({ userId: 1, category: 1 })
+menuItemSchema.index({ userId: 1, available: 1 })
 
 // ── Expense ───────────────────────────────────────────────────────────────────
 export const expenseCategorySchema = new mongoose.Schema(

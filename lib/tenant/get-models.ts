@@ -3,7 +3,7 @@ import type mongoose from 'mongoose'
 import {
   productSchema, saleSchema, categorySchema, staffSchema, userSchema,
   rentalSchema, rentalServiceSchema, rentalBookingSchema,
-  kitchenOrderSchema, expenseSchema, expenseCategorySchema, reportSchema,
+  kitchenOrderSchema, menuItemSchema, expenseSchema, expenseCategorySchema, reportSchema,
   customerSchema,
 } from '@/lib/models/schemas'
 
@@ -18,6 +18,7 @@ export function getModels(conn: mongoose.Connection) {
     RentalService:   conn.models.RentalService   || conn.model('RentalService',   rentalServiceSchema),
     RentalBooking:   conn.models.RentalBooking   || conn.model('RentalBooking',   rentalBookingSchema),
     KitchenOrder:    conn.models.KitchenOrder    || conn.model('KitchenOrder',    kitchenOrderSchema),
+    MenuItem:        conn.models.MenuItem        || conn.model('MenuItem',        menuItemSchema),
     Expense:         conn.models.Expense         || conn.model('Expense',         expenseSchema),
     ExpenseCategory: conn.models.ExpenseCategory || conn.model('ExpenseCategory', expenseCategorySchema),
     Report:          conn.models.Report          || conn.model('Report',          reportSchema),

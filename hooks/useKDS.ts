@@ -5,10 +5,9 @@ import { computeStats } from '@/lib/kds-utils'
 const POLL_INTERVAL = 8000
 
 const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
-  pending:      'acknowledged',
-  acknowledged: 'preparing',
-  preparing:    'ready',
-  ready:        'collected',
+  pending:   'preparing',
+  preparing: 'ready',
+  ready:     'served',
 }
 
 export function useKDS() {
@@ -17,7 +16,7 @@ export function useKDS() {
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<KDSFilter>('ALL')
   const [stats, setStats] = useState<KDSStats>({
-    pending: 0, acknowledged: 0, preparing: 0, ready: 0, collected: 0, avgPrepTime: 0,
+    pending: 0, preparing: 0, ready: 0, served: 0, cancelled: 0, avgPrepTime: 0,
   })
   const prevOrderIds = useRef<Set<string>>(new Set())
 
@@ -85,7 +84,7 @@ export function useKDS() {
   }, [orders])
 
   const filteredOrders = filter === 'ALL'
-    ? orders.filter(o => o.status !== 'collected')
+    ? orders.filter(o => o.status !== 'served' && o.status !== 'cancelled')
     : orders.filter(o => o.status === filter)
 
   return {
