@@ -199,7 +199,6 @@ export default function TenantForm({ initial, ownerEmail: initialOwnerEmail }: P
         <p className="text-xs text-gray-400 mb-3">Select which modules this business will have access to. All features within a module are enabled by default.</p>
         <div className="grid grid-cols-2 gap-3">
           {MODULES.map(mod => {
-            const ModIcon = mod.icon
             const on = selectedModules.includes(mod.key)
             return (
               <button
@@ -214,9 +213,6 @@ export default function TenantForm({ initial, ownerEmail: initialOwnerEmail }: P
                     : 'border-gray-200 bg-white hover:border-gray-300'
                 }`}
               >
-                <div className={`mt-0.5 p-1.5 rounded-md ${on ? 'bg-green-100' : 'bg-gray-100'}`}>
-                  <ModIcon size={16} className={on ? 'text-green-700' : 'text-gray-500'} />
-                </div>
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm font-semibold ${on ? 'text-green-800' : 'text-gray-700'}`}>{mod.label}</p>
                   <p className="text-xs text-gray-400 mt-0.5 leading-snug">{mod.description}</p>

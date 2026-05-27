@@ -414,3 +414,57 @@ export const reportSchema = new mongoose.Schema(
   { timestamps: true }
 )
 reportSchema.index({ userId: 1, reportType: 1, createdAt: -1 })
+
+// ── DrugBatch ─────────────────────────────────────────────────────────────────
+// Tracks individual stock batches per drug for FEFO, expiry, and batch recall
+export const drugBatchSchema = new mongoose.Schema(
+  {
+    userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    drugId:          { type: mongoose.Schema.Types.ObjectId, ref: 'Drug', required: true },
+    batchNumber:     { type: String, required: true, trim: true },
+    expiryDate:      { type: Date, required: true },
+    manufactureDate: { type: Date },
+    quantity:        { type: Number, required: true, default: 0 },  // current qty in this batch
+    initialQuantity: { type: Number, required: true },              // qty when received
+    buyingPrice:     { type: Number, required: true },
+    sellingPrice:    { type: Number },                              // override drug default if set
+    supplier:        { type: String, default: '' },
+    receivedDate:    { type: Date, default: Date.now },
+    status:          { type: String, enum: ['active', 'expired', 'recalled', 'depleted'], default: 'active' },
+    notes:           { type: String, default: '' },
+  },
+  { collection: 'drug_batches', timestamps: true }
+)
+drugBatchSchema.index({ userId: 1, drugId: 1, expiryDate: 1 })  // FEFO query
+drugBatchSchema.index({ userId: 1, status: 1 })
+drugBatchSchema.index({ userId: 1, expiryDate: 1 })              // expiry alerts
+
+// ── Drug ──────────────────────────────────────────────────────────────────────
+// Separate pharmacy drug catalog — independent from POS products
+export const drugSchema = new mongoose.Schema(
+  {
+    userId:           { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    genericName:      { type: String, required: true, trim: true },
+    brandName:        { type: String, default: '', trim: true },
+    category:         { type: String, default: 'General', trim: true }, // Antibiotics, Analgesics, etc.
+    drugClass:        { type: String, default: '' },
+    dosageForm:       { type: String, default: '' }, // Tablet, Capsule, Syrup, Injection, etc.
+    strength:         { type: String, default: '' }, // e.g. 500mg, 250mg/5ml
+    unit:             { type: String, default: 'Tablet' }, // Tablet, Strip, Bottle, Vial
+    barcode:          { type: String, default: '' },
+    sellingPrice:     { type: Number, required: true, default: 0 },
+    buyingPrice:      { type: Number, required: true, default: 0 },
+    stock:            { type: Number, default: 0 },  // computed from active batches
+    reorderLevel:     { type: Number, default: 10 },
+    requiresPrescription: { type: Boolean, default: false },
+    isControlled:     { type: Boolean, default: false }, // narcotics, etc.
+    description:      { type: String, default: '' },
+    sideEffects:      { type: String, default: '' },
+    manufacturer:     { type: String, default: '' },
+    isActive:         { type: Boolean, default: true },
+  },
+  { collection: 'drugs', timestamps: true }
+)
+drugSchema.index({ userId: 1, genericName: 1 })
+drugSchema.index({ userId: 1, barcode: 1 })
+drugSchema.index({ userId: 1, category: 1 })

@@ -4,7 +4,7 @@ import {
   productSchema, saleSchema, categorySchema, staffSchema, userSchema,
   rentalSchema, rentalServiceSchema, rentalBookingSchema,
   kitchenOrderSchema, menuItemSchema, expenseSchema, expenseCategorySchema, reportSchema,
-  customerSchema,
+  customerSchema, drugBatchSchema, drugSchema,
 } from '@/lib/models/schemas'
 
 export function getModels(conn: mongoose.Connection) {
@@ -23,5 +23,7 @@ export function getModels(conn: mongoose.Connection) {
     ExpenseCategory: conn.models.ExpenseCategory || conn.model('ExpenseCategory', expenseCategorySchema),
     Report:          conn.models.Report          || conn.model('Report',          reportSchema),
     Customer:        conn.models.Customer        || conn.model('Customer',        customerSchema),
+    DrugBatch:       conn.models.DrugBatch       || conn.model('DrugBatch',       drugBatchSchema),
+    Drug:            conn.models.Drug            || conn.model('Drug',            drugSchema),
   }
 }

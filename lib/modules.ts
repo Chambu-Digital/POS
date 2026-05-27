@@ -142,6 +142,39 @@ export const MODULES: ModuleDefinition[] = [
       },
     ],
   },
+  {
+    key: 'pharmacy',
+    label: 'Pharmacy',
+    description: 'Pharmacy management system',
+    defaultOn: false,
+    features: [
+      {
+        key: 'pharmacy.pos', label: 'Pharmacy POS', description: 'Fast checkout for OTC and prescription drugs',
+        href: '/dashboard/pharmacy/pos',
+        adminOnly: false, defaultOn: true,
+      },
+      {
+        key: 'pharmacy.inventory', label: 'Drug Inventory', description: 'Batch tracking, expiry, FEFO stock management',
+        href: '/dashboard/pharmacy/inventory',
+        adminOnly: false, defaultOn: true,
+      },
+      {
+        key: 'pharmacy.patients', label: 'Patients', description: 'Patient registration and records',
+        href: '/dashboard/pharmacy/patients',
+        adminOnly: false, defaultOn: true,
+      },
+      {
+        key: 'pharmacy.appointments', label: 'Appointments', description: 'Schedule and manage appointments',
+        href: '/dashboard/pharmacy/appointments',
+        adminOnly: false, defaultOn: true,
+      },
+      {
+        key: 'pharmacy.billing', label: 'Billing', description: 'Patient billing and payments',
+        href: '/dashboard/pharmacy/billing',
+        adminOnly: false, defaultOn: true,
+      },
+    ],
+  },
 ]
 
 // ── Derived helpers ────────────────────────────────────────────────────────────
@@ -225,6 +258,11 @@ export const DEFAULT_STAFF_PERMISSIONS: Record<string, boolean> = {
   'bar.tabs':         false,
   'rentals.bookings': false,
   'rentals.manage':   false,
+  'pharmacy.pos':          false,
+  'pharmacy.inventory':    false,
+  'pharmacy.patients':     false,
+  'pharmacy.appointments': false,
+  'pharmacy.billing':      false,
 }
 
 /** Default permissions for a manager */
@@ -242,6 +280,11 @@ export const DEFAULT_MANAGER_PERMISSIONS: Record<string, boolean> = {
   'bar.tabs':         false,
   'rentals.bookings': false,
   'rentals.manage':   false,
+  'pharmacy.pos':          false,
+  'pharmacy.inventory':    false,
+  'pharmacy.patients':     false,
+  'pharmacy.appointments': false,
+  'pharmacy.billing':      false,
 }
 
 /** Normalises a permissions object — only keys explicitly set to true are granted */
