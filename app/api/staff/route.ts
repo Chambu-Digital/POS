@@ -2,6 +2,7 @@ import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
 import { DEFAULT_STAFF_PERMISSIONS, DEFAULT_MANAGER_PERMISSIONS, normalisePermissions } from '@/lib/modules'
+import { checkEmailExistsAcrossTenants } from '@/lib/auth/check-email-exists'
 
 export async function GET(request: NextRequest) {
   try {
@@ -39,8 +40,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
     }
 
-    const existing = await models.Staff.findOne({ userId: payload.userId, email })
-    if (existing) return NextResponse.json({ error: 'Email already in use' }, { status: 409 })
+    // Check if email already exists in this tenant
+    const existingInTenant = await models.Staff.findOne({ userId: payload.userId, email })
+    if (existingInTenant) return NextResponse.json({ error: 'Email already in use in this business' }, { status: 409 })
+
+    // Check if email already exists across all tenants
+    const existingAccount = await checkEmailExistsAcrossTenants(email)
+    if (existingAccount) {
+      return NextResponse.json({ 
+        error: 'An account with this email already exists in another business. Please use a different email.' 
+      }, { status: 409 })
+    }
 
     const defaultPermissions = role === 'manager'
       ? { ...DEFAULT_MANAGER_PERMISSIONS }

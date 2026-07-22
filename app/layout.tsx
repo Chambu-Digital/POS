@@ -61,14 +61,14 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         {/* iOS splash / touch icon fallbacks */}
         <link rel="apple-touch-icon" href="/chambu-logo.svg" />
         <link rel="apple-touch-icon" sizes="180x180" href="/chambu-logo.svg" />
         <link rel="mask-icon" href="/chambu-logo.svg" color="#10b981" />
       </head>
-      <body className="font-sans antialiased">
+      <body className="font-sans antialiased" suppressHydrationWarning>
         {children}
         <Toaster position="top-center" richColors />
         <ServiceWorkerRegister />

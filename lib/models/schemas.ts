@@ -415,37 +415,77 @@ export const reportSchema = new mongoose.Schema(
 )
 reportSchema.index({ userId: 1, reportType: 1, createdAt: -1 })
 
+// ── StockLedger ────────────────────────────────────────────────────────────────
+// Immutable ledger of every retail product stock movement.
+// Written by the sales API on every completed sale, and by the inventory
+// adjustment API on manual stock changes. Never updated — only inserted.
+export const stockLedgerSchema = new mongoose.Schema(
+  {
+    userId:     { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    productId:  { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+    saleId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' },       // set on sale
+    staffId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    type: {
+      type: String,
+      enum: ['SALE', 'ADJUSTMENT', 'RETURN', 'IMPORT', 'MANUAL'],
+      required: true,
+    },
+    quantity:        { type: Number, required: true },   // negative = stock out, positive = stock in
+    previousStock:   { type: Number, required: true },
+    newStock:        { type: Number, required: true },
+    reason:          { type: String, default: '' },
+    orderNumber:     { type: String, default: '' },
+    timestamp:       { type: Date, default: Date.now },
+  },
+  { collection: 'stock_ledger' }
+)
+stockLedgerSchema.index({ userId: 1, productId: 1, timestamp: -1 })
+stockLedgerSchema.index({ userId: 1, saleId: 1 })
+stockLedgerSchema.index({ userId: 1, timestamp: -1 })
+
 // ── DrugBatch ─────────────────────────────────────────────────────────────────
 // Tracks individual stock batches per drug for FEFO, expiry, and batch recall
 export const drugBatchSchema = new mongoose.Schema(
   {
     userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
     drugId:          { type: mongoose.Schema.Types.ObjectId, ref: 'Drug', required: true },
-    batchNumber:     { type: String, required: true, trim: true },
+    internalBatchId: { type: String, required: true, trim: true },
+    manufacturerLot: { type: String, default: '', trim: true },
     expiryDate:      { type: Date, required: true },
     manufactureDate: { type: Date },
     quantity:        { type: Number, required: true, default: 0 },  // current qty in this batch
     initialQuantity: { type: Number, required: true },              // qty when received
+    reservedQuantity:{ type: Number, default: 0 },                  // qty reserved for held sales/transfers
     buyingPrice:     { type: Number, required: true },
     sellingPrice:    { type: Number },                              // override drug default if set
     supplier:        { type: String, default: '' },
+    invoiceNumber:   { type: String, default: '', trim: true },
+    poReference:     { type: String, default: '', trim: true },
     receivedDate:    { type: Date, default: Date.now },
-    status:          { type: String, enum: ['active', 'expired', 'recalled', 'depleted'], default: 'active' },
+    status:          { type: String, enum: ['active', 'expired', 'recalled', 'depleted', 'quarantined'], default: 'active' },
     notes:           { type: String, default: '' },
+    createdAt:       { type: Date, default: Date.now },
+    updatedAt:       { type: Date, default: Date.now },
   },
-  { collection: 'drug_batches', timestamps: true }
+  { collection: 'drug_batches' }
 )
-drugBatchSchema.index({ userId: 1, drugId: 1, expiryDate: 1 })  // FEFO query
-drugBatchSchema.index({ userId: 1, status: 1 })
-drugBatchSchema.index({ userId: 1, expiryDate: 1 })              // expiry alerts
+drugBatchSchema.index({ userId: 1, branchId: 1, drugId: 1, expiryDate: 1 })  // FEFO query
+drugBatchSchema.index({ userId: 1, branchId: 1, status: 1 })
+drugBatchSchema.index({ userId: 1, branchId: 1, expiryDate: 1 })              // expiry alerts
+drugBatchSchema.index({ userId: 1, branchId: 1, internalBatchId: 1 }, { unique: true })
+drugBatchSchema.index({ userId: 1, branchId: 1, manufacturerLot: 1 })
+drugBatchSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
 
 // ── Drug ──────────────────────────────────────────────────────────────────────
 // Separate pharmacy drug catalog — independent from POS products
 export const drugSchema = new mongoose.Schema(
   {
     userId:           { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:         { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' }, // Optional for global drugs, required for branch-specific
     genericName:      { type: String, required: true, trim: true },
     brandName:        { type: String, default: '', trim: true },
+    sku:              { type: String, default: '', trim: true },
     category:         { type: String, default: 'General', trim: true }, // Antibiotics, Analgesics, etc.
     drugClass:        { type: String, default: '' },
     dosageForm:       { type: String, default: '' }, // Tablet, Capsule, Syrup, Injection, etc.
@@ -454,17 +494,296 @@ export const drugSchema = new mongoose.Schema(
     barcode:          { type: String, default: '' },
     sellingPrice:     { type: Number, required: true, default: 0 },
     buyingPrice:      { type: Number, required: true, default: 0 },
+    wholesalePrice:   { type: Number, default: 0 },
     stock:            { type: Number, default: 0 },  // computed from active batches
     reorderLevel:     { type: Number, default: 10 },
     requiresPrescription: { type: Boolean, default: false },
     isControlled:     { type: Boolean, default: false }, // narcotics, etc.
+    status:           { type: String, enum: ['active', 'inactive', 'discontinued'], default: 'active' },
     description:      { type: String, default: '' },
     sideEffects:      { type: String, default: '' },
     manufacturer:     { type: String, default: '' },
     isActive:         { type: Boolean, default: true },
+    createdAt:        { type: Date, default: Date.now },
+    updatedAt:        { type: Date, default: Date.now },
   },
-  { collection: 'drugs', timestamps: true }
+  { collection: 'drugs' }
 )
 drugSchema.index({ userId: 1, genericName: 1 })
 drugSchema.index({ userId: 1, barcode: 1 })
 drugSchema.index({ userId: 1, category: 1 })
+drugSchema.index({ userId: 1, sku: 1 })
+drugSchema.index({ userId: 1, branchId: 1 })
+drugSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
+
+// ── Branch ─────────────────────────────────────────────────────────────────────
+// Multi-branch support for pharmacy operations
+export const branchSchema = new mongoose.Schema(
+  {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    name: { type: String, required: true, trim: true },
+    code: { type: String, required: true, unique: true, trim: true, uppercase: true },
+    address: { type: String, default: '' },
+    phone: { type: String, default: '' },
+    status: { type: String, enum: ['active', 'inactive', 'closed'], default: 'active' },
+    isDefault: { type: Boolean, default: false },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now },
+  },
+  { collection: 'branches' }
+)
+branchSchema.index({ userId: 1, status: 1 })
+branchSchema.index({ userId: 1, code: 1 }, { unique: true })
+branchSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
+
+// ── Inventory ───────────────────────────────────────────────────────────────────
+// Pharmacy inventory - derived from transactions, not directly edited
+export const inventorySchema = new mongoose.Schema(
+  {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
+    drugId: { type: mongoose.Schema.Types.ObjectId, ref: 'Drug', required: true },
+    quantityAvailable: { type: Number, required: true, default: 0 },
+    quantityReserved: { type: Number, required: true, default: 0 },
+    reorderLevel: { type: Number, default: 10 },
+    lastStockUpdate: { type: Date, default: Date.now },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now },
+  },
+  { collection: 'inventory' }
+)
+inventorySchema.index({ userId: 1, branchId: 1, drugId: 1 }, { unique: true })
+inventorySchema.index({ userId: 1, branchId: 1 })
+inventorySchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
+
+// ── InventoryTransaction ────────────────────────────────────────────────────────
+// Immutable ledger of all stock movements - system of truth
+export const inventoryTransactionSchema = new mongoose.Schema(
+  {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
+    drugId: { type: mongoose.Schema.Types.ObjectId, ref: 'Drug', required: true },
+    batchId: { type: mongoose.Schema.Types.ObjectId, ref: 'DrugBatch' },
+    type: {
+      type: String,
+      enum: ['IN', 'OUT', 'SALE', 'ADJUSTMENT', 'TRANSFER', 'DISPOSAL', 'RETURN'],
+      required: true,
+    },
+    quantity: { type: Number, required: true },
+    previousBalance: { type: Number, required: true },
+    newBalance: { type: Number, required: true },
+    referenceId: { type: String }, // Sale ID, Transfer ID, etc.
+    referenceType: { type: String }, // 'sale', 'transfer', 'adjustment', etc.
+    userIdPerformed: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    reason: { type: String, default: '' },
+    timestamp: { type: Date, default: Date.now },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { collection: 'inventory_transactions' }
+)
+inventoryTransactionSchema.index({ userId: 1, branchId: 1, drugId: 1, timestamp: -1 })
+inventoryTransactionSchema.index({ userId: 1, branchId: 1, timestamp: -1 })
+inventoryTransactionSchema.index({ userId: 1, referenceId: 1 })
+// Immutable - no updates allowed
+
+
+// ── BarBrand ───────────────────────────────────────────────────────────────────
+// Represents a spirits/wine/beer brand (e.g. Jameson, Tusker, Château Margaux)
+export const barBrandSchema = new mongoose.Schema(
+  {
+    userId:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    name:        { type: String, required: true, trim: true },
+    description: { type: String, default: '' },
+    category:    { type: String, default: '' }, // e.g. 'whisky', 'vodka', 'wine', 'beer'
+    isArchived:  { type: Boolean, default: false },
+    createdAt:   { type: Date, default: Date.now },
+    updatedAt:   { type: Date, default: Date.now },
+  },
+  { collection: 'bar_brands' }
+)
+barBrandSchema.index({ userId: 1, name: 1 }, { unique: true })
+barBrandSchema.index({ userId: 1, branchId: 1, isArchived: 1 })
+
+// ── BarInventoryItem ───────────────────────────────────────────────────────────
+// A specific size/variant of a brand held in stock (e.g. Jameson 1L, Jameson 750ml)
+export const barInventoryItemSchema = new mongoose.Schema(
+  {
+    userId:             { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    brandId:            { type: mongoose.Schema.Types.ObjectId, ref: 'BarBrand', required: true },
+    // Human-readable name stored on import (e.g. 'Jameson').
+    // Older records without this field fall back to the brand name at read time.
+    name:               { type: String, default: '' },
+    size:               { type: String, required: true },   // e.g. '1L', '750ml', '500ml'
+    buyingPrice:        { type: Number, required: true },
+    bottleSellingPrice: { type: Number, required: true },
+    stock:              { type: Number, required: true, default: 0 },  // sealed bottles
+    lowStockThreshold:  { type: Number, default: 3 },
+    isActive:           { type: Boolean, default: true },
+    createdAt:          { type: Date, default: Date.now },
+    updatedAt:          { type: Date, default: Date.now },
+  },
+  { collection: 'bar_inventory_items' }
+)
+barInventoryItemSchema.index({ userId: 1, branchId: 1, brandId: 1 })
+barInventoryItemSchema.index({ userId: 1, branchId: 1, stock: 1 })
+
+// ── BarServing ─────────────────────────────────────────────────────────────────
+// A configured serving portion for an inventory item (e.g. Tot, Double, Quarter)
+// unitsProduced is owner-defined and never auto-calculated from volume
+export const barServingSchema = new mongoose.Schema(
+  {
+    userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
+    name:            { type: String, required: true, trim: true },  // 'Tot', 'Double', 'Quarter'
+    sellingPrice:    { type: Number, required: true },
+    unitsProduced:   { type: Number, required: true, min: 1 },  // owner-defined positive integer
+    isActive:        { type: Boolean, default: true },
+    createdAt:       { type: Date, default: Date.now },
+    updatedAt:       { type: Date, default: Date.now },
+  },
+  { collection: 'bar_servings' }
+)
+barServingSchema.index({ userId: 1, inventoryItemId: 1 })
+barServingSchema.index({ userId: 1, branchId: 1 })
+
+// ── BarBottle ──────────────────────────────────────────────────────────────────
+// Tracks the lifecycle of an individual physical bottle: full → open → closed
+// Partial unique index enforces at most one open bottle per inventory item per branch
+export const barBottleSchema = new mongoose.Schema(
+  {
+    userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
+    bottleNumber:    { type: Number, required: true },  // sequential per inventory item
+    state:           { type: String, enum: ['full', 'open', 'closed'], required: true },
+    openedBy:        { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    openedAt:        { type: Date },
+    closedAt:        { type: Date },
+    expectedUnits:   { type: Number },  // from BarServing.unitsProduced at open time
+    remainingUnits:  { type: Number },  // decrements as servings are sold
+    actualUnitsSold: { type: Number },  // computed on close: expectedUnits - remainingUnits
+    difference:      { type: Number },  // expectedUnits - actualUnitsSold (negative = loss)
+    createdAt:       { type: Date, default: Date.now },
+    updatedAt:       { type: Date, default: Date.now },
+  },
+  { collection: 'bar_bottles' }
+)
+// Partial unique index: only one open bottle per inventory item per branch at a time
+barBottleSchema.index(
+  { userId: 1, branchId: 1, inventoryItemId: 1, state: 1 },
+  { unique: true, partialFilterExpression: { state: 'open' } }
+)
+barBottleSchema.index({ userId: 1, branchId: 1, inventoryItemId: 1, createdAt: -1 })
+barBottleSchema.index({ userId: 1, branchId: 1, state: 1 })
+
+// ── BarTab ─────────────────────────────────────────────────────────────────────
+// Central tab document. Payments are embedded to support partial payments.
+
+const barTabPaymentSchema = new mongoose.Schema(
+  {
+    amount:      { type: Number, required: true },
+    method:      { type: String, enum: ['cash', 'card', 'mobile_money'], required: true },
+    amountGiven: { type: Number },   // cash overpay tracking
+    change:      { type: Number },
+    mpesaCode:   { type: String },
+    mpesaPhone:  { type: String },
+    recordedBy:  { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    recordedAt:  { type: Date, default: Date.now },
+  },
+  { _id: true }
+)
+
+export const barTabSchema = new mongoose.Schema(
+  {
+    userId:         { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:       { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    staffId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    tabNumber:      { type: String, required: true },
+    customerId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
+    customerName:   { type: String, default: '' },
+    tableNumber:    { type: String, default: '' },
+    notes:          { type: String, default: '' },
+    status:         { type: String, enum: ['open', 'hold', 'billing', 'paid'], default: 'open' },
+    subtotal:       { type: Number, default: 0 },
+    discountPct:    { type: Number, default: 0, min: 0, max: 100 },
+    discountAmount: { type: Number, default: 0 },
+    total:          { type: Number, default: 0 },
+    amountPaid:     { type: Number, default: 0 },  // sum of payments
+    payments:       { type: [barTabPaymentSchema], default: [] },
+    saleId:         { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' },  // set on close
+    openedAt:       { type: Date, default: Date.now },
+    closedAt:       { type: Date },
+    synced:         { type: Boolean, default: true },
+    createdAt:      { type: Date, default: Date.now },
+    updatedAt:      { type: Date, default: Date.now },
+  },
+  { collection: 'bar_tabs' }
+)
+barTabSchema.index({ userId: 1, branchId: 1, status: 1 })
+barTabSchema.index({ userId: 1, branchId: 1, openedAt: -1 })
+barTabSchema.index({ userId: 1, tabNumber: 1 }, { unique: true })
+
+// ── BarTabLine ─────────────────────────────────────────────────────────────────
+// Individual line items added to a tab.
+// servingId is null for sealed bottle sales; populated for portion/serving sales.
+export const barTabLineSchema = new mongoose.Schema(
+  {
+    userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    tabId:           { type: mongoose.Schema.Types.ObjectId, ref: 'BarTab', required: true },
+    inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
+    servingId:       { type: mongoose.Schema.Types.ObjectId, ref: 'BarServing' },  // null = bottle sale
+    itemName:        { type: String, required: true },   // denormalized for receipt display
+    servingName:     { type: String, default: '' },      // denormalized for receipt display
+    quantity:        { type: Number, required: true, min: 1 },
+    unitPrice:       { type: Number, required: true },
+    lineTotal:       { type: Number, required: true },
+    addedBy:         { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    addedAt:         { type: Date, default: Date.now },
+    voided:          { type: Boolean, default: false },
+    voidedBy:        { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    voidedAt:        { type: Date },
+  },
+  { collection: 'bar_tab_lines' }
+)
+barTabLineSchema.index({ userId: 1, tabId: 1, addedAt: -1 })
+barTabLineSchema.index({ userId: 1, inventoryItemId: 1, addedAt: -1 })
+
+// ── BarAuditLog ────────────────────────────────────────────────────────────────
+// Immutable ledger of all significant bar operations.
+// Records are never updated or deleted — only inserted.
+export const barAuditLogSchema = new mongoose.Schema(
+  {
+    userId:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    staffId:       { type: mongoose.Schema.Types.ObjectId, ref: 'Staff', required: true },
+    operation: {
+      type: String,
+      enum: [
+        'TAB_CREATED',
+        'TAB_LINE_ADDED',
+        'TAB_STATUS_CHANGED',
+        'TAB_DISCOUNT_APPLIED',
+        'TAB_CLOSED',
+        'SERVING_SOLD',
+        'BOTTLE_SOLD',
+        'BOTTLE_OPENED',
+        'BOTTLE_CLOSED',
+        'INVENTORY_ADJUSTED',
+      ],
+      required: true,
+    },
+    referenceId:   { type: String },   // tabId, bottleId, etc.
+    referenceType: { type: String },   // 'BarTab', 'BarBottle', etc.
+    details:       { type: mongoose.Schema.Types.Mixed, default: {} },
+    timestamp:     { type: Date, default: Date.now },
+  },
+  { collection: 'bar_audit_logs' }
+)
+barAuditLogSchema.index({ userId: 1, branchId: 1, timestamp: -1 })
+barAuditLogSchema.index({ userId: 1, staffId: 1, timestamp: -1 })
+barAuditLogSchema.index({ userId: 1, operation: 1, timestamp: -1 })
+// No pre-save hooks — intentionally immutable

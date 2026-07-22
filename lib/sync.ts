@@ -4,10 +4,11 @@ import {
   updateSyncTime,
   isOnline,
 } from './indexeddb'
+import { syncBarTabs } from './bar-tabs-cache'
 
 export async function syncPendingSales() {
   if (!isOnline()) {
-    console.log('[v0] Offline - cannot sync')
+    console.log('[sync] Offline - cannot sync')
     return false
   }
 
@@ -15,38 +16,37 @@ export async function syncPendingSales() {
     const pendingSales = await getPendingSales()
 
     if (pendingSales.length === 0) {
-      console.log('[v0] No pending sales to sync')
-      return true
-    }
-
-    console.log(`[v0] Syncing ${pendingSales.length} pending sales...`)
-
-    for (const sale of pendingSales) {
-      try {
-        const { id, ...saleData } = sale
-
-        const response = await fetch('/api/sales', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(saleData),
-        })
-
-        if (response.ok) {
-          await removePendingSale(id)
-          console.log(`[v0] Synced sale ${id}`)
-        } else {
-          console.error(`[v0] Failed to sync sale ${id}:`, response.status)
+      console.log('[sync] No pending sales to sync')
+    } else {
+      console.log(`[sync] Syncing ${pendingSales.length} pending sales...`)
+      for (const sale of pendingSales) {
+        try {
+          const { id, ...saleData } = sale
+          const response = await fetch('/api/sales', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(saleData),
+          })
+          if (response.ok) {
+            await removePendingSale(id)
+            console.log(`[sync] Synced sale ${id}`)
+          } else {
+            console.error(`[sync] Failed to sync sale ${id}:`, response.status)
+          }
+        } catch (error) {
+          console.error(`[sync] Error syncing sale:`, error)
         }
-      } catch (error) {
-        console.error(`[v0] Error syncing sale:`, error)
       }
+      await updateSyncTime()
     }
 
-    await updateSyncTime()
-    console.log('[v0] Sync completed')
+    // Also sync any unsynced bar tabs
+    await syncBarTabs()
+
+    console.log('[sync] Sync completed')
     return true
   } catch (error) {
-    console.error('[v0] Sync error:', error)
+    console.error('[sync] Sync error:', error)
     return false
   }
 }
@@ -56,7 +56,7 @@ export function initAutoSync() {
 
   // Sync when coming back online
   window.addEventListener('online', () => {
-    console.log('[v0] Back online - syncing...')
+    console.log('[sync] Back online - syncing...')
     syncPendingSales()
   })
 

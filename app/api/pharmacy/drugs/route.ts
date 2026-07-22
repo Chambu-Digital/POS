@@ -13,12 +13,16 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search') || ''
     const category = searchParams.get('category') || ''
 
-    const query: any = { userId: ownerId, isActive: true }
-    if (search) query.$or = [
-      { genericName: { $regex: search, $options: 'i' } },
-      { brandName: { $regex: search, $options: 'i' } },
-      { barcode: { $regex: search, $options: 'i' } },
-    ]
+    const query: any = { userId: ownerId, status: 'active' }
+    
+    if (search) {
+      query.$or = [
+        { genericName: { $regex: search, $options: 'i' } },
+        { brandName: { $regex: search, $options: 'i' } },
+        { barcode: { $regex: search, $options: 'i' } },
+      ]
+    }
+    
     if (category) query.category = category
 
     const drugs = await models.Drug.find(query).sort({ genericName: 1 }).lean()

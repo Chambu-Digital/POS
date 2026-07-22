@@ -14,6 +14,17 @@ export async function GET(request: NextRequest) {
       const user = await models.User.findById(payload.userId)
       if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
+      // Get branches for this user
+      const branches = await models.Branch.find({ userId: payload.userId, status: 'active' }).lean()
+      
+      // Get selected branch or default
+      let selectedBranch = null
+      if (payload.branchId) {
+        selectedBranch = branches.find(b => b._id.toString() === payload.branchId)
+      } else {
+        selectedBranch = branches.find(b => b.isDefault) || branches[0] || null
+      }
+
       return NextResponse.json({
         user: {
           id: user._id, email: user.email, name: user.shopName, shopName: user.shopName,
@@ -22,6 +33,8 @@ export async function GET(request: NextRequest) {
           lastName: (user as any).lastName || '', phone: (user as any).phone || '',
           nationalId: (user as any).nationalId || '', kraPin: (user as any).kraPin || '',
           createdAt: (user as any).createdAt,
+          branches,
+          selectedBranch,
         },
       })
     } else {
@@ -29,12 +42,26 @@ export async function GET(request: NextRequest) {
       if (!staff) return NextResponse.json({ error: 'Staff not found' }, { status: 404 })
 
       const adminUser = await models.User.findById(staff.userId)
+      
+      // Get branches for the admin (staff can only access branches assigned to them)
+      const branches = await models.Branch.find({ userId: staff.userId, status: 'active' }).lean()
+      
+      // Get selected branch or default
+      let selectedBranch = null
+      if (payload.branchId) {
+        selectedBranch = branches.find(b => b._id.toString() === payload.branchId)
+      } else {
+        selectedBranch = branches.find(b => b.isDefault) || branches[0] || null
+      }
+
       return NextResponse.json({
         user: {
           id: staff._id, email: staff.email, name: staff.name,
           shopName: adminUser?.shopName || 'Shop',
           role: staff.role, type: 'staff',
           permissions: normalisePermissions(staff.permissions || {}),
+          branches,
+          selectedBranch,
         },
       })
     }

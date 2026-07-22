@@ -57,7 +57,8 @@ export default function DashboardPage() {
   }
 
   const showBar     = can('bar.tabs')
-  const showKds     = can('kds.display')
+  // kds.display was a legacy key — the canonical key is now kds.orders (any kds feature suffices)
+  const showKds     = can('kds.orders') || can('kds.chef') || can('kds.waiter')
   const showRentals = can('rentals.bookings') || can('rentals.manage')
 
   if (loading) return <div className="flex items-center justify-center h-screen"><div className="text-lg">Loading dashboard...</div></div>

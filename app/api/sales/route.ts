@@ -36,14 +36,36 @@ export async function POST(request: NextRequest) {
     const data = await request.json()
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
 
-    // Decrement stock for each item
+    // ── Deduct stock and record ledger entry for each item ───────────────────
     for (const item of data.items) {
-      if (item.productId) {
+      if (!item.productId) continue
+      try {
+        const productObjId = new Types.ObjectId(item.productId)
+        // Read current stock before deducting so we can record previousStock
+        const product = await models.Product.findById(productObjId).select('stock').lean() as any
+        if (!product) continue
+        const previousStock = product.stock ?? 0
+        const newStock      = Math.max(0, previousStock - item.quantity)
+        // Atomic deduction
         await models.Product.findByIdAndUpdate(
-          new Types.ObjectId(item.productId),
-          { $inc: { stock: -item.quantity } }
+          productObjId,
+          { $inc: { stock: -item.quantity }, updatedAt: new Date() }
         )
-      }
+        // Immutable ledger entry — never fails the sale if writing fails
+        try {
+          await (models as any).StockLedger.create({
+            userId:        ownerId,
+            productId:     productObjId,
+            staffId:       payload.type === 'staff' ? payload.userId : null,
+            type:          'SALE',
+            quantity:      -item.quantity,
+            previousStock,
+            newStock,
+            orderNumber,
+            timestamp:     new Date(),
+          })
+        } catch { /* ledger failure must never block a sale */ }
+      } catch { /* product not found — skip silently */ }
     }
 
     // Generate unique order number

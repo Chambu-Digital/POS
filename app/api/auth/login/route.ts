@@ -8,6 +8,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import mongoose from 'mongoose'
 import { connectDB } from '@/lib/db'
 
+// ── Candidate match found across tenant search ─────────────────────────────
+interface Candidate {
+  record: any
+  type: 'user' | 'staff'
+  mongoUri: string
+  features: Record<string, boolean>
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { email, password } = await request.json()
@@ -26,7 +34,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: 'Login successful', user: { ...getDemoUser(), isDemo: true } })
     }
 
-    // ── Find which tenant this email belongs to ──────────────────────────────
+    // ── Search all active tenants ────────────────────────────────────────────
+    // We collect ALL matches across every tenant before deciding which to use.
+    //
+    // Why: the same email can legitimately appear in multiple tenants:
+    //   - as a staff member in Tenant A (employed there)
+    //   - as an owner (User) in Tenant B (their own shop)
+    //
+    // Priority: an owner (User) match always wins over a staff match.
+    // If multiple owner matches exist (shouldn't happen, but possible), the
+    // one whose password matches the entered password wins.
+    // If only staff matches exist, pick the one whose password matches.
+    //
+    // We never stop at the first match — we must check all tenants so that
+    // a staff record in one tenant doesn't shadow an owner record in another.
+
     const { Tenant } = await getAdminModels()
     const tenants = await Tenant.find({ isActive: true }).lean() as unknown as Array<{
       _id: any; mongoUri: string; features: Record<string, boolean>; shopName: string
@@ -34,105 +56,115 @@ export async function POST(request: NextRequest) {
 
     console.log('[login] Found', tenants.length, 'active tenants')
 
-    let foundUser: any = null
-    let foundUserType: 'user' | 'staff' = 'user'
-    let foundMongoUri = ''
-    let foundFeatures: Record<string, boolean> = DEFAULT_MODULE_FEATURES
+    const ownerCandidates: Candidate[] = []
+    const staffCandidates: Candidate[]  = []
 
     for (const tenant of tenants) {
       try {
-        console.log('[login] Checking tenant:', tenant.mongoUri)
-        const conn = await connectTenantDB(tenant.mongoUri)
+        const conn   = await connectTenantDB(tenant.mongoUri)
         const models = getModels(conn)
+        const features = normaliseFeatures(tenant.features || {})
 
-        // Try owner first
-        let user = await models.User.findOne({ email }).select('+password')
+        // Owner match
+        const user = await models.User.findOne({ email }).select('+password')
         if (user) {
-          console.log('[login] Found user in tenant:', tenant.mongoUri)
-          foundUser = user
-          foundUserType = 'user'
-          foundMongoUri = tenant.mongoUri
-          foundFeatures = normaliseFeatures(tenant.features || {})
-          break
+          console.log('[login] Owner candidate in tenant:', tenant.mongoUri)
+          ownerCandidates.push({ record: user, type: 'user', mongoUri: tenant.mongoUri, features })
         }
 
-        // Try staff
+        // Staff match (only active staff)
         const staff = await models.Staff.findOne({ email, active: true }).select('+password')
         if (staff) {
-          console.log('[login] Found staff in tenant:', tenant.mongoUri)
-          foundUser = staff
-          foundUserType = 'staff'
-          foundMongoUri = tenant.mongoUri
-          foundFeatures = normaliseFeatures(tenant.features || {})
-          break
+          console.log('[login] Staff candidate in tenant:', tenant.mongoUri)
+          staffCandidates.push({ record: staff, type: 'staff', mongoUri: tenant.mongoUri, features })
         }
       } catch (err) {
         console.error('[login] Error checking tenant:', tenant.mongoUri, err)
-        // Skip unreachable tenant DBs
         continue
       }
     }
 
     // ── Fallback: default DB (localhost dev / single-tenant) ─────────────────
-    if (!foundUser) {
-      console.log('[login] Checking fallback default DB')
-      const conn = mongoose.connection.readyState === 1
-        ? mongoose.connection
-        : (await connectDB(), mongoose.connection)
-      const models = getModels(conn)
+    // Check the default connection last, after all registered tenants.
+    const defaultConn = mongoose.connection.readyState === 1
+      ? mongoose.connection
+      : (await connectDB(), mongoose.connection)
+    const defaultModels = getModels(defaultConn)
 
-      let user = await models.User.findOne({ email }).select('+password')
-      if (user) {
-        console.log('[login] Found user in default DB')
-        foundUser = user; foundUserType = 'user'
-      } else {
-        const staff = await models.Staff.findOne({ email, active: true }).select('+password')
-        if (staff) { 
-          console.log('[login] Found staff in default DB')
-          foundUser = staff; foundUserType = 'staff' 
-        }
+    const defaultUser = await defaultModels.User.findOne({ email }).select('+password')
+    if (defaultUser) {
+      console.log('[login] Owner candidate in default DB')
+      ownerCandidates.push({ record: defaultUser, type: 'user', mongoUri: '', features: DEFAULT_MODULE_FEATURES })
+    }
+    const defaultStaff = await defaultModels.Staff.findOne({ email, active: true }).select('+password')
+    if (defaultStaff) {
+      console.log('[login] Staff candidate in default DB')
+      staffCandidates.push({ record: defaultStaff, type: 'staff', mongoUri: '', features: DEFAULT_MODULE_FEATURES })
+    }
+
+    // ── Pick the winning candidate ───────────────────────────────────────────
+    // 1. Try all owner candidates first — password match wins immediately.
+    // 2. Fall back to staff candidates only if no owner password matched.
+    // This means a person who is both staff somewhere and an owner elsewhere
+    // will always be logged in as their own shop's owner.
+
+    const allCandidates: Candidate[] = [...ownerCandidates, ...staffCandidates]
+
+    if (allCandidates.length === 0) {
+      console.log('[login] No account found for:', email)
+      return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
+    }
+
+    let winner: Candidate | null = null
+
+    // Owner pass first
+    for (const c of ownerCandidates) {
+      const valid = await c.record.comparePassword(password)
+      if (valid) { winner = c; break }
+    }
+
+    // Staff pass only if no owner matched
+    if (!winner) {
+      for (const c of staffCandidates) {
+        const valid = await c.record.comparePassword(password)
+        if (valid) { winner = c; break }
       }
-      // No mongoUri for default DB — getTenantDB will fall back automatically
     }
 
-    if (!foundUser) {
-      console.log('[login] User not found:', email)
+    if (!winner) {
+      // At least one account was found but password didn't match any of them
+      console.log('[login] Password did not match any candidate for:', email,
+        `(${ownerCandidates.length} owner, ${staffCandidates.length} staff candidates)`)
       return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
     }
 
-    const isPasswordValid = await foundUser.comparePassword(password)
-    if (!isPasswordValid) {
-      console.log('[login] Invalid password for:', email)
-      return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
-    }
+    console.log('[login] Login successful as', winner.type, 'for:', email)
 
-    console.log('[login] Login successful for:', email)
-
-    if (foundUserType === 'user') {
-      foundUser.lastLogin = new Date()
-      await foundUser.save()
+    if (winner.type === 'user') {
+      winner.record.lastLogin = new Date()
+      await winner.record.save()
     }
 
     const token = await createToken({
-      userId: foundUser._id.toString(),
-      email: foundUser.email,
-      role: foundUser.role,
-      type: foundUserType,
-      adminId: foundUserType === 'staff' ? foundUser.userId?.toString() : undefined,
-      mongoUri: foundMongoUri || undefined,
-      tenantFeatures: foundMongoUri ? foundFeatures : undefined,
-      permissions: foundUserType === 'staff' ? foundUser.permissions : undefined,
+      userId:         winner.record._id.toString(),
+      email:          winner.record.email,
+      role:           winner.record.role,
+      type:           winner.type,
+      adminId:        winner.type === 'staff' ? winner.record.userId?.toString() : undefined,
+      mongoUri:       winner.mongoUri || undefined,
+      tenantFeatures: winner.mongoUri ? winner.features : undefined,
+      permissions:    winner.type === 'staff' ? winner.record.permissions : undefined,
     })
 
     await setAuthCookie(token)
     return NextResponse.json({
       message: 'Login successful',
       user: {
-        id: foundUser._id,
-        email: foundUser.email,
-        name: foundUserType === 'staff' ? foundUser.name : foundUser.shopName,
-        role: foundUser.role,
-        type: foundUserType,
+        id:    winner.record._id,
+        email: winner.record.email,
+        name:  winner.type === 'staff' ? winner.record.name : winner.record.shopName,
+        role:  winner.record.role,
+        type:  winner.type,
       },
     })
   } catch (error) {

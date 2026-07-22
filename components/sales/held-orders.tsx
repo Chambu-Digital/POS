@@ -22,6 +22,8 @@ interface HeldOrder {
 
 interface Props {
   onRecall: (order: HeldOrder) => void
+  /** localStorage key — defaults to 'heldOrders' so Retail behaviour is unchanged */
+  storageKey?: string
 }
 
 function loadHeld(): HeldOrder[] {
@@ -32,29 +34,28 @@ function loadHeld(): HeldOrder[] {
   }
 }
 
-export function HeldOrders({ onRecall }: Props) {
+export function HeldOrders({ onRecall, storageKey = 'heldOrders' }: Props) {
   const [orders, setOrders] = useState<HeldOrder[]>([])
   const [open, setOpen] = useState(false)
 
-  // Load count immediately on mount + whenever storage changes (cross-tab)
-  // Also refresh on window focus so returning from payment page updates instantly
+  function loadFromStorage() {
+    try { return JSON.parse(localStorage.getItem(storageKey) || '[]') } catch { return [] }
+  }
   useEffect(() => {
-    setOrders(loadHeld())
-
-    function refresh() { setOrders(loadHeld()) }
-
+    setOrders(loadFromStorage())
+    function refresh() { setOrders(loadFromStorage()) }
     window.addEventListener('storage', refresh)
     window.addEventListener('focus', refresh)
     return () => {
       window.removeEventListener('storage', refresh)
       window.removeEventListener('focus', refresh)
     }
-  }, [])
+  }, [storageKey])
 
   function recall(order: HeldOrder) {
     onRecall(order)
     const remaining = orders.filter((o) => o.id !== order.id)
-    localStorage.setItem('heldOrders', JSON.stringify(remaining))
+    localStorage.setItem(storageKey, JSON.stringify(remaining))
     setOrders(remaining)
     setOpen(false)
     toast.success('Order recalled')
@@ -62,7 +63,7 @@ export function HeldOrders({ onRecall }: Props) {
 
   function discard(id: string) {
     const remaining = orders.filter((o) => o.id !== id)
-    localStorage.setItem('heldOrders', JSON.stringify(remaining))
+    localStorage.setItem(storageKey, JSON.stringify(remaining))
     setOrders(remaining)
     toast.info('Held order discarded')
   }

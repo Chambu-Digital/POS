@@ -82,7 +82,7 @@ const staffSchema = new mongoose.Schema(
 
 staffSchema.index({ userId: 1, email: 1 })
 
-// Hash password before saving
+// Hash password before saving using bcrypt
 staffSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next()
   try {
@@ -94,7 +94,7 @@ staffSchema.pre('save', async function (next) {
   }
 })
 
-// Method to compare passwords
+// Method to compare passwords using bcrypt
 staffSchema.methods.comparePassword = async function (password: string) {
   return await bcryptjs.compare(password, this.password)
 }

@@ -3,6 +3,7 @@ import { getAdminModels } from '@/lib/admin-models'
 import { connectTenantDB } from '@/lib/db-tenant'
 import { getModels } from '@/lib/tenant/get-models'
 import { verifyAdminSession } from '../../../auth/route'
+import { checkEmailExistsAcrossTenants } from '@/lib/auth/check-email-exists'
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!await verifyAdminSession(request)) {
@@ -32,8 +33,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (owner) {
       // Update existing owner
       if (email && email !== owner.email) {
-        const existing = await User.findOne({ email, _id: { $ne: owner._id } })
-        if (existing) return NextResponse.json({ error: 'Email already in use' }, { status: 409 })
+        // Check if email already exists in this tenant
+        const existingInTenant = await User.findOne({ email, _id: { $ne: owner._id } })
+        if (existingInTenant) return NextResponse.json({ error: 'Email already in use in this tenant' }, { status: 409 })
+        
+        // Check if email already exists across all tenants
+        const existingAccount = await checkEmailExistsAcrossTenants(email)
+        if (existingAccount) {
+          return NextResponse.json({ 
+            error: 'An account with this email already exists in another tenant. Please use a different email.' 
+          }, { status: 409 })
+        }
+        
         owner.email = email
       }
       if (password) owner.password = password
@@ -42,6 +53,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     } else {
       // No owner yet — create one
       if (!password) return NextResponse.json({ error: 'Password is required to create owner account' }, { status: 400 })
+      
+      // Check if email already exists across all tenants
+      const existingAccount = await checkEmailExistsAcrossTenants(email)
+      if (existingAccount) {
+        return NextResponse.json({ 
+          error: 'An account with this email already exists in another tenant. Please use a different email.' 
+        }, { status: 409 })
+      }
+      
       owner = new User({
         email,
         password,

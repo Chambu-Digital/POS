@@ -39,7 +39,7 @@ interface PaymentSettings {
 }
 interface ReceiptSettings {
   showLogo: boolean; showTaxId: boolean; showAddress: boolean; showPhone: boolean
-  customMessage: string; paperSize: 'A4' | '80mm'
+  customMessage: string; paperSize: '58mm' | '80mm'
 }
 
 type NavKey = 'general' | 'payment' | 'notifications' | 'receipt' | 'features' | 'security'
@@ -128,7 +128,7 @@ export default function SettingsPage() {
   })
   const [receipt, setReceipt] = useState<ReceiptSettings>({
     showLogo: true, showTaxId: true, showAddress: true, showPhone: true,
-    customMessage: 'Thank You For Shopping With Us!', paperSize: 'A4',
+    customMessage: 'Thank You For Shopping With Us!', paperSize: '58mm',
   })
 
   // Refs to always have latest state for autoSave
@@ -636,12 +636,12 @@ export default function SettingsPage() {
                 checked={receipt.showAddress} onChange={v => { upReceipt({ showAddress: v }); autoSave({ receipt: { showAddress: v } }) }} />
               <ToggleRow label="Show Phone Number" desc="Display phone number on receipts"
                 checked={receipt.showPhone} onChange={v => { upReceipt({ showPhone: v }); autoSave({ receipt: { showPhone: v } }) }} />
-              <SettingRow label="Paper Size">
-                <Select value={receipt.paperSize} onValueChange={(v: 'A4' | '80mm') => upReceipt({ paperSize: v })}>
+              <SettingRow label="Paper Size" desc="Choose the receipt paper width for your thermal printer">
+                <Select value={receipt.paperSize} onValueChange={(v: '58mm' | '80mm') => { upReceipt({ paperSize: v }); autoSave({ receipt: { paperSize: v } }) }}>
                   <SelectTrigger className="max-w-xs focus:ring-green-500"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="A4">A4 (Standard)</SelectItem>
-                    <SelectItem value="80mm">80mm (Thermal)</SelectItem>
+                    <SelectItem value="58mm">58mm — Narrow thermal (default)</SelectItem>
+                    <SelectItem value="80mm">80mm — Wide thermal</SelectItem>
                   </SelectContent>
                 </Select>
               </SettingRow>

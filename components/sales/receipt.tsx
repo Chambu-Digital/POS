@@ -40,7 +40,7 @@ interface ReceiptProps {
   rentalDuration?: string
   deposit?: number
   depositPaymentMethod?: string
-  paperSize?: '58mm' | '80mm' | 'A4'
+  paperSize?: '58mm' | '80mm'
   onPrintComplete?: () => void
 }
 export interface ReceiptRef {
@@ -79,15 +79,13 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
   const isSlip = receiptType === 'rental_slip'
 
   // Build @page CSS based on paper size
-  const pageCSS = paperSize === 'A4'
-    ? `@page { size: A4; margin: 20mm; }`
-    : paperSize === '80mm'
+  const pageCSS = paperSize === '80mm'
     ? `@page { size: 80mm auto; margin: 4mm; }`
     : `@page { size: 58mm auto; margin: 3mm; }`
 
   // Body width matches paper
-  const bodyWidth = paperSize === 'A4' ? '800px' : paperSize === '80mm' ? '72mm' : '52mm'
-  const baseFontSize = paperSize === 'A4' ? '12px' : '10px'
+  const bodyWidth  = paperSize === '80mm' ? '72mm' : '52mm'
+  const baseFontSize = '10px'
 
   const handlePrint = () => {
     if (receiptRef.current) {
@@ -106,7 +104,7 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
                   font-family: Arial, sans-serif;
                   max-width: ${bodyWidth};
                   margin: 0 auto;
-                  padding: ${paperSize === 'A4' ? '20px' : '4px'};
+                  padding: 4px;
                   font-size: ${baseFontSize};
                   line-height: 1.4;
                 }

@@ -2,6 +2,7 @@ import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
+import { createInventoryTransaction } from '@/lib/inventory-service'
 
 async function generateOrderNumber(models: any, ownerId: string): Promise<string> {
   const count = await models.Sale.countDocuments({ userId: ownerId })
@@ -17,7 +18,27 @@ export async function POST(request: NextRequest) {
     const data = await request.json()
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
 
-    // ── FEFO batch deduction ──────────────────────────────────────────────────
+    // Get or determine branchId
+    let branchId = data.branchId
+    if (!branchId) {
+      // Get default branch for this user
+      const defaultBranch = await models.Branch.findOne({ userId: ownerId, isDefault: true })
+      if (defaultBranch) {
+        branchId = defaultBranch._id.toString()
+      } else {
+        // If no branches exist yet, create a default one
+        const newBranch = new models.Branch({
+          userId: ownerId,
+          name: 'Main Branch',
+          code: 'MAIN',
+          isDefault: true,
+        })
+        await newBranch.save()
+        branchId = newBranch._id.toString()
+      }
+    }
+
+    // ── FEFO batch deduction with inventory transactions ─────────────────────────
     for (const item of data.items) {
       if (!item.productId) continue
 
@@ -26,6 +47,7 @@ export async function POST(request: NextRequest) {
       // Get active batches for this drug sorted by expiry (FEFO)
       const batches = await models.DrugBatch.find({
         userId: ownerId,
+        branchId: new Types.ObjectId(branchId),
         drugId: new Types.ObjectId(item.productId),
         status: 'active',
         quantity: { $gt: 0 },
@@ -34,17 +56,26 @@ export async function POST(request: NextRequest) {
       for (const batch of batches) {
         if (remaining <= 0) break
         const deduct = Math.min(batch.quantity, remaining)
+        
+        // Create inventory transaction for this batch deduction
+        await createInventoryTransaction(models, {
+          userId: ownerId,
+          branchId: branchId,
+          drugId: item.productId,
+          batchId: batch._id.toString(),
+          type: 'SALE',
+          quantity: deduct,
+          referenceId: '', // Will be set after sale is saved
+          referenceType: 'sale',
+          userIdPerformed: payload.type === 'staff' ? payload.userId : undefined,
+          reason: 'Pharmacy sale',
+        })
+
         batch.quantity -= deduct
         if (batch.quantity === 0) batch.status = 'depleted'
         await batch.save()
         remaining -= deduct
       }
-
-      // Update Drug stock total
-      await models.Drug.findByIdAndUpdate(
-        new Types.ObjectId(item.productId),
-        { $inc: { stock: -item.quantity } }
-      )
     }
 
     // ── Generate order number ─────────────────────────────────────────────────
@@ -95,6 +126,7 @@ export async function POST(request: NextRequest) {
     const sale = new models.Sale({
       ...data,
       userId: ownerId,
+      branchId: new Types.ObjectId(branchId),
       staffId: payload.type === 'staff' ? payload.userId : null,
       orderNumber,
       customerId: customerId ? new Types.ObjectId(customerId) : null,
@@ -103,6 +135,17 @@ export async function POST(request: NextRequest) {
       source: 'pos',
     })
     await sale.save()
+
+    // Update inventory transactions with the sale reference
+    await models.InventoryTransaction.updateMany(
+      {
+        userId: ownerId,
+        branchId: new Types.ObjectId(branchId),
+        referenceType: 'sale',
+        referenceId: '',
+      },
+      { referenceId: sale._id.toString() }
+    )
 
     return NextResponse.json({ sale }, { status: 201 })
   } catch (error) {

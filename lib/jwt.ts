@@ -13,6 +13,7 @@ export interface TokenPayload {
   tenantFeatures?: Record<string, boolean>  // Tenant feature flags
   permissions?: Record<string, boolean>     // Staff permissions (staff only)
   isDemo?: boolean
+  branchId?: string         // Selected branch for multi-branch operations
 }
 
 export async function createToken(payload: TokenPayload): Promise<string> {

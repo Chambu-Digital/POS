@@ -630,7 +630,7 @@ export default function StaffPage() {
               return (
                 <div key={mod.key} className="border border-gray-200 rounded-lg overflow-hidden">
                   <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border-b border-gray-100">
-                    <ModIcon size={14} className="text-gray-500" />
+                    {ModIcon && <ModIcon size={14} className="text-gray-500" />}
                     <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">{mod.label}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 py-2.5">

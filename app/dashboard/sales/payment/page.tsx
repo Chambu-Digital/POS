@@ -47,6 +47,12 @@ function PaymentPageContent() {
   const receiptRef = useRef<ReceiptRef>(null)
   const [cart, setCart] = useState<CartItem[]>([])
   const [cartDiscount, setCartDiscount] = useState(0)
+  // Source context — set by whichever POS page wrote pendingSale
+  const [saleEndpoint, setSaleEndpoint] = useState('/api/sales')
+  const [returnUrl,    setReturnUrl]    = useState('/dashboard/sales')
+  // Bar tab context — when set, payment closes the tab instead of creating a standalone sale
+  const [activeTabId,   setActiveTabId]   = useState<string | null>(null)
+  const [activeTabName, setActiveTabName] = useState<string | null>(null)
   const [selectedPayment, setSelectedPayment] = useState<string>('')
   const [paymentAmount, setPaymentAmount] = useState<string>('')
   const [mpesaCode, setMpesaCode] = useState<string>('')
@@ -79,6 +85,11 @@ function PaymentPageContent() {
         const data = JSON.parse(cartData)
         setCart(data.cart || [])
         setCartDiscount(data.cartDiscount || 0)
+        if (data.saleEndpoint) setSaleEndpoint(data.saleEndpoint)
+        if (data.returnUrl)    setReturnUrl(data.returnUrl)
+        // Tab-specific fields — if present we close a tab instead of creating a new sale
+        if (data.activeTabId)   setActiveTabId(data.activeTabId)
+        if (data.activeTabName) setActiveTabName(data.activeTabName)
         const subtotal = (data.cart || []).reduce(
           (sum: number, item: CartItem) => sum + item.sellingPrice * item.quantity - item.discount, 0
         )
@@ -179,19 +190,74 @@ function PaymentPageContent() {
       }
 
       if (isOnline()) {
-        const response = await fetch('/api/sales', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(saleData),
-        })
+        let result: any
 
-        if (!response.ok) {
-          const err = await response.json()
-          throw new Error(err.error || 'Failed to complete sale')
+        if (activeTabId) {
+          // ── Tab checkout: save payment to tab then close it ──────────────
+          // 1. Import tab cache helpers dynamically (client-only)
+          const { markTabBilling, markTabPaid, getTab } = await import('@/lib/bar-tabs-cache')
+          const tab = getTab(activeTabId)
+          const serverId = tab?.serverId
+
+          if (serverId) {
+            // Move tab to billing
+            await fetch(`/api/bar/tabs/${serverId}`, {
+              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'billing' }),
+            })
+            // Record payment
+            await fetch(`/api/bar/tabs/${serverId}/payments`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                amount:     parseFloat(paymentAmount),
+                method:     selectedPayment,
+                mpesaCode:  selectedPayment === 'mobile_money' ? mpesaCode  : undefined,
+                mpesaPhone: selectedPayment === 'mobile_money' ? mpesaPhone : undefined,
+              }),
+            })
+            // Close tab — creates Sale record on server
+            const closeRes = await fetch(`/api/bar/tabs/${serverId}/close`, { method: 'POST' })
+            if (!closeRes.ok) {
+              const err = await closeRes.json()
+              throw new Error(err.error || 'Failed to close tab')
+            }
+            result = await closeRes.json()
+          } else {
+            // Tab not synced yet — store pending payment and fall through to pos-sale
+            markTabBilling(activeTabId, {
+              paymentMethod: selectedPayment,
+              amountPaid:    parseFloat(paymentAmount),
+              mpesaCode:     selectedPayment === 'mobile_money' ? mpesaCode  : undefined,
+              mpesaPhone:    selectedPayment === 'mobile_money' ? mpesaPhone : undefined,
+              customerId:    selectedCustomer?._id,
+              customerName:  selectedCustomer?.name,
+            })
+            const fallback = await fetch(saleEndpoint, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(saleData),
+            })
+            if (!fallback.ok) { const e = await fallback.json(); throw new Error(e.error) }
+            result = await fallback.json()
+          }
+          // Mark tab paid in localStorage regardless of path taken
+          markTabPaid(activeTabId)
+        } else {
+          // ── Standard sale (no tab) ───────────────────────────────────────
+          const response = await fetch(saleEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(saleData),
+          })
+
+          if (!response.ok) {
+            const err = await response.json()
+            throw new Error(err.error || 'Failed to complete sale')
+          }
+
+          result = await response.json()
         }
 
-        const result = await response.json()
-        const orderNumber = result.sale?.orderNumber || `ORD-${result.sale?._id?.slice(-5).toUpperCase()}`
+        const orderNumber = result.sale?.orderNumber || result.tab?.tabNumber || `ORD-${String(result.sale?._id ?? '').slice(-5).toUpperCase()}`
 
         setLastSale({
           items: cart.map(item => ({
@@ -256,15 +322,17 @@ function PaymentPageContent() {
       setProcessing(false) }
   }
 
-  function cancelOrder() { sessionStorage.removeItem('pendingSale'); router.push('/dashboard/sales') }
+  function cancelOrder() { sessionStorage.removeItem('pendingSale'); router.push(returnUrl) }
 
   function holdOrder() {
     if (cart.length === 0) return
-    const held = JSON.parse(localStorage.getItem('heldOrders') || '[]')
+    // Use a source-specific held-orders key so Bar and Retail held orders don't mix
+    const heldKey = returnUrl.includes('bar') ? 'barHeldOrders' : 'heldOrders'
+    const held = JSON.parse(localStorage.getItem(heldKey) || '[]')
     held.push({ id: `hold-${Date.now()}`, cart, cartDiscount, heldAt: new Date().toISOString() })
-    localStorage.setItem('heldOrders', JSON.stringify(held))
+    localStorage.setItem(heldKey, JSON.stringify(held))
     sessionStorage.removeItem('pendingSale')
-    router.push('/dashboard/sales')
+    router.push(returnUrl)
   }
 
   function handlePaymentMethodChange(value: string) {
@@ -304,7 +372,9 @@ function PaymentPageContent() {
     <div className="max-w-4xl mx-auto p-6">
       <Card>
         <CardContent className="p-6">
-          <h1 className="text-2xl font-bold text-center mb-6">Select Payment Method</h1>
+          <h1 className="text-2xl font-bold text-center mb-6">
+            {activeTabName ? `Close Tab — ${activeTabName}` : 'Select Payment Method'}
+          </h1>
 
           <div className="flex justify-between items-center mb-4">
             <span className="text-lg font-medium">Pay</span>
@@ -534,7 +604,7 @@ function PaymentPageContent() {
           open={showCompletionDialog}
           onOpenChange={(open) => {
             setShowCompletionDialog(open)
-            if (!open) { sessionStorage.removeItem('pendingSale'); router.push('/dashboard/sales') }
+            if (!open) { sessionStorage.removeItem('pendingSale'); router.push(returnUrl) }
           }}
           orderNumber={lastSale.receiptNumber}
           totalAmount={lastSale.total}
@@ -545,7 +615,7 @@ function PaymentPageContent() {
           subtotal={lastSale.subtotal}
           discount={lastSale.discount}
           onPrintReceipt={() => receiptRef.current?.print()}
-          onMakeNewSale={() => { sessionStorage.removeItem('pendingSale'); router.push('/dashboard/sales') }}
+          onMakeNewSale={() => { sessionStorage.removeItem('pendingSale'); router.push(returnUrl) }}
         />
       )}
 

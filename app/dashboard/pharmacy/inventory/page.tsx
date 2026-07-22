@@ -3,9 +3,12 @@
 import { useState, useEffect } from 'react'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { Search, Plus, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Search, Plus, AlertTriangle, ChevronDown, ChevronUp, Upload, Download, FolderTree, Edit2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
+import { DrugForm } from '@/components/pharmacy/drug-form'
 
 interface Drug {
   _id: string
@@ -28,7 +31,8 @@ interface Drug {
 interface Batch {
   _id: string
   drugId: string | { _id: string; genericName: string; unit?: string; category: string; barcode?: string }
-  batchNumber: string
+  internalBatchId: string
+  manufacturerLot?: string
   expiryDate: string
   manufactureDate?: string
   quantity: number
@@ -59,12 +63,20 @@ function InventoryContent() {
   const [search, setSearch] = useState('')
   const [tab, setTab] = useState<'stock' | 'expiring' | 'low' | 'expired'>('stock')
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [selectedDrug, setSelectedDrug] = useState<Drug | null>(null)
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [isEditOpen, setIsEditOpen] = useState(false)
+  const [isViewOpen, setIsViewOpen] = useState(false)
+  const [isImportOpen, setIsImportOpen] = useState(false)
+  const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false)
+  const [historyBatchId, setHistoryBatchId] = useState<string | null>(null)
+  const [isRecallOpen, setIsRecallOpen] = useState(false)
 
   // Receive stock modal
   const [showReceive, setShowReceive] = useState(false)
   const [receiveDrugId, setReceiveDrugId] = useState('')
   const [receiveForm, setReceiveForm] = useState({
-    batchNumber: '', expiryDate: '', manufactureDate: '',
+    manufacturerLot: '', invoiceNumber: '', poReference: '', expiryDate: '', manufactureDate: '',
     quantity: '', buyingPrice: '', sellingPrice: '', supplier: '', notes: '',
   })
   const [saving, setSaving] = useState(false)
@@ -86,8 +98,8 @@ function InventoryContent() {
 
   async function receiveStock() {
     if (!receiveDrugId) { toast.error('Select a drug'); return }
-    const { batchNumber, expiryDate, quantity, buyingPrice } = receiveForm
-    if (!batchNumber || !expiryDate || !quantity || !buyingPrice) {
+    const { expiryDate, quantity, buyingPrice } = receiveForm
+    if (!expiryDate || !quantity || !buyingPrice) {
       toast.error('Fill all required fields'); return
     }
     setSaving(true)
@@ -105,7 +117,7 @@ function InventoryContent() {
       if (!res.ok) { const e = await res.json(); throw new Error(e.error) }
       toast.success('Stock received')
       setShowReceive(false)
-      setReceiveForm({ batchNumber: '', expiryDate: '', manufactureDate: '', quantity: '', buyingPrice: '', sellingPrice: '', supplier: '', notes: '' })
+      setReceiveForm({ manufacturerLot: '', invoiceNumber: '', poReference: '', expiryDate: '', manufactureDate: '', quantity: '', buyingPrice: '', sellingPrice: '', supplier: '', notes: '' })
       setReceiveDrugId('')
       load()
     } catch (err: any) { toast.error(err.message || 'Failed') }
@@ -123,12 +135,38 @@ function InventoryContent() {
     load()
   }
 
+  async function handleDeleteDrug(drugId: string) {
+    if (!confirm('Delete this drug and all its batches? This cannot be undone.')) return
+    try {
+      const res = await fetch(`/api/pharmacy/drugs/${drugId}`, { method: 'DELETE' })
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error) }
+      toast.success('Drug deleted')
+      setIsViewOpen(false)
+      setSelectedDrug(null)
+      load()
+    } catch (err: any) { toast.error(err.message || 'Failed to delete drug') }
+  }
+
   // Derived stats
   const expiringBatches = batches.filter(b => b.status === 'active' && daysUntil(b.expiryDate) <= 90)
   const expiredBatches  = batches.filter(b => b.status === 'expired')
   const lowDrugs        = drugs.filter(d => d.stock > 0 && d.stock <= (d.reorderLevel || 10))
   const outDrugs        = drugs.filter(d => d.stock <= 0)
   const stockValue      = batches.filter(b => b.status === 'active').reduce((s, b) => s + b.quantity * b.buyingPrice, 0)
+  const totalStock      = drugs.reduce((sum, d) => sum + d.stock, 0)
+  const estimatedProfit = drugs.reduce((sum, d) => sum + (d.stock * (d.sellingPrice - d.buyingPrice)), 0)
+
+  function handleDownloadTemplate() {
+    const headers = ['genericName', 'brandName', 'category', 'dosageForm', 'strength', 'unit', 'buyingPrice', 'sellingPrice', 'wholesalePrice', 'reorderLevel', 'requiresPrescription', 'isControlled', 'barcode', 'manufacturer', 'description', 'sideEffects']
+    const csv = headers.join(',') + '\n'
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'pharmacy_drugs_template.csv'
+    a.click()
+    window.URL.revokeObjectURL(url)
+  }
 
   const displayDrugs = drugs.filter(d =>
     !search ||
@@ -144,14 +182,12 @@ function InventoryContent() {
     }).sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime())
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-8">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Drug Inventory</h1>
-          <p className="text-sm text-gray-500">
-            Stock value: <span className="font-semibold text-green-700">KES {stockValue.toLocaleString()}</span>
-          </p>
+          <h1 className="text-3xl font-bold">Drug Inventory</h1>
+          <p className="text-muted-foreground mt-2">Manage your pharmacy catalog and stock</p>
         </div>
         <button
           onClick={() => setShowReceive(true)}
@@ -159,6 +195,63 @@ function InventoryContent() {
         >
           <Plus size={15} /> Receive Stock
         </button>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Items in Catalog</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{drugs.length}</div>
+            <p className="text-sm text-muted-foreground">Estimated Profit</p>
+            <p className="text-lg font-semibold text-primary mt-2">
+              KES {estimatedProfit.toLocaleString()}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Total Stock</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{totalStock.toLocaleString()}</div>
+            <p className="text-sm text-muted-foreground">Stock Value (Active Batches)</p>
+            <p className="text-lg font-semibold text-primary mt-2">
+              KES {stockValue.toLocaleString()}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">Actions</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-2">
+            <Button onClick={() => setIsCreateOpen(true)} size="sm" className="w-full">
+              <Plus size={16} className="mr-2" />
+              Create Drug
+            </Button>
+            <Button onClick={() => setIsImportOpen(true)} variant="outline" size="sm" className="w-full">
+              <Upload size={16} className="mr-2" />
+              Import
+            </Button>
+            <Button onClick={handleDownloadTemplate} variant="outline" size="sm" className="w-full">
+              <Download size={16} className="mr-2" />
+              Template
+            </Button>
+            <Button onClick={() => setIsCategoryManagerOpen(true)} variant="outline" size="sm" className="w-full">
+              <FolderTree size={16} className="mr-2" />
+              Categories
+            </Button>
+            <Button onClick={() => setIsRecallOpen(true)} variant="outline" size="sm" className="w-full text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 col-span-2 mt-2">
+              <AlertTriangle size={16} className="mr-2" />
+              Global Recall
+            </Button>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Alert summary cards */}
@@ -267,9 +360,45 @@ function InventoryContent() {
                         </td>
                         <td className="px-4 py-3 text-right text-gray-600 hidden md:table-cell">KES {value.toLocaleString()}</td>
                         <td className="px-4 py-3">
-                          <button onClick={() => setExpanded(expanded === drug._id ? null : drug._id)} className="text-gray-400 hover:text-gray-700">
-                            {expanded === drug._id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => setExpanded(expanded === drug._id ? null : drug._id)} className="text-gray-400 hover:text-gray-700">
+                              {expanded === drug._id ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            </button>
+                            <div className="flex gap-1">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setSelectedDrug(drug)
+                                  setIsViewOpen(true)
+                                }}
+                              >
+                                <Search size={14} />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setSelectedDrug(drug)
+                                  setIsEditOpen(true)
+                                }}
+                              >
+                                <Edit2 size={14} />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleDeleteDrug(drug._id)
+                                }}
+                              >
+                                <Trash2 size={14} className="text-red-500" />
+                              </Button>
+                            </div>
+                          </div>
                         </td>
                       </tr>
 
@@ -300,7 +429,8 @@ function InventoryContent() {
                                 return (
                                   <div key={b._id} className="flex items-center justify-between text-xs py-2 px-3 bg-white rounded-lg border border-gray-100">
                                     <div className="flex items-center gap-3">
-                                      <span className="font-mono font-semibold text-gray-800">{b.batchNumber}</span>
+                                      <span className="font-mono font-semibold text-gray-800">Lot: {b.manufacturerLot || 'N/A'}</span>
+                                      <span className="text-[10px] text-gray-400">ID: {b.internalBatchId}</span>
                                       {b.supplier && <span className="text-gray-400">{b.supplier}</span>}
                                     </div>
                                     <div className="flex items-center gap-3">
@@ -311,8 +441,9 @@ function InventoryContent() {
                                           : b.status.toUpperCase()}
                                       </span>
                                       <span className="text-gray-400">KES {b.buyingPrice}/unit</span>
+                                      <button onClick={() => setHistoryBatchId(b._id)} className="text-gray-400 hover:text-blue-500 font-semibold px-2">History</button>
                                       {b.status === 'active' && (
-                                        <button onClick={() => recallBatch(b._id)} className="text-gray-300 hover:text-red-500">Recall</button>
+                                        <button onClick={() => recallBatch(b._id)} className="text-gray-300 hover:text-red-500 font-semibold px-2">Recall</button>
                                       )}
                                     </div>
                                   </div>
@@ -381,7 +512,8 @@ function InventoryContent() {
                   <div key={b._id} className="flex items-center justify-between bg-white border border-red-100 rounded-xl px-4 py-3">
                     <div>
                       <p className="font-semibold text-gray-900 text-sm">{drug ? drug.genericName : 'Unknown'}</p>
-                      <p className="text-xs text-gray-400">Batch: <span className="font-mono">{b.batchNumber}</span></p>
+                      <p className="text-xs text-gray-400">Lot: <span className="font-mono">{b.manufacturerLot || 'N/A'}</span></p>
+                      <p className="text-[10px] text-gray-300">ID: {b.internalBatchId}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-bold text-red-600">EXPIRED {fmtDate(b.expiryDate)}</p>
@@ -422,8 +554,8 @@ function InventoryContent() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium text-gray-600 mb-1 block">Batch Number *</label>
-                <Input placeholder="e.g. BTH-001" value={receiveForm.batchNumber} onChange={e => setReceiveForm(f => ({ ...f, batchNumber: e.target.value }))} />
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Manufacturer Lot</label>
+                <Input placeholder="Optional" value={receiveForm.manufacturerLot} onChange={e => setReceiveForm(f => ({ ...f, manufacturerLot: e.target.value }))} />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 mb-1 block">Quantity *</label>
@@ -458,6 +590,17 @@ function InventoryContent() {
               <Input placeholder="Supplier / distributor name" value={receiveForm.supplier} onChange={e => setReceiveForm(f => ({ ...f, supplier: e.target.value }))} />
             </div>
 
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">Invoice Number</label>
+                <Input placeholder="Optional" value={receiveForm.invoiceNumber} onChange={e => setReceiveForm(f => ({ ...f, invoiceNumber: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1 block">PO Reference</label>
+                <Input placeholder="Optional" value={receiveForm.poReference} onChange={e => setReceiveForm(f => ({ ...f, poReference: e.target.value }))} />
+              </div>
+            </div>
+
             <div>
               <label className="text-xs font-medium text-gray-600 mb-1 block">Notes</label>
               <Input placeholder="Optional" value={receiveForm.notes} onChange={e => setReceiveForm(f => ({ ...f, notes: e.target.value }))} />
@@ -474,6 +617,316 @@ function InventoryContent() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Create/Edit Drug Dialog */}
+      <Dialog open={isCreateOpen || isEditOpen} onOpenChange={(open) => {
+        if (!open) {
+          setIsCreateOpen(false)
+          setIsEditOpen(false)
+          setSelectedDrug(null)
+        }
+      }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogTitle>
+            {selectedDrug ? 'Edit Drug' : 'Create Drug'}
+          </DialogTitle>
+          <DialogDescription>
+            {selectedDrug ? 'Update drug information' : 'Add a new drug to your catalog'}
+          </DialogDescription>
+          <DrugForm
+            drug={selectedDrug}
+            onSuccess={(savedDrug) => {
+              setIsCreateOpen(false)
+              setIsEditOpen(false)
+              setSelectedDrug(null)
+              load()
+              
+              // Handoff to Receive Stock if a new drug was created
+              if (savedDrug && !selectedDrug) {
+                setReceiveDrugId(savedDrug._id)
+                setReceiveForm(f => ({
+                  ...f,
+                  buyingPrice: String(savedDrug.buyingPrice || ''),
+                  sellingPrice: String(savedDrug.sellingPrice || '')
+                }))
+                setShowReceive(true)
+              }
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* View Drug Dialog */}
+      <Dialog open={isViewOpen} onOpenChange={(open) => {
+        if (!open) {
+          setIsViewOpen(false)
+          setSelectedDrug(null)
+        }
+      }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogTitle>Drug Details</DialogTitle>
+          <DialogDescription>View and manage drug information</DialogDescription>
+          {selectedDrug && (
+            <div className="space-y-6 mt-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-muted-foreground">Generic Name</label>
+                  <p className="text-lg font-semibold">{selectedDrug.genericName}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Brand Name</label>
+                  <p className="text-lg font-semibold">{selectedDrug.brandName || '-'}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Category</label>
+                  <p className="text-lg font-semibold">{selectedDrug.category}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Drug Class</label>
+                  <p className="text-lg font-semibold">{(selectedDrug as any).drugClass || '-'}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Dosage Form</label>
+                  <p className="text-lg font-semibold">{selectedDrug.dosageForm || '-'}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Strength</label>
+                  <p className="text-lg font-semibold">{selectedDrug.strength || '-'}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Unit</label>
+                  <p className="text-lg font-semibold">{selectedDrug.unit || '-'}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Stock</label>
+                  <p className="text-lg font-semibold text-green-600">{selectedDrug.stock}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Reorder Level</label>
+                  <p className="text-lg font-semibold">{selectedDrug.reorderLevel || 10}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Barcode</label>
+                  <p className="text-lg font-semibold">{selectedDrug.barcode || '-'}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Buying Price</label>
+                  <p className="text-lg font-semibold">KES {selectedDrug.buyingPrice.toLocaleString()}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Selling Price</label>
+                  <p className="text-lg font-semibold">KES {selectedDrug.sellingPrice.toLocaleString()}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Wholesale Price</label>
+                  <p className="text-lg font-semibold">KES {((selectedDrug as any).wholesalePrice || 0).toLocaleString()}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">SKU</label>
+                  <p className="text-lg font-semibold">{(selectedDrug as any).sku || '-'}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Manufacturer</label>
+                  <p className="text-lg font-semibold">{selectedDrug.manufacturer || '-'}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Status</label>
+                  <p className="text-lg font-semibold">{(selectedDrug as any).status || 'active'}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Requires Prescription</label>
+                  <p className="text-lg font-semibold">{selectedDrug.requiresPrescription ? 'Yes' : 'No'}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Controlled Drug</label>
+                  <p className="text-lg font-semibold">{selectedDrug.isControlled ? 'Yes' : 'No'}</p>
+                </div>
+              </div>
+
+              {selectedDrug.description && (
+                <div>
+                  <label className="text-xs text-muted-foreground">Description</label>
+                  <p className="text-sm mt-1">{selectedDrug.description}</p>
+                </div>
+              )}
+
+              {(selectedDrug as any).sideEffects && (
+                <div>
+                  <label className="text-xs text-muted-foreground">Side Effects</label>
+                  <p className="text-sm mt-1">{(selectedDrug as any).sideEffects}</p>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-4 border-t">
+                <Button
+                  onClick={() => {
+                    setIsViewOpen(false)
+                    setIsEditOpen(true)
+                  }}
+                  className="flex-1"
+                >
+                  <Edit2 size={16} className="mr-2" />
+                  Edit Drug
+                </Button>
+                <Button
+                  onClick={() => {
+                    setIsViewOpen(false)
+                    handleDeleteDrug(selectedDrug._id)
+                  }}
+                  variant="destructive"
+                  className="flex-1"
+                >
+                  <Trash2 size={16} className="mr-2" />
+                  Delete Drug
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Import Modal Placeholder */}
+      <Dialog open={isImportOpen} onOpenChange={setIsImportOpen}>
+        <DialogContent>
+          <DialogTitle>Import Drugs</DialogTitle>
+          <DialogDescription>Import drugs from CSV file</DialogDescription>
+          <div className="py-8 text-center text-muted-foreground">
+            <Upload size={48} className="mx-auto mb-4 opacity-50" />
+            <p>Import functionality coming soon</p>
+            <p className="text-sm mt-2">Download the template first to prepare your data</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Category Manager Placeholder */}
+      <Dialog open={isCategoryManagerOpen} onOpenChange={setIsCategoryManagerOpen}>
+        <DialogContent>
+          <DialogTitle>Manage Categories</DialogTitle>
+          <DialogDescription>Manage drug categories</DialogDescription>
+          <div className="py-8 text-center text-muted-foreground">
+            <FolderTree size={48} className="mx-auto mb-4 opacity-50" />
+            <p>Category manager coming soon</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {/* Global Recall Dialog */}
+      <GlobalRecallDialog open={isRecallOpen} onOpenChange={setIsRecallOpen} onRecallSuccess={load} />
+
+      {/* Batch History Dialog */}
+      {historyBatchId && (
+        <BatchHistoryDialog batchId={historyBatchId} open={!!historyBatchId} onOpenChange={(o) => !o && setHistoryBatchId(null)} />
+      )}
     </div>
+  )
+}
+
+function GlobalRecallDialog({ open, onOpenChange, onRecallSuccess }: { open: boolean, onOpenChange: (o: boolean) => void, onRecallSuccess: () => void }) {
+  const [lotNumber, setLotNumber] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function handleRecall() {
+    if (!lotNumber) return toast.error('Enter a manufacturer lot number')
+    if (!confirm(`Are you sure you want to recall all active batches with lot number: ${lotNumber}?`)) return
+    
+    setLoading(true)
+    try {
+      const res = await fetch('/api/pharmacy/batches/recall', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ manufacturerLot: lotNumber })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to recall')
+      
+      toast.success(data.message || 'Recall successful')
+      onOpenChange(false)
+      onRecallSuccess()
+    } catch (err: any) {
+      toast.error(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogTitle className="text-red-600 flex items-center gap-2">
+          <AlertTriangle size={20} /> Global Batch Recall
+        </DialogTitle>
+        <DialogDescription>
+          Enter a Manufacturer Lot number. All batches matching this lot will be immediately marked as recalled and blocked from sales.
+        </DialogDescription>
+        <div className="space-y-4 mt-2">
+          <div>
+            <label className="text-xs font-medium text-gray-600 mb-1 block">Manufacturer Lot Number *</label>
+            <Input 
+              placeholder="e.g. AMX240615" 
+              value={lotNumber} 
+              onChange={e => setLotNumber(e.target.value)} 
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button variant="destructive" disabled={loading || !lotNumber} onClick={handleRecall}>
+              {loading ? 'Recalling...' : 'Execute Recall'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function BatchHistoryDialog({ batchId, open, onOpenChange }: { batchId: string, open: boolean, onOpenChange: (o: boolean) => void }) {
+  const [transactions, setTransactions] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (batchId && open) {
+      setLoading(true)
+      fetch(`/api/pharmacy/batches/${batchId}/history`)
+        .then(res => res.json())
+        .then(data => {
+          setTransactions(data.transactions || [])
+        })
+        .finally(() => setLoading(false))
+    }
+  }, [batchId, open])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogTitle>Batch History</DialogTitle>
+        <DialogDescription>Timeline of stock movements for this batch.</DialogDescription>
+        
+        <div className="mt-4 space-y-3">
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading history...</p>
+          ) : transactions.length === 0 ? (
+            <p className="text-sm text-gray-500">No transactions found for this batch.</p>
+          ) : (
+            transactions.map(tx => (
+              <div key={tx._id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 border rounded-xl bg-gray-50">
+                <div>
+                  <p className="font-semibold text-sm">
+                    {tx.type} <span className="text-gray-400 font-normal ml-2">{tx.reason || ''}</span>
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {new Date(tx.timestamp).toLocaleString()} {tx.userIdPerformed?.name && `by ${tx.userIdPerformed.name}`}
+                  </p>
+                </div>
+                <div className="text-right mt-2 sm:mt-0">
+                  <p className={`font-bold ${tx.quantity > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {tx.quantity > 0 ? '+' : ''}{tx.quantity}
+                  </p>
+                  <p className="text-xs text-gray-400">Bal: {tx.newBalance}</p>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

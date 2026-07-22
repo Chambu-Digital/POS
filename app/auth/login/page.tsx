@@ -182,6 +182,11 @@ export default function LoginPage() {
               {loading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
+          <div className="mt-4 text-center text-sm">
+            <Link href="/auth/forgot-password" className="text-primary hover:underline">
+              Forgot password?
+            </Link>
+          </div>
           <div className="mt-4 text-center text-sm text-muted-foreground">
             Contact Chambu Digital to get access.
           </div>

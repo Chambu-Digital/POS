@@ -3,8 +3,12 @@ import type mongoose from 'mongoose'
 import {
   productSchema, saleSchema, categorySchema, staffSchema, userSchema,
   rentalSchema, rentalServiceSchema, rentalBookingSchema,
-  kitchenOrderSchema, menuItemSchema, expenseSchema, expenseCategorySchema, reportSchema,
+  kitchenOrderSchema, menuItemSchema, expenseSchema, expenseCategorySchema,
+  reportSchema, stockLedgerSchema,
   customerSchema, drugBatchSchema, drugSchema,
+  branchSchema, inventorySchema, inventoryTransactionSchema,
+  barBrandSchema, barInventoryItemSchema, barServingSchema, barBottleSchema,
+  barTabSchema, barTabLineSchema, barAuditLogSchema,
 } from '@/lib/models/schemas'
 
 export function getModels(conn: mongoose.Connection) {
@@ -22,8 +26,19 @@ export function getModels(conn: mongoose.Connection) {
     Expense:         conn.models.Expense         || conn.model('Expense',         expenseSchema),
     ExpenseCategory: conn.models.ExpenseCategory || conn.model('ExpenseCategory', expenseCategorySchema),
     Report:          conn.models.Report          || conn.model('Report',          reportSchema),
+    StockLedger:     conn.models.StockLedger     || conn.model('StockLedger',     stockLedgerSchema),
     Customer:        conn.models.Customer        || conn.model('Customer',        customerSchema),
     DrugBatch:       conn.models.DrugBatch       || conn.model('DrugBatch',       drugBatchSchema),
     Drug:            conn.models.Drug            || conn.model('Drug',            drugSchema),
+    Branch:          conn.models.Branch          || conn.model('Branch',          branchSchema),
+    Inventory:       conn.models.Inventory       || conn.model('Inventory',       inventorySchema),
+    InventoryTransaction: conn.models.InventoryTransaction || conn.model('InventoryTransaction', inventoryTransactionSchema),
+    BarBrand:         conn.models.BarBrand         || conn.model('BarBrand',         barBrandSchema),
+    BarInventoryItem: conn.models.BarInventoryItem || conn.model('BarInventoryItem', barInventoryItemSchema),
+    BarServing:       conn.models.BarServing       || conn.model('BarServing',       barServingSchema),
+    BarBottle:        conn.models.BarBottle        || conn.model('BarBottle',        barBottleSchema),
+    BarTab:           conn.models.BarTab           || conn.model('BarTab',           barTabSchema),
+    BarTabLine:       conn.models.BarTabLine       || conn.model('BarTabLine',       barTabLineSchema),
+    BarAuditLog:      conn.models.BarAuditLog      || conn.model('BarAuditLog',      barAuditLogSchema),
   }
 }

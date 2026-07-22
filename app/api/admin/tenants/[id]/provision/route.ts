@@ -3,6 +3,7 @@ import { connectTenantDB } from '@/lib/db-tenant'
 import { getModels } from '@/lib/tenant/get-models'
 import { getAdminModels } from '@/lib/admin-models'
 import { verifyAdminSession } from '../../../auth/route'
+import { checkEmailExistsAcrossTenants } from '@/lib/auth/check-email-exists'
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!await verifyAdminSession(request)) {
@@ -21,12 +22,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const tenant = await Tenant.findById(id).lean() as { mongoUri: string; shopName?: string } | null
     if (!tenant) return NextResponse.json({ error: 'Tenant not found' }, { status: 404 })
 
+    // Check if email already exists across all tenants
+    const existingAccount = await checkEmailExistsAcrossTenants(email)
+    if (existingAccount) {
+      return NextResponse.json({ 
+        error: 'An account with this email already exists in another tenant. Please use a different email.' 
+      }, { status: 409 })
+    }
+
     console.log('[provision] Connecting to tenant DB:', tenant.mongoUri)
     const conn = await connectTenantDB(tenant.mongoUri)
     const { User } = getModels(conn)
-
-    const existing = await User.findOne({ email })
-    if (existing) return NextResponse.json({ error: 'An account with this email already exists in this tenant' }, { status: 409 })
 
     const user = new User({
       email,
