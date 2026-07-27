@@ -86,7 +86,9 @@ export const customerSchema = new mongoose.Schema(
     name:          { type: String, required: true, trim: true },
     phone:         { type: String, default: '', trim: true },
     email:         { type: String, default: '' },
+    idNumber:      { type: String, default: '', trim: true }, // ID number required for credit
     creditBalance: { type: Number, default: 0 }, // positive = owes us, negative = we owe them
+    creditLimit:   { type: Number, default: 0 }, // maximum credit allowed (0 = no credit)
     ledger: [{
       date:        { type: Date, default: Date.now },
       type:        { type: String, enum: ['purchase', 'payment', 'adjustment'] },

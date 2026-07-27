@@ -36,11 +36,18 @@ export async function POST(request: NextRequest) {
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
-    const { name, phone, email } = await request.json()
+    const { name, phone, email, idNumber, creditLimit } = await request.json()
 
     if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 })
 
-    const customer = new models.Customer({ userId: ownerId, name, phone, email })
+    const customer = new models.Customer({ 
+      userId: ownerId, 
+      name, 
+      phone, 
+      email, 
+      idNumber: idNumber || '',
+      creditLimit: creditLimit || 0 
+    })
     await customer.save()
     return NextResponse.json({ customer }, { status: 201 })
   } catch (error) {

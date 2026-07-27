@@ -1,6 +1,7 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
+import { Types } from 'mongoose'
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
     const staffId = url.searchParams.get('staffId')
 
     const filter: any = { userId: ownerId }
-    if (inventoryItemId) filter.inventoryItemId = inventoryItemId
+    if (inventoryItemId) filter.inventoryItemId = new Types.ObjectId(inventoryItemId)
     if (state) filter.state = state
     if (staffId) filter.openedBy = staffId
 

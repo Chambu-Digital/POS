@@ -20,7 +20,9 @@ interface Customer {
   name: string
   phone: string
   email?: string
+  idNumber?: string
   creditBalance: number
+  creditLimit: number
   ledger: LedgerEntry[]
   createdAt: string
 }
@@ -44,6 +46,8 @@ function CustomersContent() {
   const [newName, setNewName] = useState('')
   const [newPhone, setNewPhone] = useState('')
   const [newEmail, setNewEmail] = useState('')
+  const [newIdNumber, setNewIdNumber] = useState('')
+  const [newCreditLimit, setNewCreditLimit] = useState('')
   const [saving, setSaving] = useState(false)
 
   // Pay credit
@@ -51,6 +55,15 @@ function CustomersContent() {
   const [payAmount, setPayAmount] = useState('')
   const [payNote, setPayNote] = useState('')
   const [paying, setPaying] = useState(false)
+
+  // Edit customer
+  const [editCustomer, setEditCustomer] = useState<Customer | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editIdNumber, setEditIdNumber] = useState('')
+  const [editCreditLimit, setEditCreditLimit] = useState('')
+  const [editing, setEditing] = useState(false)
 
   useEffect(() => { load() }, [])
 
@@ -75,11 +88,17 @@ function CustomersContent() {
       const res = await fetch('/api/customers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName, phone: newPhone, email: newEmail }),
+        body: JSON.stringify({ 
+          name: newName, 
+          phone: newPhone, 
+          email: newEmail,
+          idNumber: newIdNumber,
+          creditLimit: parseFloat(newCreditLimit) || 0 
+        }),
       })
       if (res.ok) {
         toast.success('Customer added')
-        setShowAdd(false); setNewName(''); setNewPhone(''); setNewEmail('')
+        setShowAdd(false); setNewName(''); setNewPhone(''); setNewEmail(''); setNewIdNumber(''); setNewCreditLimit('')
         load()
       } else {
         const d = await res.json(); toast.error(d.error || 'Failed to add customer')
@@ -106,6 +125,41 @@ function CustomersContent() {
       }
     } catch { toast.error('Failed to record payment') }
     setPaying(false)
+  }
+
+  function openEditCustomer(customer: Customer) {
+    setEditCustomer(customer)
+    setEditName(customer.name)
+    setEditPhone(customer.phone)
+    setEditEmail(customer.email || '')
+    setEditIdNumber(customer.idNumber || '')
+    setEditCreditLimit(String(customer.creditLimit))
+  }
+
+  async function updateCustomer() {
+    if (!editCustomer || !editName.trim()) { toast.error('Name is required'); return }
+    setEditing(true)
+    try {
+      const res = await fetch(`/api/customers/${editCustomer._id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName,
+          phone: editPhone,
+          email: editEmail,
+          idNumber: editIdNumber,
+          creditLimit: parseFloat(editCreditLimit) || 0,
+        }),
+      })
+      if (res.ok) {
+        toast.success('Customer updated')
+        setEditCustomer(null); setEditName(''); setEditPhone(''); setEditEmail(''); setEditIdNumber(''); setEditCreditLimit('')
+        load()
+      } else {
+        const d = await res.json(); toast.error(d.error || 'Failed to update customer')
+      }
+    } catch { toast.error('Failed to update customer') }
+    setEditing(false)
   }
 
   async function deleteCustomer(id: string, name: string) {
@@ -162,7 +216,9 @@ function CustomersContent() {
               <tr>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">Name</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">Phone</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-500">ID Number</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">Credit Balance</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-500">Limit</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500">Since</th>
                 <th className="px-4 py-3" />
               </tr>
@@ -181,6 +237,13 @@ function CustomersContent() {
                       </button>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{c.phone || '—'}</td>
+                    <td className="px-4 py-3 text-gray-600">
+                      {c.idNumber ? (
+                        <span className="font-medium">{c.idNumber}</span>
+                      ) : (
+                        <span className="text-gray-400 text-xs">No ID</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       {c.creditBalance > 0 ? (
                         <span className="text-red-600 font-semibold">KES {c.creditBalance.toLocaleString()}</span>
@@ -188,11 +251,24 @@ function CustomersContent() {
                         <span className="text-green-600 text-xs">No debt</span>
                       )}
                     </td>
+                    <td className="px-4 py-3 text-gray-600">
+                      {c.creditLimit > 0 ? (
+                        <span className="text-blue-600">KES {c.creditLimit.toLocaleString()}</span>
+                      ) : (
+                        <span className="text-gray-400 text-xs">No limit</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-gray-400 text-xs">
                       {new Date(c.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2 justify-end">
+                        <button
+                          onClick={() => openEditCustomer(c)}
+                          className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                        >
+                          Edit
+                        </button>
                         {c.creditBalance > 0 && (
                           <button
                             onClick={() => { setPayCustomer(c); setPayAmount(String(c.creditBalance)) }}
@@ -214,7 +290,7 @@ function CustomersContent() {
                   {/* Ledger expansion */}
                   {expanded === c._id && (
                     <tr key={`${c._id}-ledger`}>
-                      <td colSpan={5} className="px-4 pb-4 bg-gray-50">
+                      <td colSpan={7} className="px-4 pb-4 bg-gray-50">
                         <div className="mt-2">
                           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Transaction History</p>
                           {c.ledger.length === 0 ? (
@@ -267,6 +343,25 @@ function CustomersContent() {
             <div>
               <label className="text-sm font-medium text-gray-700">Email</label>
               <Input className="mt-1" type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="optional" />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-700">ID Number</label>
+              <Input 
+                className="mt-1" 
+                value={newIdNumber} 
+                onChange={e => setNewIdNumber(e.target.value)} 
+                placeholder="Required for credit (e.g. National ID, Passport)" 
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-700">Credit Limit</label>
+              <Input 
+                className="mt-1" 
+                type="number" 
+                value={newCreditLimit} 
+                onChange={e => setNewCreditLimit(e.target.value)} 
+                placeholder="0 for no credit" 
+              />
             </div>
             <div className="flex gap-2 pt-1">
               <button
@@ -322,6 +417,60 @@ function CustomersContent() {
                   {paying ? 'Saving...' : 'Record Payment'}
                 </button>
                 <button onClick={() => setPayCustomer(null)} className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Customer Dialog */}
+      <Dialog open={!!editCustomer} onOpenChange={v => !v && setEditCustomer(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogTitle>Edit Customer</DialogTitle>
+          {editCustomer && (
+            <div className="space-y-3 mt-2">
+              <div>
+                <label className="text-sm font-medium text-gray-700">Name *</label>
+                <Input className="mt-1" value={editName} onChange={e => setEditName(e.target.value)} placeholder="Full name" autoFocus />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Phone</label>
+                <Input className="mt-1" value={editPhone} onChange={e => setEditPhone(e.target.value)} placeholder="e.g. 0712345678" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Email</label>
+                <Input className="mt-1" type="email" value={editEmail} onChange={e => setEditEmail(e.target.value)} placeholder="optional" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">ID Number</label>
+                <Input 
+                  className="mt-1" 
+                  value={editIdNumber} 
+                  onChange={e => setEditIdNumber(e.target.value)} 
+                  placeholder="Required for credit (e.g. National ID, Passport)" 
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Credit Limit</label>
+                <Input 
+                  className="mt-1" 
+                  type="number" 
+                  value={editCreditLimit} 
+                  onChange={e => setEditCreditLimit(e.target.value)} 
+                  placeholder="0 for no credit" 
+                />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={updateCustomer}
+                  disabled={editing}
+                  className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50"
+                >
+                  {editing ? 'Saving...' : 'Update Customer'}
+                </button>
+                <button onClick={() => setEditCustomer(null)} className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
                   Cancel
                 </button>
               </div>

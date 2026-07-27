@@ -35,6 +35,7 @@ interface BarProduct {
   stock: number
   lowStockThreshold: number
   barcode?: string
+  hasOpenBottle?: boolean
   servings: { _id: string; name: string; sellingPrice: number; unitsProduced: number }[]
 }
 
@@ -72,6 +73,20 @@ function BarPOSContent() {
   const [activeTabId,   setActiveTabId]   = useState<string | null>(null)
   const [activeTabName, setActiveTabName] = useState<string | null>(null)
 
+  // Customer selection for credit sales
+  const [selectedCustomer, setSelectedCustomer] = useState<any>(null)
+  const [customers, setCustomers] = useState<any[]>([])
+  const [customerSearch, setCustomerSearch] = useState('')
+
+  // ── Open-bottle warning state ─────────────────────────────────────────────────
+  // When a serving is tapped and there is no open bottle, we warn the user before
+  // adding to cart. They can proceed (fallback deduction from sealed stock) or cancel.
+  const [pendingServing, setPendingServing] = useState<{
+    product: BarProduct
+    price: number
+    nameSuffix: string
+  } | null>(null)
+
   const [cart, setCart] = useState<CartItem[]>(() => {
     if (typeof window === 'undefined') return []
     try { return JSON.parse(sessionStorage.getItem(CART_KEY) || '[]') } catch { return [] }
@@ -101,13 +116,34 @@ function BarPOSContent() {
   const { state: scannerState, lastResult, submitManual, enterEditing, exitEditing } =
     useBarcodeScanner({ context: 'sales', onResult: handleScanResult })
 
-  useEffect(() => { fetchProducts(); initAutoSync() }, [])
+  async function fetchProducts() {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/bar/products')
+      if (!res.ok) throw new Error()
+      const data = await res.json()
+      const prods: BarProduct[] = (data.products || []).map((p: any) => ({
+        ...p, sellingPrice: p.bottleSellingPrice ?? 0,
+      }))
+      setProducts(prods)
+      setCategories([...new Set(prods.map(p => p.brandCategory).filter(Boolean))].sort() as string[])
+    } catch { toast.error('Failed to load bar products') }
+    finally { setLoading(false) }
+  }
 
-  // ── Refresh products whenever the page regains focus ─────────────────────────
-  // After a completed sale the user returns from /dashboard/sales/payment.
-  // The component is already mounted so useEffect([]) doesn't re-fire.
-  // Listening to the 'focus' / 'visibilitychange' events ensures stock counts
-  // are always fresh as soon as the user is back on this page.
+  async function fetchCustomers() {
+    try {
+      const res = await fetch('/api/customers')
+      if (res.ok) {
+        const data = await res.json()
+        setCustomers(data.customers || [])
+      }
+    } catch { console.error('Failed to load customers') }
+  }
+
+  useEffect(() => { fetchProducts(); fetchCustomers(); initAutoSync() }, [])
+
+  // Re-fetch when the page regains visibility (e.g. after returning from payment)
   useEffect(() => {
     function onVisible() {
       if (document.visibilityState === 'visible') fetchProducts()
@@ -118,19 +154,6 @@ function BarPOSContent() {
     return () => {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onFocus)
-    }
-  }, [])
-  // Re-fetch products when the user navigates back to this page (e.g. after payment)
-  // so stock counts are always current without a full page reload.
-  useEffect(() => {
-    function onVisible() {
-      if (document.visibilityState === 'visible') fetchProducts()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', onVisible)
-    return () => {
-      document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', onVisible)
     }
   }, [])
   useEffect(() => { sessionStorage.setItem(CART_KEY, JSON.stringify(cart)) }, [cart])
@@ -152,6 +175,16 @@ function BarPOSContent() {
     finally { setLoading(false) }
   }
 
+  async function fetchCustomers() {
+    try {
+      const res = await fetch('/api/customers')
+      if (res.ok) {
+        const data = await res.json()
+        setCustomers(data.customers || [])
+      }
+    } catch { console.error('Failed to load customers') }
+  }
+
   function filterProducts() {
     let f = products
     if (categoryFilter !== 'all') f = f.filter(p => p.brandCategory === categoryFilter)
@@ -167,6 +200,20 @@ function BarPOSContent() {
   }
 
   function addToCart(product: BarProduct, price?: number, nameSuffix?: string) {
+    if (product.stock <= 0) { toast.error('Out of stock'); return }
+
+    // ── Serving sale: warn if no open bottle ─────────────────────────────────
+    // The sale will still work via sealed-stock fallback, but the user should
+    // know they need to open a bottle for accurate unit tracking.
+    if (nameSuffix && !product.hasOpenBottle) {
+      setPendingServing({ product, price: price!, nameSuffix })
+      return  // wait for user confirmation in the warning dialog
+    }
+
+    addToCartDirect(product, price, nameSuffix)
+  }
+
+  function addToCartDirect(product: BarProduct, price?: number, nameSuffix?: string) {
     if (product.stock <= 0) { toast.error('Out of stock'); return }
     const sellingPrice = price ?? product.bottleSellingPrice
     const productName  = nameSuffix ? `${product.name} ${product.size} — ${nameSuffix}` : `${product.name} ${product.size}`
@@ -229,6 +276,8 @@ function BarPOSContent() {
       returnUrl:     '/dashboard/bar/pos',
       activeTabId:   activeTabId ?? undefined,
       activeTabName: activeTabName ?? undefined,
+      customerId:    selectedCustomer?._id ?? undefined,
+      customerName:  selectedCustomer?.name ?? undefined,
     }))
     sessionStorage.removeItem(CART_KEY)
     sessionStorage.removeItem(DISCOUNT_KEY)
@@ -292,6 +341,37 @@ function BarPOSContent() {
               )}
             </div>
             <div className="flex items-center gap-2">
+              {/* Customer selector */}
+              <div className="relative">
+                <Select
+                  value={selectedCustomer?._id || 'none'}
+                  onValueChange={(val) => {
+                    if (val === 'none') {
+                      setSelectedCustomer(null)
+                    } else {
+                      const customer = customers.find(c => c._id === val)
+                      setSelectedCustomer(customer || null)
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-48">
+                    <SelectValue placeholder="Select Customer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Customer</SelectItem>
+                    {customers.map(c => (
+                      <SelectItem key={c._id} value={c._id}>
+                        {c.name}
+                        {c.creditLimit > 0 && (
+                          <span className="text-xs text-muted-foreground ml-2">
+                            (Limit: KES {c.creditLimit.toLocaleString()})
+                          </span>
+                        )}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <BarTabs activeTabId={activeTabId} onRecall={handleTabRecall} />
               <HeldOrders storageKey="barHeldOrders" onRecall={(order) => {
                 setActiveTabId(null); setActiveTabName(null)
@@ -358,8 +438,8 @@ function BarPOSContent() {
                 <p className="text-center text-muted-foreground py-8">
                   {activeTabId ? 'Tab is empty — add items above' : 'Cart is empty'}
                 </p>
-              ) : cart.map(item => (
-                <div key={item.productId} className="border rounded-lg p-2.5">
+              ) : cart.map((item, idx) => (
+                <div key={`${item.productId}-${idx}`} className="border rounded-lg p-2.5">
                   <div className="flex justify-between items-start">
                     <p className="font-medium text-sm truncate leading-tight pr-1">{item.productName}</p>
                     <Button size="sm" variant="ghost" className="h-6 w-6 p-0 shrink-0" onClick={() => removeFromCart(item.productId)}>
@@ -388,6 +468,35 @@ function BarPOSContent() {
 
           <Card>
             <CardContent className="p-4 space-y-3">
+              {/* Customer credit info */}
+              {selectedCustomer && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium text-blue-800">{selectedCustomer.name}</span>
+                    <span className="text-blue-600">
+                      Balance: KSh {selectedCustomer.creditBalance?.toLocaleString() || 0}
+                    </span>
+                  </div>
+                  {selectedCustomer.creditLimit > 0 && (
+                    <div className="text-xs text-blue-600 mt-1">
+                      Available Credit: KSh {Math.max(0, selectedCustomer.creditLimit - (selectedCustomer.creditBalance || 0)).toLocaleString()}
+                    </div>
+                  )}
+                  {!selectedCustomer.idNumber && selectedCustomer.creditLimit > 0 && (
+                    <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
+                      <p className="text-xs text-yellow-800 font-medium">⚠️ ID Number Required for Credit</p>
+                      <a 
+                        href="/dashboard/retail/customers" 
+                        className="text-xs text-yellow-700 underline hover:text-yellow-900"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Add ID to enable credit sales →
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Subtotal:</span><span className="font-medium">KSh {subtotal.toLocaleString()}</span>
@@ -415,6 +524,44 @@ function BarPOSContent() {
           </Card>
         </div>
       </div>
+
+      {/* Open-bottle warning dialog */}
+      {pendingServing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-background rounded-xl shadow-xl p-6 max-w-sm w-full mx-4 space-y-4">
+            <div className="text-center space-y-1">
+              <div className="text-3xl mb-2">⚠️</div>
+              <h3 className="font-bold text-base">No Open Bottle</h3>
+              <p className="text-sm text-muted-foreground">
+                There is no open bottle for{' '}
+                <span className="font-semibold">{pendingServing.product.name} {pendingServing.product.size}</span>.
+              </p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Serving sales without an open bottle will deduct from sealed stock instead.
+                For accurate unit tracking, open a bottle first from the{' '}
+                <a href="/dashboard/bar/inventory" className="underline text-primary">inventory page</a>.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setPendingServing(null)}
+                className="px-4 py-2 rounded-lg border text-sm font-medium hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  addToCartDirect(pendingServing.product, pendingServing.price, pendingServing.nameSuffix)
+                  setPendingServing(null)
+                }}
+                className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+              >
+                Add Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <FloatingCartButton itemCount={cart.length} onClick={scrollToCart} />
       <ScannerFeedback state={scannerState} lastResult={lastResult} />

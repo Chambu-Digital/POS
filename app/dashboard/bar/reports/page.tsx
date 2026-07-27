@@ -54,8 +54,27 @@ interface ProductSold {
   revenue: number
 }
 
-type Period = '7d' | '30d' | '90d' | 'custom'
-type ReportTab = 'overview' | 'open' | 'closed' | 'bottles' | 'products'
+interface CreditTransaction {
+  customerName: string
+  customerPhone: string
+  type: 'purchase' | 'payment'
+  amount: number
+  balance: number
+  date: string
+  note?: string
+}
+
+interface CustomerCreditSummary {
+  _id: string
+  name: string
+  phone: string
+  creditBalance: number
+  creditLimit: number
+  availableCredit: number
+}
+
+type Period = 'today' | '7d' | '30d' | '90d' | 'custom'
+type ReportTab = 'overview' | 'open' | 'closed' | 'bottles' | 'products' | 'payments' | 'credit'
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
@@ -69,7 +88,7 @@ export default function BarReportsPage() {
 
 function ReportsContent() {
   // ── Period state ────────────────────────────────────────────────────────────
-  const [period,   setPeriod]   = useState<Period>('30d')
+  const [period,   setPeriod]   = useState<Period>('today')
   const [fromDate, setFromDate] = useState('')
   const [toDate,   setToDate]   = useState('')
 
@@ -86,6 +105,13 @@ function ReportsContent() {
   const [dailyRevenue,   setDailyRevenue]   = useState<{ date: string; total: number }[]>([])
   const [totalRevenue,   setTotalRevenue]   = useState(0)
   const [totalSales,     setTotalSales]     = useState(0)
+  const [paymentModes,   setPaymentModes]   = useState<{ method: string; label: string; count: number; amount: number }[]>([])
+  const [totalPayments,  setTotalPayments]  = useState(0)
+  const [creditTransactions, setCreditTransactions] = useState<CreditTransaction[]>([])
+  const [customerSummary, setCustomerSummary] = useState<CustomerCreditSummary[]>([])
+  const [totalCreditSales, setTotalCreditSales] = useState(0)
+  const [totalCreditPayments, setTotalCreditPayments] = useState(0)
+  const [totalOutstanding, setTotalOutstanding] = useState(0)
 
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<ReportTab>('overview')
@@ -96,6 +122,7 @@ function ReportsContent() {
     const now = new Date()
     const to  = now.toISOString().slice(0, 10)
     if (period === 'custom') return { from: fromDate, to: toDate }
+    if (period === 'today') return { from: to, to }
     const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
     const from = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
     return { from, to }
@@ -109,12 +136,14 @@ function ReportsContent() {
     if (!from || !to) { setLoading(false); return }
 
     try {
-      const [outstandingRes, openRes, closedRes, diffRes, productsRes] = await Promise.all([
+      const [outstandingRes, openRes, closedRes, diffRes, productsRes, paymentsRes, creditRes] = await Promise.all([
         fetch('/api/bar/reports/outstanding'),
         fetch('/api/bar/tabs?status=open'),
         fetch(`/api/bar/reports/closed-tabs?from=${from}&to=${to}`),
         fetch(`/api/bar/reports/bottle-differences?from=${from}&to=${to}`),
         fetch(`/api/bar/reports/products-sold?from=${from}&to=${to}`),
+        fetch(`/api/bar/reports/payment-modes?from=${from}&to=${to}`),
+        fetch(`/api/bar/reports/credit?from=${from}&to=${to}`),
       ])
 
       if (outstandingRes.ok) {
@@ -144,6 +173,19 @@ function ReportsContent() {
         setTotalRevenue(d.totalRevenue ?? 0)
         setTotalSales(d.totalSales ?? 0)
       }
+      if (paymentsRes.ok) {
+        const d = await paymentsRes.json()
+        setPaymentModes(d.paymentModes ?? [])
+        setTotalPayments(d.totalAmount ?? 0)
+      }
+      if (creditRes.ok) {
+        const d = await creditRes.json()
+        setCreditTransactions(d.creditTransactions ?? [])
+        setCustomerSummary(d.customerSummary ?? [])
+        setTotalCreditSales(d.totalCreditSales ?? 0)
+        setTotalCreditPayments(d.totalCreditPayments ?? 0)
+        setTotalOutstanding(d.totalOutstanding ?? 0)
+      }
     } catch {
       toast.error('Failed to load reports')
     }
@@ -155,6 +197,7 @@ function ReportsContent() {
   // ── UI helpers ──────────────────────────────────────────────────────────────
 
   const periodLabel: Record<Period, string> = {
+    'today':  'Today',
     '7d':     'Last 7 days',
     '30d':    'Last 30 days',
     '90d':    'Last 90 days',
@@ -167,6 +210,8 @@ function ReportsContent() {
     { key: 'closed',    label: 'Closed Tabs'        },
     { key: 'bottles',   label: 'Bottle Differences' },
     { key: 'products',  label: 'Products Sold'      },
+    { key: 'payments',  label: 'Payment Modes'      },
+    { key: 'credit',    label: 'Credit'             },
   ]
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -181,7 +226,7 @@ function ReportsContent() {
           <p className="text-sm text-muted-foreground">Sales, inventory, and performance analytics</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {(['7d', '30d', '90d', 'custom'] as Period[]).map(p => (
+          {(['today', '7d', '30d', '90d', 'custom'] as Period[]).map(p => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
@@ -526,6 +571,193 @@ function ReportsContent() {
                     <span className="text-center">{products.reduce((s, p) => s + p.quantity, 0)}</span>
                     <span className="text-right">KES {totalRevenue.toLocaleString()}</span>
                   </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Payment modes ───────────────────────────────────────────────────── */}
+      {activeTab === 'payments' && (
+        <div className="space-y-4">
+          {paymentModes.length > 0 && (
+            <Card>
+              <CardHeader><CardTitle className="text-base">Payment Distribution</CardTitle></CardHeader>
+              <CardContent>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={paymentModes} margin={{ left: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }}
+                        tickFormatter={v => `${(v / 1000).toFixed(0)}K`} />
+                      <Tooltip formatter={(v: number) => [`KES ${v.toLocaleString()}`, 'Amount']} />
+                      <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Payment Breakdown</CardTitle>
+                {totalPayments > 0 && (
+                  <span className="text-sm font-semibold text-emerald-600">
+                    Total: KES {totalPayments.toLocaleString()}
+                  </span>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {paymentModes.length === 0 ? (
+                <EmptyState message="No payments in this period" />
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-3 text-xs font-semibold text-muted-foreground px-3 pb-2 border-b">
+                    <span>Payment Method</span>
+                    <span className="text-center">Transactions</span>
+                    <span className="text-right">Amount</span>
+                  </div>
+                  {paymentModes.map((pm, i) => {
+                    const percentage = totalPayments > 0 ? (pm.amount / totalPayments) * 100 : 0
+                    return (
+                      <div key={pm.method} className="grid grid-cols-3 items-center px-3 py-2 rounded-lg hover:bg-muted/40 text-sm">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-[11px] text-muted-foreground w-4 shrink-0">{i + 1}</span>
+                          <span className="truncate font-medium">{pm.label}</span>
+                        </div>
+                        <span className="text-center text-muted-foreground">{pm.count}</span>
+                        <div className="text-right">
+                          <span className="font-semibold">KES {pm.amount.toLocaleString()}</span>
+                          <span className="text-xs text-muted-foreground ml-1">({percentage.toFixed(1)}%)</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                  <Separator className="mt-2" />
+                  <div className="grid grid-cols-3 px-3 py-2 text-sm font-bold">
+                    <span>Total</span>
+                    <span className="text-center">{paymentModes.reduce((s, pm) => s + pm.count, 0)}</span>
+                    <span className="text-right">KES {totalPayments.toLocaleString()}</span>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Credit ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'credit' && (
+        <div className="space-y-4">
+          {/* Summary cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card>
+              <CardHeader><CardTitle className="text-base">Credit Sales</CardTitle></CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold text-red-600">KES {totalCreditSales.toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground mt-1">Total credit purchases</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle className="text-base">Credit Payments</CardTitle></CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold text-green-600">KES {totalCreditPayments.toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground mt-1">Total payments received</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader><CardTitle className="text-base">Outstanding Credit</CardTitle></CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold text-orange-600">KES {totalOutstanding.toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground mt-1">Total unpaid balance</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Customer summary */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Customer Credit Summary</CardTitle>
+                <span className="text-sm font-semibold text-muted-foreground">
+                  {customerSummary.length} customers with outstanding credit
+                </span>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {customerSummary.length === 0 ? (
+                <EmptyState message="No outstanding credit" />
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-4 text-xs font-semibold text-muted-foreground px-3 pb-2 border-b">
+                    <span>Customer</span>
+                    <span className="text-center">Balance</span>
+                    <span className="text-center">Limit</span>
+                    <span className="text-right">Available</span>
+                  </div>
+                  {customerSummary.map((c, i) => (
+                    <div key={c._id} className="grid grid-cols-4 items-center px-3 py-2 rounded-lg hover:bg-muted/40 text-sm">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-[11px] text-muted-foreground w-4 shrink-0">{i + 1}</span>
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{c.name}</p>
+                          <p className="text-xs text-muted-foreground truncate">{c.phone || 'No phone'}</p>
+                        </div>
+                      </div>
+                      <span className="text-center text-red-600 font-medium">KES {c.creditBalance.toLocaleString()}</span>
+                      <span className="text-center text-blue-600">KES {c.creditLimit.toLocaleString()}</span>
+                      <span className="text-right text-green-600 font-medium">KES {c.availableCredit.toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Transaction history */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Credit Transaction History</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {creditTransactions.length === 0 ? (
+                <EmptyState message="No credit transactions in this period" />
+              ) : (
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  <div className="grid grid-cols-4 text-xs font-semibold text-muted-foreground px-3 pb-2 border-b sticky top-0 bg-background">
+                    <span>Customer</span>
+                    <span className="text-center">Type</span>
+                    <span className="text-center">Amount</span>
+                    <span className="text-right">Date</span>
+                  </div>
+                  {[...creditTransactions].reverse().map((t, i) => (
+                    <div key={i} className="grid grid-cols-4 items-center px-3 py-2 rounded-lg hover:bg-muted/40 text-sm">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{t.customerName}</p>
+                        {t.note && <p className="text-xs text-muted-foreground truncate">{t.note}</p>}
+                      </div>
+                      <span className={cn(
+                        'text-center text-xs font-medium px-2 py-1 rounded-full',
+                        t.type === 'purchase' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                      )}>
+                        {t.type === 'purchase' ? 'Purchase' : 'Payment'}
+                      </span>
+                      <span className={cn(
+                        'text-center font-medium',
+                        t.type === 'purchase' ? 'text-red-600' : 'text-green-600'
+                      )}>
+                        {t.type === 'purchase' ? '+' : '-'}KES {Math.abs(t.amount).toLocaleString()}
+                      </span>
+                      <span className="text-right text-xs text-muted-foreground">
+                        {new Date(t.date).toLocaleDateString()}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>

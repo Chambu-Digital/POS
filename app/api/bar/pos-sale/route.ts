@@ -66,20 +66,44 @@ export async function POST(request: NextRequest) {
     // ── Customer credit ───────────────────────────────────────────────────────
     if (paymentMethod === 'credit' && customerId) {
       const customer = await models.Customer.findOne({ _id: customerId, userId: ownerId })
-      if (customer) {
-        const unpaidAmount = Math.max(0, total - (amountPaid ?? 0))
-        if (unpaidAmount > 0) {
-          customer.creditBalance = (customer.creditBalance ?? 0) + unpaidAmount
-          customer.ledger = customer.ledger ?? []
-          customer.ledger.push({
-            type:           'purchase',
-            amount:         unpaidAmount,
-            description:    `Bar POS credit — ${new Date().toLocaleDateString()}`,
-            date:           new Date(),
-            runningBalance: customer.creditBalance,
-          })
-          await customer.save()
+      if (!customer) {
+        return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
+      }
+
+      // Require ID number for credit sales
+      if (!customer.idNumber || customer.idNumber.trim() === '') {
+        return NextResponse.json({
+          error: 'ID number required for credit sales',
+          requiresId: true,
+          customerId: customerId,
+          customerName: customer.name
+        }, { status: 400 })
+      }
+
+      const unpaidAmount = Math.max(0, total - (amountPaid ?? 0))
+      if (unpaidAmount > 0) {
+        // Check credit limit
+        const currentBalance = customer.creditBalance ?? 0
+        const creditLimit = customer.creditLimit ?? 0
+        const newBalance = currentBalance + unpaidAmount
+
+        if (creditLimit > 0 && newBalance > creditLimit) {
+          return NextResponse.json({
+            error: `Credit limit exceeded. Available: KES ${(creditLimit - currentBalance).toLocaleString()}, Required: KES ${unpaidAmount.toLocaleString()}`
+          }, { status: 400 })
         }
+
+        customer.creditBalance = newBalance
+        customer.ledger = customer.ledger ?? []
+        customer.ledger.push({
+          type:           'purchase',
+          amount:         unpaidAmount,
+          balance:        newBalance,
+          saleId:         null, // Will be set after sale creation
+          note:           `Bar POS credit — ${new Date().toLocaleDateString()}`,
+          date:           new Date(),
+        })
+        await customer.save()
       }
     }
 
@@ -195,8 +219,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ── Order number + Sale record ────────────────────────────────────────────
-    const orderNumber = await nextOrderNumber(models, ownerId)
+    // ── Recompute totals server-side — never trust client-sent figures ───────────
+    // Each item's line total = price × quantity − discount (floor at 0).
+    // The server recalculates subtotal, applies cartDiscount, and uses the result
+    // as the authoritative total stored on the Sale record.
+    const computedSubtotal = saleItems.reduce(
+      (s, item) => s + item.price * item.quantity - (item.discount ?? 0),
+      0
+    )
+    const computedDiscount = Math.max(0, cartDiscount ?? 0)
+    const computedTotal    = Math.max(0, computedSubtotal - computedDiscount)
 
     const sale = await models.Sale.create({
       userId:       ownerId,

@@ -52,6 +52,23 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   }
 }
 
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const payload = await getAuthPayload()
+    if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const { models } = await getTenantDB(request)
+    const { id } = await params
+    const data = await request.json()
+
+    const customer = await models.Customer.findByIdAndUpdate(id, { $set: data }, { new: true })
+    if (!customer) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    return NextResponse.json({ customer })
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to update customer' }, { status: 500 })
+  }
+}
+
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const payload = await getAuthPayload()

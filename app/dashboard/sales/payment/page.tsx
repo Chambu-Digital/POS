@@ -77,6 +77,7 @@ function PaymentPageContent() {
   const [showAddCustomer, setShowAddCustomer] = useState(false)
   const [newCustomerName, setNewCustomerName] = useState('')
   const [newCustomerPhone, setNewCustomerPhone] = useState('')
+  const [idRequiredError, setIdRequiredError] = useState<{ customerId: string; customerName: string } | null>(null)
 
   useEffect(() => {
     const cartData = sessionStorage.getItem('pendingSale')
@@ -200,30 +201,77 @@ function PaymentPageContent() {
           const serverId = tab?.serverId
 
           if (serverId) {
-            // Move tab to billing
-            await fetch(`/api/bar/tabs/${serverId}`, {
-              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ status: 'billing' }),
-            })
-            // Record payment
-            await fetch(`/api/bar/tabs/${serverId}/payments`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                amount:     parseFloat(paymentAmount),
-                method:     selectedPayment,
-                mpesaCode:  selectedPayment === 'mobile_money' ? mpesaCode  : undefined,
-                mpesaPhone: selectedPayment === 'mobile_money' ? mpesaPhone : undefined,
-              }),
-            })
-            // Close tab — creates Sale record on server
-            const closeRes = await fetch(`/api/bar/tabs/${serverId}/close`, { method: 'POST' })
-            if (!closeRes.ok) {
-              const err = await closeRes.json()
-              throw new Error(err.error || 'Failed to close tab')
+            // ── Step 1: Push current cart lines to the server tab ──────────
+            // The tab's lines only existed in localStorage. Sync them now so
+            // the server has accurate items before close creates the Sale record.
+            // We clear existing server lines by sending all current cart items.
+            // Each line is sent individually; errors are non-fatal — the sale
+            // proceeds and pos-sale is used as fallback if lines fail to push.
+            let linesSynced = true
+            for (const item of cart) {
+              try {
+                const rawId     = (item.productId || '').trim()
+                const isServing = rawId.includes('__')
+                const invItemId = isServing ? rawId.split('__')[0] : rawId
+                const servingName = isServing ? rawId.split('__').slice(1).join('__') : ''
+
+                const lineRes = await fetch(`/api/bar/tabs/${serverId}/lines`, {
+                  method:  'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    inventoryItemId: invItemId,
+                    servingId:       null,   // servingId not stored in cart; name used for display
+                    quantity:        item.quantity,
+                    unitPrice:       item.sellingPrice,
+                    itemName:        item.productName,
+                    servingName:     servingName || '',
+                    discount:        item.discount,
+                  }),
+                })
+                if (!lineRes.ok) { linesSynced = false }
+              } catch { linesSynced = false }
             }
-            result = await closeRes.json()
+
+            // If lines failed to sync, fall back to pos-sale which handles
+            // everything independently without requiring a server tab.
+            if (!linesSynced) {
+              console.warn('[payment] Tab lines sync failed, falling back to pos-sale')
+              const fallback = await fetch(saleEndpoint, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(saleData),
+              })
+              if (!fallback.ok) { const e = await fallback.json(); throw new Error(e.error) }
+              result = await fallback.json()
+              markTabPaid(activeTabId)
+              // Skip the tab close flow
+            } else {
+              // ── Step 2: Move tab to billing ────────────────────────────────
+              await fetch(`/api/bar/tabs/${serverId}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: 'billing' }),
+              })
+              // ── Step 3: Record payment ─────────────────────────────────────
+              await fetch(`/api/bar/tabs/${serverId}/payments`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  amount:     parseFloat(paymentAmount),
+                  method:     selectedPayment,
+                  mpesaCode:  selectedPayment === 'mobile_money' ? mpesaCode  : undefined,
+                  mpesaPhone: selectedPayment === 'mobile_money' ? mpesaPhone : undefined,
+                }),
+              })
+              // ── Step 4: Close tab — server creates the Sale record ─────────
+              const closeRes = await fetch(`/api/bar/tabs/${serverId}/close`, { method: 'POST' })
+              if (!closeRes.ok) {
+                const err = await closeRes.json()
+                throw new Error(err.error || 'Failed to close tab')
+              }
+              result = await closeRes.json()
+              markTabPaid(activeTabId)
+            }
           } else {
-            // Tab not synced yet — store pending payment and fall through to pos-sale
+            // ── Tab has no serverId (created offline, not yet synced) ──────────
+            // Store pending payment in localStorage and fall through to pos-sale.
             markTabBilling(activeTabId, {
               paymentMethod: selectedPayment,
               amountPaid:    parseFloat(paymentAmount),
@@ -238,9 +286,8 @@ function PaymentPageContent() {
             })
             if (!fallback.ok) { const e = await fallback.json(); throw new Error(e.error) }
             result = await fallback.json()
+            markTabPaid(activeTabId)
           }
-          // Mark tab paid in localStorage regardless of path taken
-          markTabPaid(activeTabId)
         } else {
           // ── Standard sale (no tab) ───────────────────────────────────────
           const response = await fetch(saleEndpoint, {
@@ -251,6 +298,14 @@ function PaymentPageContent() {
 
           if (!response.ok) {
             const err = await response.json()
+            // Handle ID requirement error for credit sales
+            if (err.requiresId) {
+              setIdRequiredError({
+                customerId: err.customerId,
+                customerName: err.customerName,
+              })
+              throw new Error('ID required for credit')
+            }
             throw new Error(err.error || 'Failed to complete sale')
           }
 
@@ -503,6 +558,45 @@ function PaymentPageContent() {
                 </div>
               </div>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ID Required Dialog */}
+      <Dialog open={!!idRequiredError} onOpenChange={() => setIdRequiredError(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>ID Number Required</DialogTitle>
+            <DialogDescription>
+              This customer needs an ID number on file before they can use credit payment.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <p className="text-sm text-yellow-800">
+                <span className="font-semibold">{idRequiredError?.customerName}</span> does not have an ID number recorded.
+              </p>
+              <p className="text-xs text-yellow-700 mt-2">
+                ID number is required for all credit sales for security and tracking purposes.
+              </p>
+            </div>
+            <div className="mt-4 flex gap-2">
+              <Button
+                onClick={() => {
+                  window.open('/dashboard/retail/customers', '_blank')
+                  setIdRequiredError(null)
+                }}
+                className="flex-1 bg-blue-600 hover:bg-blue-700"
+              >
+                Add ID Number
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setIdRequiredError(null)}
+              >
+                Cancel
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

@@ -64,11 +64,15 @@ export default function InventoryItemDetailPage() {
 // We always resolve by the ID suffix, so slugs don't need to be unique.
 
 function extractId(param: string): string {
+  console.log('[extractId] Input param:', param)
   // Last 24 chars are the ObjectId when format is slug--id
   if (param.includes('--')) {
-    return param.split('--').pop()!
+    const extracted = param.split('--').pop()!
+    console.log('[extractId] Extracted ID from slug:', extracted)
+    return extracted
   }
   // Fallback: raw ObjectId (old links / direct navigation)
+  console.log('[extractId] Using raw param as ID:', param)
   return param
 }
 
@@ -94,6 +98,8 @@ function ItemDetailContent() {
   const [servings, setServings] = useState<Serving[]>([])
   const [bottles,  setBottles]  = useState<Bottle[]>([])
   const [loading,  setLoading]  = useState(true)
+  const [servingsLoading, setServingsLoading] = useState(false)
+  const [bottlesLoading, setBottlesLoading] = useState(false)
 
   const [isEditing,    setIsEditing]    = useState(false)
   const [isStockOpen,  setIsStockOpen]  = useState(false)
@@ -112,7 +118,12 @@ function ItemDetailContent() {
 
   async function load() {
     setLoading(true)
+    setServingsLoading(true)
+    setBottlesLoading(true)
     try {
+      console.log('[Inventory Detail] Loading with itemId:', itemId)
+      console.log('[Inventory Detail] Raw ID from params:', rawId)
+      
       const [itemRes, servingsRes, bottlesRes] = await Promise.all([
         fetch(`/api/bar/inventory-items/${itemId}`),
         fetch(`/api/bar/inventory-items/${itemId}/servings`),
@@ -121,7 +132,7 @@ function ItemDetailContent() {
 
       if (itemRes.ok) {
         const data = await itemRes.json()
-        // API returns { item, brand, openBottle, servings, lowStockAlert }
+        console.log('[Inventory Detail] Item response:', data)
         setItem(data.item)
         setBrand(data.brand ?? null)
         setEditForm({
@@ -129,19 +140,40 @@ function ItemDetailContent() {
           bottleSellingPrice: data.item.bottleSellingPrice,
           lowStockThreshold:  data.item.lowStockThreshold,
         })
+      } else {
+        console.error('[Inventory Detail] Item API failed:', itemRes.status, itemRes.statusText)
+        toast.error('Failed to load item details')
       }
       if (servingsRes.ok) {
         const data = await servingsRes.json()
+        console.log('[Inventory Detail] Servings response:', data)
+        console.log('[Inventory Detail] Servings array:', data.servings)
+        console.log('[Inventory Detail] Servings array length:', data.servings?.length)
+        console.log('[Inventory Detail] Debug data:', data.debug)
+        console.log('[Inventory Detail] Setting servings state with:', data.servings)
         setServings(data.servings ?? [])
+      } else {
+        console.error('[Inventory Detail] Servings API failed:', servingsRes.status, servingsRes.statusText)
+        toast.error('Failed to load servings')
+        setServings([])
       }
       if (bottlesRes.ok) {
         const data = await bottlesRes.json()
+        console.log('[Inventory Detail] Bottles response:', data)
         setBottles(data.bottles ?? [])
+      } else {
+        console.error('[Inventory Detail] Bottles API failed:', bottlesRes.status, bottlesRes.statusText)
+        toast.error('Failed to load bottle history')
+        setBottles([])
       }
-    } catch {
-      toast.error('Failed to load item')
+    } catch (err) {
+      console.error('[Inventory Detail] Load error:', err)
+      toast.error('Failed to load item data')
+    } finally {
+      setLoading(false)
+      setServingsLoading(false)
+      setBottlesLoading(false)
     }
-    setLoading(false)
   }
 
   async function updateItem(e: React.FormEvent) {
@@ -243,6 +275,7 @@ function ItemDetailContent() {
   // item.name is e.g. "Jameson" (from CSV). Fall back to brand name for older records.
   const itemName     = (item.name && item.name.trim()) ? item.name : brandName
   const displayTitle = `${itemName} ${item.size}`.trim()
+  // Derive open bottle from bottles array for consistency
   const openBottleDoc = bottles.find(b => b.state === 'open')
 
   return (
@@ -380,7 +413,7 @@ function ItemDetailContent() {
         <CardHeader>
           <div className="flex justify-between items-center">
             <CardTitle>Serving Options ({servings.filter(s => s.isActive).length} active)</CardTitle>
-            <Button size="sm" onClick={() => setIsServingOpen(v => !v)}>
+            <Button size="sm" onClick={() => setIsServingOpen(v => !v)} disabled={servingsLoading}>
               <Plus className="mr-2 h-4 w-4" />
               {isServingOpen ? 'Cancel' : 'Add Serving'}
             </Button>
@@ -412,10 +445,15 @@ function ItemDetailContent() {
             </form>
           )}
 
-          {servings.length === 0 ? (
-            <p className="text-center text-muted-foreground text-sm py-6">
-              No servings yet. Add one to enable portion sales from this item.
-            </p>
+          {servingsLoading ? (
+            <p className="text-center text-muted-foreground text-sm py-6">Loading servings…</p>
+          ) : servings.length === 0 ? (
+            <div className="text-center text-muted-foreground text-sm py-6">
+              <p className="mb-3">No servings yet. Add one to enable portion sales from this item.</p>
+              <Button size="sm" onClick={() => setIsServingOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" /> Add First Serving
+              </Button>
+            </div>
           ) : (
             <div className="space-y-2">
               {servings.map(s => (

@@ -205,7 +205,7 @@ export const SERVICE_MODULE: ModuleDefinition & { features: ServiceModuleFeature
     // ── Bar sub-domain ──────────────────────────────────────────────────────
     {
       key: 'bar.tabs',
-      label: 'Bar POS',
+      label: 'POS',
       description: 'Bar point of sale — sell drinks and servings',
       href: '/dashboard/bar/pos',
       adminOnly: false,
@@ -214,7 +214,7 @@ export const SERVICE_MODULE: ModuleDefinition & { features: ServiceModuleFeature
     },
     {
       key: 'bar.inventory',
-      label: 'Bar Inventory',
+      label: 'Inventory',
       description: 'Manage bar inventory and stock',
       href: '/dashboard/service/bar/inventory',
       adminOnly: true,
@@ -223,7 +223,7 @@ export const SERVICE_MODULE: ModuleDefinition & { features: ServiceModuleFeature
     },
     {
       key: 'bar.reports',
-      label: 'Bar Reports',
+      label: 'Reports',
       description: 'View bar sales and performance reports',
       href: '/dashboard/service/bar/reports',
       adminOnly: true,
@@ -232,10 +232,19 @@ export const SERVICE_MODULE: ModuleDefinition & { features: ServiceModuleFeature
     },
     {
       key: 'bar.admin',
-      label: 'Bar Administration',
+      label: 'Administration',
       description: 'Manage brands and bar settings',
       href: '/dashboard/service/bar/brands',
       adminOnly: true,
+      defaultOn: true,
+      subDomain: 'bar',
+    },
+    {
+      key: 'bar.customers',
+      label: 'Customers',
+      description: 'Manage bar customers and credit accounts',
+      href: '/dashboard/retail/customers',
+      adminOnly: false,
       defaultOn: true,
       subDomain: 'bar',
     },
@@ -456,6 +465,7 @@ export const DEFAULT_STAFF_PERMISSIONS: Record<string, boolean> = {
   'bar.inventory':    false,
   'bar.reports':      false,
   'bar.admin':        false,
+  'bar.customers':    false,
   'rentals.bookings': false,
   'rentals.manage':   false,
   'pharmacy.pos':          false,
@@ -483,6 +493,7 @@ export const DEFAULT_MANAGER_PERMISSIONS: Record<string, boolean> = {
   'bar.inventory':    false,
   'bar.reports':      false,
   'bar.admin':        false,
+  'bar.customers':    true,
   'rentals.bookings': false,
   'rentals.manage':   false,
   'pharmacy.pos':          false,
