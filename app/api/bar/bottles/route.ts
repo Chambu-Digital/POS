@@ -21,7 +21,13 @@ export async function GET(request: NextRequest) {
     if (state) filter.state = state
     if (staffId) filter.openedBy = staffId
 
-    const bottles = await models.BarBottle.find(filter).sort({ createdAt: -1 }).lean()
+    const bottles = await models.BarBottle.find(filter)
+      .sort({ createdAt: -1 })
+      .populate('inventoryItemId', 'name size brandName brandCategory')
+      .populate('openedBy', 'name')
+      .populate('closedBy', 'name')
+      .lean()
+    
     return NextResponse.json({ bottles })
   } catch (error) {
     console.error('[bar/bottles] GET error:', error)

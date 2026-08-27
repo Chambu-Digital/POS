@@ -2,12 +2,18 @@
 // Returns all active bar inventory items with their brand info and servings
 // embedded, ready for the Quick Sale and Tab product-selection UX.
 //
+// V2: Multi-bottle support
+//   - hasOpenBottle: boolean (legacy compatibility)
+//   - openBottleCount: number (how many bottles are currently open)
+//   - servings include both unitsProduced (legacy) and servingsPerContainer (V2)
+//
 // Shape of each item in the response:
 // {
 //   _id, size, buyingPrice, bottleSellingPrice, stock, lowStockThreshold,
 //   brandId, brandName, brandCategory,
 //   hasOpenBottle: boolean,
-//   servings: [{ _id, name, unitsProduced, sellingPrice }]
+//   openBottleCount: number,
+//   servings: [{ _id, name, unitsProduced, servingsPerContainer, sellingPrice }]
 // }
 //
 // Query params:
@@ -58,7 +64,12 @@ export async function GET(request: NextRequest) {
       if (!servingMap.has(key)) servingMap.set(key, [])
       servingMap.get(key)!.push(s)
     }
-    const openBottleSet = new Set(openBottles.map((b: any) => String(b.inventoryItemId)))
+    // V2: Count open bottles per item (multi-bottle support)
+    const openBottleCountMap = new Map<string, number>()
+    for (const b of openBottles as any[]) {
+      const key = String(b.inventoryItemId)
+      openBottleCountMap.set(key, (openBottleCountMap.get(key) || 0) + 1)
+    }
 
     // 3. Compose and filter
     const products = (items as any[])
@@ -66,6 +77,8 @@ export async function GET(request: NextRequest) {
         const brand = brandMap.get(String(item.brandId))
         // name field was added later — fall back to brand name for older records
         const itemName = (item.name && item.name.trim()) ? item.name : (brand?.name ?? '')
+        const openBottleCount = openBottleCountMap.get(String(item._id)) || 0
+        
         return {
           _id:               String(item._id),
           name:              itemName,
@@ -77,12 +90,14 @@ export async function GET(request: NextRequest) {
           brandId:           String(item.brandId),
           brandName:         brand?.name         ?? '',
           brandCategory:     brand?.category     ?? '',
-          hasOpenBottle:     openBottleSet.has(String(item._id)),
+          hasOpenBottle:     openBottleCount > 0,  // Legacy compatibility
+          openBottleCount,   // V2: How many bottles are open
           servings:          (servingMap.get(String(item._id)) ?? []).map((s: any) => ({
-            _id:           String(s._id),
-            name:          s.name,
-            unitsProduced: s.unitsProduced,
-            sellingPrice:  s.sellingPrice,
+            _id:              String(s._id),
+            name:             s.name,
+            unitsProduced:    s.unitsProduced,  // Legacy field
+            servingsPerContainer: s.servingsPerContainer || s.unitsProduced || 1,  // V2 field
+            sellingPrice:     s.sellingPrice,
           })),
         }
       })

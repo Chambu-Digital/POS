@@ -18,8 +18,12 @@ export async function GET(request: NextRequest) {
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
 
     const { searchParams } = new URL(request.url)
-    const to   = searchParams.get('to')   ? new Date(searchParams.get('to')!)   : new Date()
-    const from = searchParams.get('from') ? new Date(searchParams.get('from')!) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    const toParam = searchParams.get('to')
+    const fromParam = searchParams.get('from')
+    
+    // Parse dates and set to end of day for 'to' date (in UTC)
+    const to = toParam ? new Date(toParam + 'T23:59:59.999Z') : new Date()
+    const from = fromParam ? new Date(fromParam + 'T00:00:00.000Z') : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
 
     const bottles = await models.BarBottle.find({
       userId:   ownerId,

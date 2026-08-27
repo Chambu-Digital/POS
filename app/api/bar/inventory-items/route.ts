@@ -49,13 +49,25 @@ export async function GET(request: NextRequest) {
     ])
 
     const brandMap        = new Map(brands.map((b: any)  => [String(b._id), b]))
-    const openBottleMap   = new Map(openBottles.map((b: any) => [String(b.inventoryItemId), b]))
+    
+    // Group open bottles by inventoryItemId (multiple bottles per product)
+    const openBottleCountMap = new Map<string, number>()
+    openBottles.forEach((bottle: any) => {
+      const key = String(bottle.inventoryItemId)
+      openBottleCountMap.set(key, (openBottleCountMap.get(key) || 0) + 1)
+    })
+    
     const servingCountMap = new Map(servingCounts.map((s: any) => [String(s._id), s.count]))
 
     const items = rawItems.map(item => {
       const brand      = brandMap.get(String(item.brandId))
-      const openBottle = openBottleMap.get(String(item._id)) ?? null
+      const openBottlesCount = openBottleCountMap.get(String(item._id)) ?? 0
       const servings   = servingCountMap.get(String(item._id)) ?? 0
+      
+      // Calculate inventory metrics
+      const sealedCount = item.stock
+      const totalBottles = sealedCount + openBottlesCount
+      const inventoryValue = totalBottles * item.buyingPrice
 
       return {
         _id:               String(item._id),
@@ -65,22 +77,27 @@ export async function GET(request: NextRequest) {
         size:              item.size,
         buyingPrice:       item.buyingPrice,
         bottleSellingPrice: item.bottleSellingPrice,
+        
+        // NEW: Clear sealed/open separation
+        sealedCount:       sealedCount,
+        openBottlesCount:  openBottlesCount,
+        totalBottles:      totalBottles,
+        inventoryValue:    inventoryValue,
+        
+        // DEPRECATED: Keep for backward compatibility (will be removed in future)
         stock:             item.stock,
+        
         lowStockThreshold: item.lowStockThreshold,
+        lowStockAlert:     totalBottles > 0 && totalBottles <= item.lowStockThreshold,
         isActive:          item.isActive,
+        
         // Brand fields — flat for easy access on the list page
         brandId:           String(item.brandId),
         brandName:         brand?.name     ?? '',
         brandCategory:     brand?.category ?? '',
-        // Open bottle summary
-        openBottle:        openBottle ? {
-          _id:            String(openBottle._id),
-          state:          openBottle.state,
-          remainingUnits: openBottle.remainingUnits,
-        } : null,
+        
         // Serving count for the list view badge
         servingCount:      servings,
-        lowStockAlert:     item.stock > 0 && item.stock <= item.lowStockThreshold,
       }
     })
 

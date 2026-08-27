@@ -24,6 +24,10 @@ import { setTabLines, type LocalTab } from '@/lib/bar-tabs-cache'
 import { initAutoSync } from '@/lib/sync'
 import type { ScanResult } from '@/lib/barcode-scanner/types'
 
+import { OpenBottleModal } from '@/components/bar/open-bottle-modal'
+import { CloseBottleModal } from '@/components/bar/close-bottle-modal'
+import { SelectBottleModal } from '@/components/bar/select-bottle-modal'
+
 interface BarProduct {
   _id: string
   name: string
@@ -36,7 +40,8 @@ interface BarProduct {
   lowStockThreshold: number
   barcode?: string
   hasOpenBottle?: boolean
-  servings: { _id: string; name: string; sellingPrice: number; unitsProduced: number }[]
+  openBottleCount: number
+  servings: { _id: string; name: string; sellingPrice: number; servingsPerContainer: number }[]
 }
 
 interface CartItem {
@@ -46,6 +51,11 @@ interface CartItem {
   sellingPrice: number
   quantity: number
   discount: number
+  _meta?: {
+    inventoryItemId: string
+    servingId?: string
+    bottleId?: string
+  }
 }
 
 const CART_KEY     = 'barActiveCart'
@@ -78,13 +88,20 @@ function BarPOSContent() {
   const [customers, setCustomers] = useState<any[]>([])
   const [customerSearch, setCustomerSearch] = useState('')
 
-  // ── Open-bottle warning state ─────────────────────────────────────────────────
-  // When a serving is tapped and there is no open bottle, we warn the user before
-  // adding to cart. They can proceed (fallback deduction from sealed stock) or cancel.
-  const [pendingServing, setPendingServing] = useState<{
+  // ── Open-bottle warning state (REMOVED in V2) ────────────────────────────────
+  // V2: Auto-open bottles when needed, no warning modal
+
+  // ── V2: Modal states ──────────────────────────────────────────────────────────
+  const [openBottleModalOpen, setOpenBottleModalOpen] = useState(false)
+  const [closeBottleModalOpen, setCloseBottleModalOpen] = useState(false)
+  const [closeBottleProduct, setCloseBottleProduct] = useState<BarProduct | null>(null)
+  
+  const [selectBottleModalOpen, setSelectBottleModalOpen] = useState(false)
+  const [selectBottleContext, setSelectBottleContext] = useState<{
     product: BarProduct
-    price: number
-    nameSuffix: string
+    serving: { _id: string; name: string; sellingPrice: number; servingsPerContainer: number }
+    quantity: number
+    bottles: any[]
   } | null>(null)
 
   const [cart, setCart] = useState<CartItem[]>(() => {
@@ -199,32 +216,129 @@ function BarPOSContent() {
     setFilteredProducts(f)
   }
 
-  function addToCart(product: BarProduct, price?: number, nameSuffix?: string) {
+  async function addToCart(product: BarProduct, price?: number, nameSuffix?: string, serving?: any) {
     if (product.stock <= 0) { toast.error('Out of stock'); return }
 
-    // ── Serving sale: warn if no open bottle ─────────────────────────────────
-    // The sale will still work via sealed-stock fallback, but the user should
-    // know they need to open a bottle for accurate unit tracking.
-    if (nameSuffix && !product.hasOpenBottle) {
-      setPendingServing({ product, price: price!, nameSuffix })
-      return  // wait for user confirmation in the warning dialog
+    // V2: Handle serving sales with multi-bottle logic
+    if (nameSuffix && serving) {
+      // Check how many bottles are open
+      if (product.openBottleCount === 0) {
+        // No bottles open — will auto-open on backend, add to cart directly
+        toast.info(`Will open new ${product.name} ${product.size}`)
+        addToCartDirect(product, price, nameSuffix, serving)
+      } else if (product.openBottleCount === 1) {
+        // Single bottle open — add to cart directly (backend will auto-select)
+        addToCartDirect(product, price, nameSuffix, serving)
+      } else {
+        // Multiple bottles open — show selection modal
+        await showBottleSelectionModal(product, serving, 1)
+      }
+    } else {
+      // Sealed bottle sale — no changes
+      addToCartDirect(product, price, nameSuffix, serving)
     }
-
-    addToCartDirect(product, price, nameSuffix)
   }
 
-  function addToCartDirect(product: BarProduct, price?: number, nameSuffix?: string) {
-    if (product.stock <= 0) { toast.error('Out of stock'); return }
-    const sellingPrice = price ?? product.bottleSellingPrice
-    const productName  = nameSuffix ? `${product.name} ${product.size} — ${nameSuffix}` : `${product.name} ${product.size}`
-    const productId    = nameSuffix ? `${product._id}__${nameSuffix}` : product._id
+  async function showBottleSelectionModal(
+    product: BarProduct,
+    serving: { _id: string; name: string; sellingPrice: number; servingsPerContainer: number },
+    quantity: number
+  ) {
+    try {
+      // Fetch bottle availability
+      const res = await fetch(
+        `/api/bar/bottles/availability?inventoryItemId=${product._id}&servingId=${serving._id}&quantity=${quantity}`
+      )
+      
+      if (!res.ok) throw new Error('Failed to fetch bottle availability')
+      
+      const data = await res.json()
+      
+      const bottles = data.bottles.map((b: any) => ({
+        bottleId: b.bottleId,
+        bottleNumber: b.bottleNumber,
+        remainingFraction: b.remainingFraction,
+        openedAt: b.openedAt,
+        canProvide: b.availability[serving._id]?.canProvide || false,
+        availableServings: b.availability[serving._id]?.available || 0,
+      }))
+
+      setSelectBottleContext({ product, serving, quantity, bottles })
+      setSelectBottleModalOpen(true)
+    } catch (error) {
+      console.error('Failed to fetch bottle availability:', error)
+      toast.error('Failed to check bottle availability')
+    }
+  }
+
+  function handleBottleSelected(bottleId: string) {
+    if (!selectBottleContext) return
+    
+    const { product, serving } = selectBottleContext
+    
+    // Add to cart with bottleId embedded
+    const sellingPrice = serving.sellingPrice
+    const productName  = `${product.name} ${product.size} — ${serving.name}`
+    const productId    = `${product._id}__${serving.name}__${bottleId}`
+    
     setCart(prev => {
       const ex = prev.find(i => i.productId === productId)
       if (ex) {
         if (ex.quantity >= product.stock) { toast.error('Not enough stock'); return prev }
         return prev.map(i => i.productId === productId ? { ...i, quantity: i.quantity + 1 } : i)
       }
-      return [...prev, { productId, productName, brand: product.brandCategory, sellingPrice, quantity: 1, discount: 0 }]
+      return [...prev, { 
+        productId, 
+        productName, 
+        brand: product.brandCategory, 
+        sellingPrice, 
+        quantity: 1, 
+        discount: 0,
+        // Store metadata for API call
+        _meta: {
+          inventoryItemId: product._id,
+          servingId: serving._id,
+          bottleId,
+        }
+      }]
+    })
+    
+    setSelectBottleContext(null)
+  }
+
+  function addToCartDirect(product: BarProduct, price?: number, nameSuffix?: string, serving?: any) {
+    if (product.stock <= 0) { toast.error('Out of stock'); return }
+    const sellingPrice = price ?? product.bottleSellingPrice
+    const productName  = nameSuffix ? `${product.name} ${product.size} — ${nameSuffix}` : `${product.name} ${product.size}`
+    const productId    = nameSuffix ? `${product._id}__${nameSuffix}` : product._id
+    
+    setCart(prev => {
+      const ex = prev.find(i => i.productId === productId)
+      if (ex) {
+        if (ex.quantity >= product.stock) { toast.error('Not enough stock'); return prev }
+        return prev.map(i => i.productId === productId ? { ...i, quantity: i.quantity + 1 } : i)
+      }
+      
+      // Build cart item with metadata if it's a serving sale
+      const cartItem: CartItem = {
+        productId,
+        productName,
+        brand: product.brandCategory,
+        sellingPrice,
+        quantity: 1,
+        discount: 0,
+      }
+      
+      // Add metadata for serving sales
+      if (serving) {
+        cartItem._meta = {
+          inventoryItemId: product._id,
+          servingId: serving._id,
+          // bottleId will be set when bottle selection happens or auto-assigned by backend
+        }
+      }
+      
+      return [...prev, cartItem]
     })
   }
 
@@ -261,6 +375,129 @@ function BarPOSContent() {
     setCart([])
     setCartDiscount(0)
     toast.success('Tab saved')
+  }
+
+  // ── V2: Bottle management handlers ───────────────────────────────────────────
+  async function handleOpenBottle(product?: BarProduct) {
+    // If product context provided (from card) → instant open
+    if (product) {
+      await openBottleDirectly(product)
+    } else {
+      // No context (from toolbar) → show modal with dropdown
+      setOpenBottleModalOpen(true)
+    }
+  }
+
+  async function openBottleDirectly(product: BarProduct) {
+    try {
+      const res = await fetch('/api/bar/bottles/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inventoryItemId: product._id })
+      })
+      
+      if (!res.ok) {
+        const error = await res.json()
+        throw new Error(error.error || 'Failed to open bottle')
+      }
+      
+      const data = await res.json()
+      const bottleNumber = data.bottle?.bottleNumber || '?'
+      
+      // Show feedback based on how many bottles are already open
+      if (product.openBottleCount === 0) {
+        // First bottle → green success
+        toast.success(`Bottle #${bottleNumber} of ${product.name} ${product.size} opened`)
+      } else if (product.openBottleCount === 1) {
+        // Second bottle → yellow warning
+        toast.warning(
+          `Bottle #${bottleNumber} opened`,
+          { description: `Note: Bottle #1 of ${product.name} is still active` }
+        )
+      } else {
+        // Third+ bottle → yellow warning with count
+        toast.warning(
+          `Bottle #${bottleNumber} opened`,
+          { description: `${product.openBottleCount} bottles of ${product.name} already open` }
+        )
+      }
+      
+      await fetchProducts()  // Refresh product list
+    } catch (error: any) {
+      console.error('Failed to open bottle:', error)
+      toast.error(error.message || 'Failed to open bottle')
+    }
+  }
+
+  async function handleCloseBottle(product: BarProduct) {
+    // Fetch open bottles for this product
+    try {
+      const res = await fetch(`/api/bar/products/${product._id}/open-bottles`)
+      if (!res.ok) throw new Error('Failed to fetch bottles')
+      
+      const data = await res.json()
+      const openBottles = data.bottles || []
+
+      if (openBottles.length === 0) {
+        toast.error('No open bottles to close')
+        return
+      }
+
+      if (openBottles.length === 1) {
+        // Single bottle — close it directly
+        const closeRes = await fetch(`/api/bar/bottles/${openBottles[0].bottleId}/close`, {
+          method: 'POST',
+        })
+        if (!closeRes.ok) throw new Error('Failed to close bottle')
+        
+        const closeData = await closeRes.json()
+        const variancePct = ((closeData.bottle.varianceFraction || 0) * 100).toFixed(1)
+        
+        toast.success(
+          `Closed ${product.name} ${product.size} bottle #${closeData.bottle.bottleNumber}`,
+          variancePct !== '0.0'
+            ? { description: `Variance: ${variancePct}% remaining` }
+            : undefined
+        )
+        await fetchProducts()  // Refresh
+      } else {
+        // Multiple bottles — show selector
+        setCloseBottleProduct(product)
+        setCloseBottleModalOpen(true)
+      }
+    } catch (error: any) {
+      console.error('Failed to close bottle:', error)
+      toast.error(error.message || 'Failed to close bottle')
+    }
+  }
+
+  async function handleBottleOpened() {
+    await fetchProducts()  // Refresh product list
+  }
+
+  async function handleBottleClosed() {
+    // Fetch updated open bottles for the current product
+    if (closeBottleProduct) {
+      try {
+        const res = await fetch(`/api/bar/products/${closeBottleProduct._id}/open-bottles`)
+        if (res.ok) {
+          const data = await res.json()
+          const remaining = data.bottles || []
+          
+          if (remaining.length === 0) {
+            // No more bottles open, close modal
+            setCloseBottleModalOpen(false)
+            setCloseBottleProduct(null)
+          } else {
+            // Update the product state to reflect remaining bottles
+            setCloseBottleProduct(prev => prev ? { ...prev, openBottleCount: remaining.length } : null)
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch updated bottles:', error)
+      }
+    }
+    await fetchProducts()  // Refresh product list
   }
 
   // ── Checkout ─────────────────────────────────────────────────────────────────
@@ -341,6 +578,17 @@ function BarPOSContent() {
               )}
             </div>
             <div className="flex items-center gap-2">
+              {/* General Open Bottle Button */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleOpenBottle()}
+                className="hidden sm:flex items-center gap-1.5"
+              >
+                <Plus size={16} />
+                Open Bottle
+              </Button>
+              
               {/* Customer selector */}
               <div className="relative">
                 <Select
@@ -404,7 +652,13 @@ function BarPOSContent() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {filteredProducts.map(product => (
-                  <BarProductCard key={product._id} product={product} onAdd={addToCart} />
+                  <BarProductCard
+                    key={product._id}
+                    product={product}
+                    onAdd={addToCart}
+                    onOpenBottle={handleOpenBottle}
+                    onCloseBottle={handleCloseBottle}
+                  />
                 ))}
               </div>
             )}
@@ -525,42 +779,40 @@ function BarPOSContent() {
         </div>
       </div>
 
-      {/* Open-bottle warning dialog */}
-      {pendingServing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-background rounded-xl shadow-xl p-6 max-w-sm w-full mx-4 space-y-4">
-            <div className="text-center space-y-1">
-              <div className="text-3xl mb-2">⚠️</div>
-              <h3 className="font-bold text-base">No Open Bottle</h3>
-              <p className="text-sm text-muted-foreground">
-                There is no open bottle for{' '}
-                <span className="font-semibold">{pendingServing.product.name} {pendingServing.product.size}</span>.
-              </p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Serving sales without an open bottle will deduct from sealed stock instead.
-                For accurate unit tracking, open a bottle first from the{' '}
-                <a href="/dashboard/bar/inventory" className="underline text-primary">inventory page</a>.
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setPendingServing(null)}
-                className="px-4 py-2 rounded-lg border text-sm font-medium hover:bg-muted transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  addToCartDirect(pendingServing.product, pendingServing.price, pendingServing.nameSuffix)
-                  setPendingServing(null)
-                }}
-                className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
-              >
-                Add Anyway
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* V2 Modals */}
+      <OpenBottleModal
+        isOpen={openBottleModalOpen}
+        onClose={() => setOpenBottleModalOpen(false)}
+        products={products}
+        onBottleOpened={handleBottleOpened}
+      />
+
+      {closeBottleProduct && (
+        <CloseBottleModalWrapper
+          isOpen={closeBottleModalOpen}
+          onClose={() => {
+            setCloseBottleModalOpen(false)
+            setCloseBottleProduct(null)
+          }}
+          product={closeBottleProduct}
+          onBottleClosed={handleBottleClosed}
+        />
+      )}
+
+      {selectBottleContext && (
+        <SelectBottleModal
+          isOpen={selectBottleModalOpen}
+          onClose={() => {
+            setSelectBottleModalOpen(false)
+            setSelectBottleContext(null)
+          }}
+          productName={selectBottleContext.product.name}
+          productSize={selectBottleContext.product.size}
+          servingName={selectBottleContext.serving.name}
+          quantity={selectBottleContext.quantity}
+          bottles={selectBottleContext.bottles}
+          onBottleSelected={handleBottleSelected}
+        />
       )}
 
       <FloatingCartButton itemCount={cart.length} onClick={scrollToCart} />
@@ -579,12 +831,15 @@ function BarPOSContent() {
 
 interface BarProductCardProps {
   product: BarProduct
-  onAdd:   (product: BarProduct, price?: number, nameSuffix?: string) => void
+  onAdd:   (product: BarProduct, price?: number, nameSuffix?: string, serving?: any) => void
+  onOpenBottle?: (product: BarProduct) => void
+  onCloseBottle?: (product: BarProduct) => void
 }
 
-function BarProductCard({ product, onAdd }: BarProductCardProps) {
+function BarProductCard({ product, onAdd, onOpenBottle, onCloseBottle }: BarProductCardProps) {
   const outOfStock = product.stock <= 0
   const lowStock   = !outOfStock && product.stock <= product.lowStockThreshold
+  const hasServings = product.servings.length > 0
 
   return (
     <Card className="hover:shadow-md transition-all">
@@ -598,10 +853,47 @@ function BarProductCard({ product, onAdd }: BarProductCardProps) {
               <p className="text-xs text-muted-foreground">{product.brandCategory}</p>
             )}
           </div>
-          <Badge variant={outOfStock ? 'destructive' : lowStock ? 'outline' : 'default'} className="text-[10px] px-1.5 py-0 shrink-0">
-            {outOfStock ? 'Out' : `${product.stock}`}
-          </Badge>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Open bottle count badge */}
+            {hasServings && product.openBottleCount > 0 && (
+              <Badge 
+                variant="outline" 
+                className={`text-[10px] px-1.5 py-0 ${
+                  product.openBottleCount === 1 
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                    : 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                }`}
+              >
+                {product.openBottleCount === 1 ? '🟢' : '🟡'} {product.openBottleCount}
+              </Badge>
+            )}
+            {/* Stock badge */}
+            <Badge variant={outOfStock ? 'destructive' : lowStock ? 'outline' : 'default'} className="text-[10px] px-1.5 py-0">
+              {outOfStock ? 'Out' : `${product.stock}`}
+            </Badge>
+          </div>
         </div>
+
+        {/* V2: Open/Close Bottle Buttons - Only show if servings exist */}
+        {hasServings && (
+          <div className="flex gap-1">
+            <button
+              onClick={() => onOpenBottle?.(product)}
+              disabled={outOfStock}
+              className="flex-1 px-2 py-1 text-xs rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Open Bottle
+            </button>
+            {product.openBottleCount > 0 && (
+              <button
+                onClick={() => onCloseBottle?.(product)}
+                className="flex-1 px-2 py-1 text-xs rounded border border-red-200 text-red-700 hover:bg-red-50 transition-colors"
+              >
+                Close {product.openBottleCount > 1 ? `(${product.openBottleCount})` : ''}
+              </button>
+            )}
+          </div>
+        )}
 
         {product.bottleSellingPrice > 0 && (
           <button disabled={outOfStock} onClick={() => onAdd(product)}
@@ -617,12 +909,9 @@ function BarProductCard({ product, onAdd }: BarProductCardProps) {
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-1">Servings</p>
             )}
             {product.servings.map(serving => (
-              <button key={serving._id} onClick={() => onAdd(product, serving.sellingPrice, serving.name)}
+              <button key={serving._id} onClick={() => onAdd(product, serving.sellingPrice, serving.name, serving)}
                 className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-muted hover:bg-primary/10 hover:ring-1 hover:ring-primary transition-all">
-                <span className="text-sm font-medium">
-                  {serving.name}
-                  <span className="text-muted-foreground font-normal text-xs ml-1">×{serving.unitsProduced}/btl</span>
-                </span>
+                <span className="text-sm font-medium">{serving.name}</span>
                 <span className="text-sm font-bold text-primary">KSh {serving.sellingPrice.toLocaleString()}</span>
               </button>
             ))}
@@ -634,5 +923,77 @@ function BarProductCard({ product, onAdd }: BarProductCardProps) {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+
+// ─── CloseBottleModalWrapper ─────────────────────────────────────────────────
+// Fetches open bottles dynamically when the modal is opened
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface CloseBottleModalWrapperProps {
+  isOpen: boolean
+  onClose: () => void
+  product: BarProduct
+  onBottleClosed: () => void
+}
+
+function CloseBottleModalWrapper({ isOpen, onClose, product, onBottleClosed }: CloseBottleModalWrapperProps) {
+  const [bottles, setBottles] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchBottles()
+    }
+  }, [isOpen, product._id])
+
+  async function fetchBottles() {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/bar/products/${product._id}/open-bottles`)
+      if (!res.ok) throw new Error('Failed to fetch bottles')
+      
+      const data = await res.json()
+      setBottles(data.bottles || [])
+    } catch (error) {
+      console.error('Failed to fetch bottles:', error)
+      toast.error('Failed to load bottles')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleBottleClosed() {
+    // Refetch bottles to update the list
+    fetchBottles()
+    onBottleClosed()
+  }
+
+  if (!isOpen) return null
+  if (loading) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="bg-white rounded-xl shadow-xl p-8">
+          <p className="text-sm text-muted-foreground">Loading bottles...</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <CloseBottleModal
+      isOpen={isOpen}
+      onClose={onClose}
+      productName={product.name}
+      productSize={product.size}
+      bottles={bottles.map(b => ({
+        _id: b.bottleId,
+        bottleNumber: b.bottleNumber,
+        openedAt: b.openedAt,
+        remainingFraction: b.remainingFraction,
+      }))}
+      onBottleClosed={handleBottleClosed}
+    />
   )
 }

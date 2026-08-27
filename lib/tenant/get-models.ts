@@ -8,7 +8,7 @@ import {
   customerSchema, drugBatchSchema, drugSchema,
   branchSchema, inventorySchema, inventoryTransactionSchema,
   barBrandSchema, barInventoryItemSchema, barServingSchema, barBottleSchema,
-  barTabSchema, barTabLineSchema, barAuditLogSchema,
+  barTabSchema, barTabLineSchema, barAuditLogSchema, barBottleAuditSchema,
 } from '@/lib/models/schemas'
 
 export function getModels(conn: mongoose.Connection) {
@@ -40,5 +40,6 @@ export function getModels(conn: mongoose.Connection) {
     BarTab:           conn.models.BarTab           || conn.model('BarTab',           barTabSchema),
     BarTabLine:       conn.models.BarTabLine       || conn.model('BarTabLine',       barTabLineSchema),
     BarAuditLog:      conn.models.BarAuditLog      || conn.model('BarAuditLog',      barAuditLogSchema),
+    BarBottleAudit:   conn.models.BarBottleAudit   || conn.model('BarBottleAudit',   barBottleAuditSchema),
   }
 }

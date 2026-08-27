@@ -9,10 +9,14 @@ import { Separator } from '@/components/ui/separator'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line,
 } from 'recharts'
-import { Calendar, RefreshCw, TrendingUp, GlassWater, AlertTriangle, DollarSign } from 'lucide-react'
+import { Calendar, RefreshCw, TrendingUp, GlassWater, AlertTriangle, DollarSign, Wine } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { cn } from '@/lib/utils'
+import { OpenBottlesList } from '@/components/bar/bottles/OpenBottlesList'
+import { BottleTimelineDrawer } from '@/components/bar/bottles/BottleTimelineDrawer'
+import { ServingSalesReport } from '@/components/bar/reports/serving-sales-report'
+import { formatDistanceToNow } from 'date-fns'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -73,8 +77,45 @@ interface CustomerCreditSummary {
   availableCredit: number
 }
 
+interface OpenBottle {
+  _id: string
+  bottleNumber: number
+  productName: string
+  productSize: string
+  brandCategory: string
+  openedAt: string
+  openedBy?: { _id: string; name: string } | null
+  remainingFraction: number
+}
+
+interface ClosedBottle {
+  _id: string
+  bottleNumber: number
+  productName: string
+  productSize: string
+  openedAt: string
+  closedAt: string
+  openedBy?: { _id: string; name: string } | null
+  closedBy?: { _id: string; name: string } | null
+  hasVariance: boolean
+  varianceFraction: number
+}
+
+interface VarianceBottle {
+  _id: string
+  bottleNumber: number
+  productName: string
+  productSize: string
+  closedAt: string
+  closedBy?: { _id: string; name: string } | null
+  varianceFraction: number
+  servingsPerContainer: number
+  unaccountedServings: number
+  servingUnit: string
+}
+
 type Period = 'today' | '7d' | '30d' | '90d' | 'custom'
-type ReportTab = 'overview' | 'open' | 'closed' | 'bottles' | 'products' | 'payments' | 'credit'
+type ReportTab = 'overview' | 'open' | 'closed' | 'bottles_v2' | 'servings' | 'products' | 'payments' | 'credit'
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
@@ -88,7 +129,7 @@ export default function BarReportsPage() {
 
 function ReportsContent() {
   // ── Period state ────────────────────────────────────────────────────────────
-  const [period,   setPeriod]   = useState<Period>('today')
+  const [period,   setPeriod]   = useState<Period>('30d')
   const [fromDate, setFromDate] = useState('')
   const [toDate,   setToDate]   = useState('')
 
@@ -101,6 +142,25 @@ function ReportsContent() {
   const [closedCount,    setClosedCount]    = useState(0)
   const [bottleDiffs,    setBottleDiffs]    = useState<BottleDiff[]>([])
   const [totalLoss,      setTotalLoss]      = useState(0)
+  
+  // ── Bottles V2 state (new bottle reports) ──────────────────────────────────
+  const [bottlesV2Summary,   setBottlesV2Summary]   = useState({ openBottles: 0, closedToday: 0, variancesCount: 0 })
+  const [openBottlesV2,      setOpenBottlesV2]      = useState<OpenBottle[]>([])
+  const [closedBottlesV2,    setClosedBottlesV2]    = useState<ClosedBottle[]>([])
+  const [varianceBottlesV2,  setVarianceBottlesV2]  = useState<VarianceBottle[]>([])
+  const [selectedBottleId,   setSelectedBottleId]   = useState<string | null>(null)
+  
+  // ── Serving Sales state ─────────────────────────────────────────────────────
+  const [servingSalesProducts, setServingSalesProducts] = useState<any[]>([])
+  const [servingSalesSummary, setServingSalesSummary] = useState({
+    totalRevenue: 0,
+    totalServings: 0,
+    productsCount: 0,
+    bottleTrackingCoverage: 0,
+    totalSalesLines: 0,
+    linesWithBottleTracking: 0,
+  })
+  
   const [products,       setProducts]       = useState<ProductSold[]>([])
   const [dailyRevenue,   setDailyRevenue]   = useState<{ date: string; total: number }[]>([])
   const [totalRevenue,   setTotalRevenue]   = useState(0)
@@ -136,7 +196,7 @@ function ReportsContent() {
     if (!from || !to) { setLoading(false); return }
 
     try {
-      const [outstandingRes, openRes, closedRes, diffRes, productsRes, paymentsRes, creditRes] = await Promise.all([
+      const [outstandingRes, openRes, closedRes, diffRes, productsRes, paymentsRes, creditRes, bottlesV2Res, servingSalesRes] = await Promise.all([
         fetch('/api/bar/reports/outstanding'),
         fetch('/api/bar/tabs?status=open'),
         fetch(`/api/bar/reports/closed-tabs?from=${from}&to=${to}`),
@@ -144,6 +204,8 @@ function ReportsContent() {
         fetch(`/api/bar/reports/products-sold?from=${from}&to=${to}`),
         fetch(`/api/bar/reports/payment-modes?from=${from}&to=${to}`),
         fetch(`/api/bar/reports/credit?from=${from}&to=${to}`),
+        fetch(`/api/bar/reports/bottles?date=${from}`),
+        fetch(`/api/bar/reports/serving-sales?from=${from}&to=${to}`),
       ])
 
       if (outstandingRes.ok) {
@@ -186,6 +248,25 @@ function ReportsContent() {
         setTotalCreditPayments(d.totalCreditPayments ?? 0)
         setTotalOutstanding(d.totalOutstanding ?? 0)
       }
+      if (bottlesV2Res.ok) {
+        const d = await bottlesV2Res.json()
+        setBottlesV2Summary(d.summary ?? { openBottles: 0, closedToday: 0, variancesCount: 0 })
+        setOpenBottlesV2(d.openBottles ?? [])
+        setClosedBottlesV2(d.closedBottles ?? [])
+        setVarianceBottlesV2(d.variances ?? [])
+      }
+      if (servingSalesRes.ok) {
+        const d = await servingSalesRes.json()
+        setServingSalesProducts(d.products ?? [])
+        setServingSalesSummary(d.summary ?? {
+          totalRevenue: 0,
+          totalServings: 0,
+          productsCount: 0,
+          bottleTrackingCoverage: 0,
+          totalSalesLines: 0,
+          linesWithBottleTracking: 0,
+        })
+      }
     } catch {
       toast.error('Failed to load reports')
     }
@@ -205,13 +286,14 @@ function ReportsContent() {
   }
 
   const tabs: { key: ReportTab; label: string }[] = [
-    { key: 'overview',  label: 'Overview'          },
-    { key: 'open',      label: `Open Tabs (${openTabCount})` },
-    { key: 'closed',    label: 'Closed Tabs'        },
-    { key: 'bottles',   label: 'Bottle Differences' },
-    { key: 'products',  label: 'Products Sold'      },
-    { key: 'payments',  label: 'Payment Modes'      },
-    { key: 'credit',    label: 'Credit'             },
+    { key: 'overview',   label: 'Overview'          },
+    { key: 'open',       label: `Open Tabs (${openTabCount})` },
+    { key: 'closed',     label: 'Closed Tabs'        },
+    { key: 'bottles_v2', label: 'Bottles'            },
+    { key: 'servings',   label: 'Serving Sales'      },
+    { key: 'products',   label: 'Products Sold'      },
+    { key: 'payments',   label: 'Payment Modes'      },
+    { key: 'credit',     label: 'Credit'             },
   ]
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -518,6 +600,183 @@ function ReportsContent() {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {/* ── Bottles V2 (New bottle lifecycle reports) ─────────────────────── */}
+      {activeTab === 'bottles_v2' && (
+        <div className="space-y-6">
+          {/* Summary cards */}
+          <div className="grid grid-cols-3 gap-4">
+            <SummaryCard
+              icon={<Wine size={18} className="text-emerald-600" />}
+              bg="bg-emerald-50"
+              label="Open Bottles"
+              value={bottlesV2Summary.openBottles.toString()}
+              sub="Currently in use"
+            />
+            <SummaryCard
+              icon={<Wine size={18} className="text-blue-600" />}
+              bg="bg-blue-50"
+              label="Closed Today"
+              value={bottlesV2Summary.closedToday.toString()}
+              sub="Completed bottles"
+            />
+            <SummaryCard
+              icon={<AlertTriangle size={18} className="text-red-500" />}
+              bg="bg-red-50"
+              label="Variances"
+              value={bottlesV2Summary.variancesCount.toString()}
+              sub="Need review"
+              highlight={bottlesV2Summary.variancesCount > 0}
+            />
+          </div>
+
+          {/* Open Bottles Section */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Open Bottles</CardTitle>
+                <Badge variant="secondary">
+                  {bottlesV2Summary.openBottles}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <OpenBottlesList
+                bottles={openBottlesV2}
+                onViewBottle={setSelectedBottleId}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Bottle Variances Section */}
+          {varianceBottlesV2.length > 0 && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">⚠ Bottle Variances</CardTitle>
+                  <Badge variant="destructive">
+                    {varianceBottlesV2.length}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {varianceBottlesV2.map((variance) => {
+                    const variancePct = (variance.varianceFraction * 100).toFixed(1)
+                    return (
+                      <div
+                        key={variance._id}
+                        className="flex items-start justify-between p-4 rounded-lg border border-orange-200 bg-orange-50/50"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <AlertTriangle size={14} className="text-orange-600 shrink-0" />
+                            <p className="font-semibold text-sm">
+                              {variance.productName} {variance.productSize}
+                            </p>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Bottle #{variance.bottleNumber} · Closed by {variance.closedBy?.name || 'Unknown'}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(variance.closedAt).toLocaleDateString()} · {formatDistanceToNow(new Date(variance.closedAt), { addSuffix: true })}
+                          </p>
+                          <p className="text-xs text-orange-700 font-medium mt-2">
+                            Unaccounted: {variancePct}% ({variance.unaccountedServings} {variance.servingUnit})
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSelectedBottleId(variance._id)}
+                          className="shrink-0"
+                        >
+                          View
+                        </Button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Closed Bottles Table */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Closed Bottles</CardTitle>
+                <span className="text-sm text-muted-foreground">
+                  {closedBottlesV2.length} bottles closed
+                </span>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {closedBottlesV2.length === 0 ? (
+                <EmptyState message="No bottles closed in this period" />
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-5 text-xs font-semibold text-muted-foreground px-3 pb-2 border-b">
+                    <span>Bottle #</span>
+                    <span>Product</span>
+                    <span className="text-center">Opened</span>
+                    <span className="text-center">Closed</span>
+                    <span className="text-right">Status</span>
+                  </div>
+                  {closedBottlesV2.map((bottle) => (
+                    <button
+                      key={bottle._id}
+                      onClick={() => setSelectedBottleId(bottle._id)}
+                      className="grid grid-cols-5 items-center px-3 py-2 rounded-lg hover:bg-muted/40 text-sm w-full text-left transition-colors"
+                    >
+                      <span className="font-mono">#{bottle.bottleNumber}</span>
+                      <span className="truncate">
+                        {bottle.productName} {bottle.productSize}
+                      </span>
+                      <span className="text-center text-xs text-muted-foreground">
+                        {new Date(bottle.openedAt).toLocaleDateString()}
+                      </span>
+                      <span className="text-center text-xs text-muted-foreground">
+                        {new Date(bottle.closedAt).toLocaleDateString()}
+                      </span>
+                      <span className="text-right">
+                        {bottle.hasVariance ? (
+                          <Badge variant="outline" className="text-orange-600 border-orange-300 text-[10px]">
+                            ⚠ Variance
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-emerald-600 border-emerald-300 text-[10px]">
+                            ✓ Normal
+                          </Badge>
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Bottle Timeline Drawer */}
+          <BottleTimelineDrawer
+            isOpen={selectedBottleId !== null}
+            onClose={() => setSelectedBottleId(null)}
+            bottleId={selectedBottleId}
+            onBottleClosed={() => {
+              load()
+              setSelectedBottleId(null)
+            }}
+          />
+        </div>
+      )}
+
+      {/* ── Serving Sales ───────────────────────────────────────────────────── */}
+      {activeTab === 'servings' && (
+        <ServingSalesReport
+          products={servingSalesProducts}
+          summary={servingSalesSummary}
+        />
       )}
 
       {/* ── Products sold ──────────────────────────────────────────────────── */}

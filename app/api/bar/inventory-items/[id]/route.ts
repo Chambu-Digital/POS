@@ -15,13 +15,28 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const item = await models.BarInventoryItem.findOne({ _id: new Types.ObjectId(id), userId: ownerId })
     if (!item) return NextResponse.json({ error: 'Inventory item not found' }, { status: 404 })
 
-    const brand = await models.BarBrand.findById(item.brandId)
-    const openBottle = await models.BarBottle.findOne({ inventoryItemId: item._id, state: 'open' })
-    const lowStockAlert = item.stock <= item.lowStockThreshold
+    const [brand, openBottlesCount] = await Promise.all([
+      models.BarBrand.findById(item.brandId),
+      models.BarBottle.countDocuments({ inventoryItemId: item._id, state: 'open' })
+    ])
+    
+    // Calculate inventory metrics
+    const sealedCount = item.stock
+    const totalBottles = sealedCount + openBottlesCount
+    const inventoryValue = totalBottles * item.buyingPrice
+    const lowStockAlert = totalBottles > 0 && totalBottles <= item.lowStockThreshold
 
     // Note: servings are fetched separately by frontend from /api/bar/inventory-items/[id]/servings
     // to avoid duplicate data and potential inconsistencies
-    return NextResponse.json({ item, brand, openBottle, lowStockAlert })
+    return NextResponse.json({ 
+      item, 
+      brand, 
+      sealedCount,
+      openBottlesCount,
+      totalBottles,
+      inventoryValue,
+      lowStockAlert 
+    })
   } catch (error) {
     console.error('[bar/inventory-items/[id]]', error)
     return NextResponse.json({ error: 'Failed to fetch inventory item' }, { status: 500 })

@@ -1,13 +1,18 @@
 // ─── POST /api/bar/pos-sale ────────────────────────────────────────────────────
-// Processes a Bar POS direct sale (no tab lifecycle).
+// Processes a Bar POS direct sale using synthetic tab approach for unified bottle tracking.
 //
-// Stock deduction rules:
-//   Serving sale  (productId = "inventoryItemId__servingName"):
-//     → deduct 1 unit per serving sold from the open BarBottle.remainingUnits.
-//     → if no open bottle exists, deduct fractional sealed stock.
-//     → if bottle hits 0 remaining units, auto-close it.
-//   Bottle sale (productId = plain inventoryItemId):
-//     → deduct quantity from BarInventoryItem.stock directly.
+// V2 Unified Bottle Tracking:
+//   ALL serving sales (tab or direct) now flow through TabManager to ensure:
+//   - Proper bottle selection and deduction via InventoryEngine
+//   - BarTabLine creation with bottleId tracking
+//   - Unified audit logging
+//   - Activity timeline visibility
+//
+// Flow:
+//   1. Create synthetic tab (marked with isSyntheticDirectSale: true)
+//   2. Add all items via TabManager.addLine() → bottle tracking automatic
+//   3. Close synthetic tab immediately with payment details
+//   4. Create Sale record for backward compatibility
 //
 // Body shape accepted (same as shared payment page sends):
 // {
@@ -19,6 +24,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantDB }  from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { TabManager } from '@/lib/bar/tab-manager'
 
 async function nextOrderNumber(models: any, userId: string): Promise<string> {
   const last = await models.Sale.findOne({ userId, source: 'bar' })
@@ -34,13 +40,22 @@ async function nextOrderNumber(models: any, userId: string): Promise<string> {
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('[bar/pos-sale] ========== POST STARTED ==========')
+    
     const payload = await getAuthPayload()
-    if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!payload) {
+      console.log('[bar/pos-sale] ❌ Unauthorized - no auth payload')
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    console.log('[bar/pos-sale] ✅ Auth payload:', { userId: payload.userId, type: payload.type })
 
-    const { models } = await getTenantDB(request)
+    const { models, conn } = await getTenantDB(request)
+    console.log('[bar/pos-sale] ✅ Connected to DB:', conn.name)
+    
     const ownerId = payload.type === 'staff' && payload.adminId
       ? payload.adminId
       : payload.userId
+    console.log('[bar/pos-sale] Owner ID:', ownerId)
 
     const body = await request.json()
     const {
@@ -56,14 +71,23 @@ export async function POST(request: NextRequest) {
       customerName,
     } = body
 
+    console.log('[bar/pos-sale] Request body:', {
+      itemCount: items?.length,
+      total,
+      paymentMethod,
+      hasItems: !!items?.length
+    })
+
     if (!items?.length) {
+      console.log('[bar/pos-sale] ❌ Cart is empty')
       return NextResponse.json({ error: 'Cart is empty' }, { status: 400 })
     }
     if (!paymentMethod) {
+      console.log('[bar/pos-sale] ❌ Payment method missing')
       return NextResponse.json({ error: 'Payment method is required' }, { status: 400 })
     }
 
-    // ── Customer credit ───────────────────────────────────────────────────────
+    // ── Customer credit validation ────────────────────────────────────────────
     if (paymentMethod === 'credit' && customerId) {
       const customer = await models.Customer.findOne({ _id: customerId, userId: ownerId })
       if (!customer) {
@@ -96,139 +120,148 @@ export async function POST(request: NextRequest) {
         customer.creditBalance = newBalance
         customer.ledger = customer.ledger ?? []
         customer.ledger.push({
-          type:           'purchase',
-          amount:         unpaidAmount,
-          balance:        newBalance,
-          saleId:         null, // Will be set after sale creation
-          note:           `Bar POS credit — ${new Date().toLocaleDateString()}`,
-          date:           new Date(),
+          type:    'purchase',
+          amount:  unpaidAmount,
+          balance: newBalance,
+          saleId:  null, // Will be set after sale creation
+          note:    `Bar POS credit — ${new Date().toLocaleDateString()}`,
+          date:    new Date(),
         })
         await customer.save()
       }
     }
 
-    // ── Build sale items + deduct bar inventory ───────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════
+    // V2 UNIFIED BOTTLE TRACKING: Use synthetic tab approach
+    // ══════════════════════════════════════════════════════════════════════════
+
+    console.log('[bar/pos-sale] 🧪 Creating synthetic tab...')
+    // 1. Create synthetic direct sale tab
+    const syntheticTab = await TabManager.createSyntheticDirectSaleTab(
+      {
+        userId:       ownerId,
+        branchId:     undefined, // Use branchId if available in context
+        staffId:      payload.userId,
+        customerId:   customerId || undefined,
+        customerName: customerName || 'Bar Sale',
+        tableNumber:  'DIRECT',
+        notes:        `Direct sale - ${paymentMethod}`,
+      },
+      conn
+    )
+
+    const tabId = String((syntheticTab as any)._id)
+    console.log('[bar/pos-sale] ✅ Synthetic tab created:', tabId)
+
+    // 2. Add all items via TabManager → bottle tracking happens automatically
     const saleItems: any[] = []
 
+    console.log('[bar/pos-sale] 🔄 Processing items...')
     for (const item of items as any[]) {
       const rawId       = (item.productId || '').trim()
       const isServing   = rawId.includes('__')
       const invItemId   = isServing ? rawId.split('__')[0] : rawId
       const servingName = isServing ? rawId.split('__').slice(1).join('__') : ''
-      const price       = item.price ?? item.unitPrice ?? 0
+      const unitPrice   = item.price ?? item.unitPrice ?? 0
 
-      saleItems.push({
-        productId:   invItemId || '000000000000000000000001',
-        productName: item.productName || item.label || 'Bar Item',
-        quantity:    item.quantity,
-        price,
-        discount:    item.discount ?? 0,
-        total:       price * item.quantity - (item.discount ?? 0),
-      })
+      console.log(`[bar/pos-sale]   Item: ${item.productName || 'Unknown'}, isServing: ${isServing}, id: ${invItemId}`)
 
-      // ── Deduct stock ────────────────────────────────────────────────────────
-      // Errors here must never abort the sale — catch and log only.
-      try {
-        if (isServing) {
-          // Find the open bottle for this inventory item
-          const openBottle = await models.BarBottle.findOne({
-            inventoryItemId: invItemId,
-            userId:          ownerId,
-            state:           'open',
-          })
+      // Look up actual serving and inventory item for proper tracking
+      if (isServing) {
+        const serving = await models.BarServing.findOne({
+          inventoryItemId: invItemId,
+          userId:          ownerId,
+          name:            servingName,
+          isActive:        true,
+        }).lean() as any
 
-          if (openBottle) {
-            // Each serving sold = 1 unit deducted from the open bottle
-            const unitsToDeduct  = item.quantity
-            const prevRemaining  = openBottle.remainingUnits ?? 0
-            openBottle.remainingUnits = Math.max(0, prevRemaining - unitsToDeduct)
-            openBottle.updatedAt = new Date()
+        const invItem = await models.BarInventoryItem.findById(invItemId).lean() as any
 
-            // Auto-close bottle when empty
-            if (openBottle.remainingUnits === 0) {
-              openBottle.state           = 'closed'
-              openBottle.closedAt        = new Date()
-              openBottle.actualUnitsSold = openBottle.expectedUnits ?? prevRemaining
-              openBottle.difference      = (openBottle.expectedUnits ?? prevRemaining) - openBottle.actualUnitsSold
-            }
-            await openBottle.save()
-
-            // Audit
-            await models.BarAuditLog.create({
-              userId:        ownerId,
-              staffId:       payload.userId,
-              operation:     'SERVING_SOLD',
-              referenceId:   String(openBottle._id),
-              referenceType: 'BarBottle',
-              details: {
-                inventoryItemId: invItemId,
-                servingName,
-                quantitySold:    item.quantity,
-                remainingUnits:  openBottle.remainingUnits,
-              },
-              timestamp: new Date(),
-            }).catch(() => {/* non-fatal */})
-          } else {
-            // No open bottle — look up how many servings per bottle to compute
-            // fractional sealed bottle deduction.
-            const serving = await models.BarServing.findOne({
-              inventoryItemId: invItemId,
-              userId:          ownerId,
-              name:            servingName,
-              isActive:        true,
-            }).lean() as any
-
-            const unitsPerBottle = serving?.unitsProduced ?? 1
-            // How many whole sealed bottles does this serving quantity consume?
-            const wholeBottles = Math.floor(item.quantity / unitsPerBottle)
-            if (wholeBottles > 0) {
-              await models.BarInventoryItem.findOneAndUpdate(
-                { _id: invItemId, userId: ownerId },
-                { $inc: { stock: -wholeBottles }, updatedAt: new Date() }
-              )
-            }
-          }
-        } else {
-          // Whole-bottle sale — deduct directly from sealed stock
-          const before = await models.BarInventoryItem.findOne(
-            { _id: invItemId, userId: ownerId }
-          ).select('stock').lean() as any
-
-          await models.BarInventoryItem.findOneAndUpdate(
-            { _id: invItemId, userId: ownerId },
-            { $inc: { stock: -item.quantity }, updatedAt: new Date() }
-          )
-
-          // Audit
-          await models.BarAuditLog.create({
-            userId:        ownerId,
-            staffId:       payload.userId,
-            operation:     'BOTTLE_SOLD',
-            referenceId:   invItemId,
-            referenceType: 'BarInventoryItem',
-            details: {
-              quantitySold:  item.quantity,
-              stockBefore:   before?.stock ?? 0,
-              stockAfter:    Math.max(0, (before?.stock ?? 0) - item.quantity),
-            },
-            timestamp: new Date(),
-          }).catch(() => {/* non-fatal */})
+        if (!serving) {
+          throw new Error(`Serving not found: ${invItemId} / ${servingName}`)
         }
-      } catch (deductErr) {
-        console.error('[bar/pos-sale] stock deduction error:', invItemId, deductErr)
+
+        if (!invItem) {
+          throw new Error(`Inventory item not found: ${invItemId}`)
+        }
+
+        // Add line via TabManager → automatic bottle tracking!
+        // If this fails, the entire sale should fail (no silent fallback)
+        console.log(`[bar/pos-sale]     ✅ Found serving & inventory item, calling TabManager.addLine()`)
+        await TabManager.addLine(
+          tabId,
+          {
+            inventoryItemId: invItemId,
+            servingId:       String(serving._id),
+            quantity:        item.quantity,
+            staffId:         payload.userId,
+            itemName:        invItem.name,
+            servingName:     servingName,
+            unitPrice:       serving.sellingPrice,
+          },
+          conn
+        )
+        console.log(`[bar/pos-sale]     ✅ TabManager.addLine() succeeded for serving`)
+
+        saleItems.push({
+          productId:   invItemId,
+          productName: `${invItem.name} (${servingName})`,
+          quantity:    item.quantity,
+          price:       serving.sellingPrice,
+          discount:    item.discount ?? 0,
+          total:       serving.sellingPrice * item.quantity - (item.discount ?? 0),
+        })
+      } else {
+        // Sealed bottle sale → TabManager.addLine with servingId: null
+        const invItem = await models.BarInventoryItem.findById(invItemId).lean() as any
+
+        if (!invItem) {
+          throw new Error(`Inventory item not found: ${invItemId}`)
+        }
+
+        await TabManager.addLine(
+          tabId,
+          {
+            inventoryItemId: invItemId,
+            servingId:       null,  // Bottle sale
+            quantity:        item.quantity,
+            staffId:         payload.userId,
+            itemName:        invItem.name,
+            servingName:     '',
+            unitPrice:       invItem.sellingPrice || unitPrice,
+          },
+          conn
+        )
+
+        saleItems.push({
+          productId:   invItemId,
+          productName: invItem.name,
+          quantity:    item.quantity,
+          price:       invItem.sellingPrice || unitPrice,
+          discount:    item.discount ?? 0,
+          total:       (invItem.sellingPrice || unitPrice) * item.quantity - (item.discount ?? 0),
+        })
       }
     }
 
-    // ── Recompute totals server-side — never trust client-sent figures ───────────
-    // Each item's line total = price × quantity − discount (floor at 0).
-    // The server recalculates subtotal, applies cartDiscount, and uses the result
-    // as the authoritative total stored on the Sale record.
-    const computedSubtotal = saleItems.reduce(
-      (s, item) => s + item.price * item.quantity - (item.discount ?? 0),
-      0
+    console.log('[bar/pos-sale] 🔒 Closing synthetic tab...')
+    // 3. Close synthetic tab immediately with payment details
+    await TabManager.closeSyntheticTab(
+      tabId,
+      {
+        paymentMethod: paymentMethod as any,
+        amountPaid:    amountPaid ?? total,
+        mpesaCode:     paymentMethod === 'mobile_money' ? mpesaCode : undefined,
+        mpesaPhone:    paymentMethod === 'mobile_money' ? mpesaPhone : undefined,
+        staffId:       payload.userId,
+      },
+      conn
     )
-    const computedDiscount = Math.max(0, cartDiscount ?? 0)
-    const computedTotal    = Math.max(0, computedSubtotal - computedDiscount)
+    console.log('[bar/pos-sale] ✅ Synthetic tab closed')
+
+    console.log('[bar/pos-sale] 📝 Creating Sale record for compatibility...')
+    // 4. Create Sale record for backward compatibility with existing reports
+    const orderNumber = await nextOrderNumber(models, ownerId)
 
     const sale = await models.Sale.create({
       userId:       ownerId,
@@ -250,28 +283,17 @@ export async function POST(request: NextRequest) {
       createdAt:    new Date(),
     })
 
-    // ── Sale-level audit log ──────────────────────────────────────────────────
-    models.BarAuditLog.create({
-      userId:    ownerId,
-      staffId:   payload.userId,
-      operation: 'TAB_CLOSED',
-      details: {
-        action:      'bar_pos_sale',
-        orderNumber,
-        saleId:      String(sale._id),
-        total,
-        paymentMethod,
-        itemCount:   items.length,
-      },
-      timestamp: new Date(),
-    }).catch(() => {/* non-fatal */})
-
-    return NextResponse.json({ sale, orderNumber }, { status: 201 })
+    console.log('[bar/pos-sale] ✅ Sale created:', { saleId: sale._id, orderNumber, syntheticTabId: tabId })
+    console.log('[bar/pos-sale] ========== POST COMPLETED SUCCESSFULLY ==========')
+    return NextResponse.json({ sale, orderNumber, syntheticTabId: tabId }, { status: 201 })
   } catch (error: any) {
-    console.error('[bar/pos-sale] POST error:', error)
+    console.error('[bar/pos-sale] ========== POST ERROR ==========')
+    console.error('[bar/pos-sale] Error message:', error.message)
+    console.error('[bar/pos-sale] Error stack:', error.stack)
     return NextResponse.json(
       { error: error.message || 'Failed to process sale' },
       { status: 500 }
     )
   }
 }
+

@@ -633,7 +633,8 @@ barInventoryItemSchema.index({ userId: 1, branchId: 1, stock: 1 })
 
 // ── BarServing ─────────────────────────────────────────────────────────────────
 // A configured serving portion for an inventory item (e.g. Tot, Double, Quarter)
-// unitsProduced is owner-defined and never auto-calculated from volume
+// FRACTIONAL MODEL: servingsPerContainer defines how many servings a full container yields
+// DEPRECATED: unitsProduced (kept for migration compatibility, will be removed in future)
 export const barServingSchema = new mongoose.Schema(
   {
     userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -641,7 +642,13 @@ export const barServingSchema = new mongoose.Schema(
     inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
     name:            { type: String, required: true, trim: true },  // 'Tot', 'Double', 'Quarter'
     sellingPrice:    { type: Number, required: true },
-    unitsProduced:   { type: Number, required: true, min: 1 },  // owner-defined positive integer
+    
+    // NEW: Fractional model - how many servings does a full bottle yield?
+    servingsPerContainer: { type: Number, required: true, min: 1 },  // e.g., 20 Tots per bottle
+    
+    // DEPRECATED: Old unit-based model (kept for migration reference)
+    unitsProduced:   { type: Number, min: 1 },
+    
     isActive:        { type: Boolean, default: true },
     createdAt:       { type: Date, default: Date.now },
     updatedAt:       { type: Date, default: Date.now },
@@ -653,7 +660,8 @@ barServingSchema.index({ userId: 1, branchId: 1 })
 
 // ── BarBottle ──────────────────────────────────────────────────────────────────
 // Tracks the lifecycle of an individual physical bottle: full → open → closed
-// Partial unique index enforces at most one open bottle per inventory item per branch
+// FRACTIONAL MODEL: remainingFraction tracks bottle state as 0.0 (empty) to 1.0 (full)
+// MULTI-BOTTLE SUPPORT: Multiple bottles can be open simultaneously
 export const barBottleSchema = new mongoose.Schema(
   {
     userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -661,23 +669,32 @@ export const barBottleSchema = new mongoose.Schema(
     inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
     bottleNumber:    { type: Number, required: true },  // sequential per inventory item
     state:           { type: String, enum: ['full', 'open', 'closed'], required: true },
+    
+    // NEW: Fractional state tracking (0.0 = empty, 1.0 = full)
+    remainingFraction: { type: Number, default: 1.0, min: 0, max: 1 },
+    expectedFraction:  { type: Number, default: 1.0 },  // Always 1.0 for new bottles
+    actualFraction:    { type: Number },  // remainingFraction at close time
+    varianceFraction:  { type: Number },  // Waste/loss tracking
+    
+    // DEPRECATED: Old unit-based tracking (kept for migration reference)
+    expectedUnits:   { type: Number },
+    remainingUnits:  { type: Number },
+    actualUnitsSold: { type: Number },
+    difference:      { type: Number },
+    
+    // Lifecycle tracking
     openedBy:        { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
     openedAt:        { type: Date },
+    closedBy:        { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
     closedAt:        { type: Date },
-    expectedUnits:   { type: Number },  // from BarServing.unitsProduced at open time
-    remainingUnits:  { type: Number },  // decrements as servings are sold
-    actualUnitsSold: { type: Number },  // computed on close: expectedUnits - remainingUnits
-    difference:      { type: Number },  // expectedUnits - actualUnitsSold (negative = loss)
+    
     createdAt:       { type: Date, default: Date.now },
     updatedAt:       { type: Date, default: Date.now },
   },
   { collection: 'bar_bottles' }
 )
-// Partial unique index: only one open bottle per inventory item per branch at a time
-barBottleSchema.index(
-  { userId: 1, branchId: 1, inventoryItemId: 1, state: 1 },
-  { unique: true, partialFilterExpression: { state: 'open' } }
-)
+// Regular compound index (no uniqueness - allows multiple open bottles)
+barBottleSchema.index({ userId: 1, branchId: 1, inventoryItemId: 1, state: 1 })
 barBottleSchema.index({ userId: 1, branchId: 1, inventoryItemId: 1, createdAt: -1 })
 barBottleSchema.index({ userId: 1, branchId: 1, state: 1 })
 
@@ -709,6 +726,7 @@ export const barTabSchema = new mongoose.Schema(
     tableNumber:    { type: String, default: '' },
     notes:          { type: String, default: '' },
     status:         { type: String, enum: ['open', 'hold', 'billing', 'paid'], default: 'open' },
+    isSyntheticDirectSale: { type: Boolean, default: false },  // NEW: marks instant direct sales
     subtotal:       { type: Number, default: 0 },
     discountPct:    { type: Number, default: 0, min: 0, max: 100 },
     discountAmount: { type: Number, default: 0 },
@@ -731,6 +749,7 @@ barTabSchema.index({ userId: 1, tabNumber: 1 }, { unique: true })
 // ── BarTabLine ─────────────────────────────────────────────────────────────────
 // Individual line items added to a tab.
 // servingId is null for sealed bottle sales; populated for portion/serving sales.
+// bottleId tracks which specific bottle supplied the serving (multi-bottle support)
 export const barTabLineSchema = new mongoose.Schema(
   {
     userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -738,6 +757,7 @@ export const barTabLineSchema = new mongoose.Schema(
     tabId:           { type: mongoose.Schema.Types.ObjectId, ref: 'BarTab', required: true },
     inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
     servingId:       { type: mongoose.Schema.Types.ObjectId, ref: 'BarServing' },  // null = bottle sale
+    bottleId:        { type: mongoose.Schema.Types.ObjectId, ref: 'BarBottle' },   // NEW: which bottle was used
     itemName:        { type: String, required: true },   // denormalized for receipt display
     servingName:     { type: String, default: '' },      // denormalized for receipt display
     quantity:        { type: Number, required: true, min: 1 },
@@ -753,6 +773,7 @@ export const barTabLineSchema = new mongoose.Schema(
 )
 barTabLineSchema.index({ userId: 1, tabId: 1, addedAt: -1 })
 barTabLineSchema.index({ userId: 1, inventoryItemId: 1, addedAt: -1 })
+barTabLineSchema.index({ userId: 1, bottleId: 1 })  // NEW: bottle history lookups
 
 // ── BarAuditLog ────────────────────────────────────────────────────────────────
 // Immutable ledger of all significant bar operations.
@@ -789,3 +810,60 @@ barAuditLogSchema.index({ userId: 1, branchId: 1, timestamp: -1 })
 barAuditLogSchema.index({ userId: 1, staffId: 1, timestamp: -1 })
 barAuditLogSchema.index({ userId: 1, operation: 1, timestamp: -1 })
 // No pre-save hooks — intentionally immutable
+
+// ── BarBottleAudit ─────────────────────────────────────────────────────────────
+// Variance tracking: expected vs actual servings when bottles are closed
+// Used for theft detection, spillage analysis, and accountability
+const barBottleAuditServingSchema = new mongoose.Schema(
+  {
+    servingId:   { type: mongoose.Schema.Types.ObjectId, ref: 'BarServing', required: true },
+    servingName: { type: String, required: true },
+    quantity:    { type: Number, required: true },
+  },
+  { _id: false }
+)
+
+export const barBottleAuditSchema = new mongoose.Schema(
+  {
+    userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    bottleId:        { type: mongoose.Schema.Types.ObjectId, ref: 'BarBottle', required: true },
+    inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
+    
+    // Product context (denormalized for reporting)
+    productName:     { type: String, required: true },
+    productSize:     { type: String, default: '' },
+    brandCategory:   { type: String, default: '' },
+    
+    // Bottle state at closure
+    bottleNumber:       { type: Number, required: true },
+    remainingFraction:  { type: Number, required: true, min: 0, max: 1 },  // at close time
+    
+    // Expected servings (calculated from remainingFraction)
+    expectedServings:   { type: [barBottleAuditServingSchema], default: [] },
+    totalExpected:      { type: Number, required: true },
+    
+    // Actual servings sold (from BarTabLine)
+    actualServings:     { type: [barBottleAuditServingSchema], default: [] },
+    totalActual:        { type: Number, required: true },
+    
+    // Variance analysis
+    varianceQuantity:   { type: Number, required: true },  // expected - actual
+    variancePercentage: { type: Number, required: true },  // (variance / expected) * 100
+    varianceFlag:       { type: String, enum: ['normal', 'warning', 'critical'], required: true },
+    
+    // Audit context
+    closedBy:        { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    closedAt:        { type: Date, required: true },
+    notes:           { type: String, default: '' },
+    
+    createdAt:       { type: Date, default: Date.now },
+  },
+  { collection: 'bar_bottle_audits' }
+)
+barBottleAuditSchema.index({ userId: 1, branchId: 1, closedAt: -1 })
+barBottleAuditSchema.index({ userId: 1, bottleId: 1 })
+barBottleAuditSchema.index({ userId: 1, inventoryItemId: 1, closedAt: -1 })
+barBottleAuditSchema.index({ userId: 1, varianceFlag: 1, closedAt: -1 })  // high-variance queries
+barBottleAuditSchema.index({ userId: 1, closedBy: 1, closedAt: -1 })      // per-staff analysis
+// Immutable - no updates allowed after creation

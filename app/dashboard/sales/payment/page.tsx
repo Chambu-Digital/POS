@@ -157,12 +157,9 @@ function PaymentPageContent() {
     if (!selectedPayment) { toast.error('Please select a payment method'); return }
     if (!paymentAmount || parseFloat(paymentAmount) <= 0) { toast.error('Please enter a valid payment amount'); return }
     if (selectedPayment === 'credit' && !selectedCustomer) { toast.error('Please select a customer for credit payment'); return }
-    if (selectedPayment === 'mobile_money' && mpesaMethod === 'manual' && !mpesaCode.trim()) {
-      toast.error('Please enter M-Pesa transaction code'); return
-    }
-    if (selectedPayment === 'mobile_money' && !mpesaPhone.trim()) {
-      toast.error('Please enter M-Pesa phone number'); return
-    }
+    
+    // M-Pesa fields are now optional - seller confirms they received payment
+    // No validation required for phone number or transaction code
 
     setProcessing(true)
     setShowPaymentDialog(false)
@@ -186,8 +183,12 @@ function PaymentPageContent() {
         paymentMethod: selectedPayment,
         customerName: selectedCustomer?.name || '',
         customerId: selectedCustomer?._id || null,
-        mpesaCode: selectedPayment === 'mobile_money' ? mpesaCode : undefined,
-        mpesaPhone: selectedPayment === 'mobile_money' ? mpesaPhone : undefined,
+      }
+      
+      // Only include M-Pesa details if they're provided (optional)
+      if (selectedPayment === 'mobile_money') {
+        if (mpesaCode.trim()) saleData.mpesaCode = mpesaCode.trim()
+        if (mpesaPhone.trim()) saleData.mpesaPhone = mpesaPhone.trim()
       }
 
       if (isOnline()) {
@@ -642,7 +643,7 @@ function PaymentPageContent() {
             {showMpesaFields && (
               <>
                 <div>
-                  <Label className="text-sm font-medium mb-2 block">M-Pesa Phone Number</Label>
+                  <Label className="text-sm font-medium mb-2 block">M-Pesa Phone Number <span className="text-muted-foreground font-normal">(optional)</span></Label>
                   <Input type="tel" value={mpesaPhone} onChange={e => setMpesaPhone(e.target.value)} placeholder="e.g., 0712345678" disabled={stkPushInitiated} />
                 </div>
                 <div className="flex gap-2">
@@ -660,8 +661,9 @@ function PaymentPageContent() {
                 )}
                 {mpesaMethod === 'manual' && (
                   <div>
-                    <Label className="text-sm font-medium mb-2 block">M-Pesa Transaction Code</Label>
+                    <Label className="text-sm font-medium mb-2 block">M-Pesa Transaction Code <span className="text-muted-foreground font-normal">(optional)</span></Label>
                     <Input type="text" value={mpesaCode} onChange={e => setMpesaCode(e.target.value.toUpperCase())} placeholder="e.g., QGH7XYZ123" className="uppercase" />
+                    <p className="text-xs text-muted-foreground mt-1">Enter code only if you want to record it</p>
                   </div>
                 )}
               </>

@@ -43,6 +43,7 @@ export interface CreateTabInput {
 export interface AddLineInput {
   inventoryItemId: string
   servingId?: string | null  // null = bottle sale, string = serving sale
+  bottleId?: string | null   // NEW: which bottle to use (optional, for serving sales)
   quantity: number
   staffId: string
   itemName: string
@@ -137,14 +138,89 @@ export class TabManager {
   }
 
   /**
+   * Create a synthetic tab for direct sales that processes instantly through
+   * the tab system to ensure proper bottle tracking.
+   *
+   * This tab is marked with `isSyntheticDirectSale: true` and has special handling:
+   * - Created with status 'open'
+   * - Items added via addLine() (ensuring bottle tracking works)
+   * - Immediately transitioned to 'paid' status
+   * - Filtered out from regular tab reports
+   *
+   * @param data - Direct sale tab input (same as createTab but with required customerName)
+   * @param conn - Tenant mongoose connection
+   * @returns The newly created synthetic BarTab document (plain object)
+   */
+  static async createSyntheticDirectSaleTab(
+    data: CreateTabInput & { customerName: string },
+    conn: mongoose.Connection
+  ): Promise<Record<string, unknown>> {
+    const models = getModels(conn)
+
+    // Generate sequential tab number scoped to this user
+    const existingCount = await models.BarTab.countDocuments({ userId: data.userId })
+    const tabNumber = `DIRECT-${existingCount + 1}`
+
+    const now = new Date()
+    const tab = await models.BarTab.create({
+      userId:                data.userId,
+      branchId:              data.branchId,
+      staffId:               data.staffId,
+      tabNumber,
+      customerId:            data.customerId,
+      customerName:          data.customerName,
+      tableNumber:           data.tableNumber ?? 'DIRECT',
+      notes:                 data.notes ?? 'Auto-generated for direct sale',
+      status:                'open',
+      isSyntheticDirectSale: true,  // Mark as synthetic
+      subtotal:              0,
+      discountPct:           0,
+      discountAmount:        0,
+      total:                 0,
+      amountPaid:            0,
+      payments:              [],
+      synced:                true,
+      openedAt:              now,
+      createdAt:             now,
+      updatedAt:             now,
+    })
+
+    // Audit log for synthetic tab creation (use TAB_CREATED with synthetic flag)
+    await models.BarAuditLog.create({
+      userId:        data.userId,
+      branchId:      data.branchId,
+      staffId:       data.staffId,
+      operation:     'TAB_CREATED',
+      referenceId:   String(tab._id),
+      referenceType: 'BarTab',
+      details: {
+        tabNumber,
+        customerName: data.customerName,
+        tableNumber:  data.tableNumber ?? 'DIRECT',
+        isSynthetic:  true,
+        type:         'direct_sale',
+      },
+      timestamp: now,
+    })
+
+    return tab.toObject()
+  }
+
+  /**
    * Add a line item to an open tab.
+   *
+   * V2 MULTI-BOTTLE SUPPORT:
+   * - If bottleId provided: use that specific bottle
+   * - If no bottleId and single open bottle: auto-select
+   * - If no bottleId and multiple open bottles: throw BOTTLE_SELECTION_REQUIRED
+   * - If no open bottles: auto-open one
    *
    * Validates the tab is in 'open' status (throws TAB_LOCKED otherwise).
    * For serving sales: calls ServingEngine.computeServing and
-   *   InventoryEngine.deductServingUnits.
+   *   InventoryEngine.deductFraction.
    * For bottle sales (servingId is null/undefined): calls
    *   InventoryEngine.sellSealedBottle.
-   * Inserts a BarTabLine, recomputes the tab's subtotal/discountAmount/total,
+   * Inserts a BarTabLine with bottleId tracking, recomputes tab balances,
    * and inserts a TAB_LINE_ADDED audit log.
    *
    * @param tabId  - The BarTab _id
@@ -152,14 +228,21 @@ export class TabManager {
    * @param conn   - Tenant mongoose connection
    * @returns { tab, tabLine } as plain objects
    * @throws Error('TAB_LOCKED') if tab status is not 'open'
-   * @throws Error('NO_OPEN_BOTTLE') propagated from InventoryEngine
+   * @throws Error('BOTTLE_SELECTION_REQUIRED') if multiple bottles open and no bottleId provided
+   * @throws Error('BOTTLE_NOT_FOUND_OR_CLOSED') if bottleId invalid
+   * @throws Error('INSUFFICIENT_FRACTION') if bottle can't provide serving
    * @throws Error('INSUFFICIENT_STOCK') propagated from InventoryEngine
    */
   static async addLine(
     tabId: string,
     line: AddLineInput,
     conn: mongoose.Connection
-  ): Promise<{ tab: Record<string, unknown>; tabLine: Record<string, unknown> }> {
+  ): Promise<{ 
+    tab: Record<string, unknown>; 
+    tabLine: Record<string, unknown>;
+    bottleAutoOpened?: boolean;
+    openedBottle?: Record<string, unknown>;
+  }> {
     const models = getModels(conn)
 
     const tab = await models.BarTab.findById(tabId)
@@ -171,31 +254,75 @@ export class TabManager {
       throw new Error('TAB_LOCKED')
     }
 
-    // Determine lineTotal
+    // Determine lineTotal and handle inventory
     let lineTotal: number
+    let selectedBottleId: string | undefined
+    let bottleAutoOpened = false
+    let openedBottle: Record<string, unknown> | undefined
 
     if (line.servingId) {
-      // Serving sale — fetch serving config and compute via ServingEngine
+      // ═════════════════════════════════════════════════════════════════════════
+      // Serving sale — V2 fractional + multi-bottle logic
+      // ═════════════════════════════════════════════════════════════════════════
+      
       const serving = await models.BarServing.findById(line.servingId)
       if (!serving) {
         throw new Error('SERVING_NOT_FOUND')
       }
 
+      // Compute fraction needed
       const result = ServingEngine.computeServing(
-        { sellingPrice: serving.sellingPrice, unitsProduced: serving.unitsProduced },
+        { sellingPrice: serving.sellingPrice, servingsPerContainer: serving.servingsPerContainer },
         line.quantity
       )
       lineTotal = result.lineTotal
 
-      // Deduct units from the open bottle
-      await InventoryEngine.deductServingUnits(
-        line.inventoryItemId,
-        result.unitsToDeduct,
+      console.log(`[TabManager] Computed serving: fraction=${result.fractionToDeduct}, total=${result.lineTotal}, servingsPerContainer=${serving.servingsPerContainer}`)
+
+      // Bottle selection strategy: explicit → single → auto-open
+      let targetBottleId: string
+
+      if (line.bottleId) {
+        // User explicitly selected a bottle
+        targetBottleId = line.bottleId
+      } else {
+        // No bottle specified — check how many are open
+        const openBottles = await InventoryEngine.getOpenBottles(line.inventoryItemId, conn)
+
+        if (openBottles.length === 0) {
+          // No bottles open — auto-open one (with toast on client side)
+          const newBottle = await InventoryEngine.openBottle(
+            line.inventoryItemId,
+            line.staffId,
+            conn
+          )
+          targetBottleId = String((newBottle as any)._id)
+          bottleAutoOpened = true
+          openedBottle = newBottle
+        } else if (openBottles.length === 1) {
+          // Single open bottle — auto-select
+          targetBottleId = String((openBottles[0] as any)._id)
+        } else {
+          // Multiple open bottles — user MUST choose
+          throw new Error('BOTTLE_SELECTION_REQUIRED')
+        }
+      }
+
+      // Deduct fraction from the selected bottle
+      await InventoryEngine.deductFraction(
+        targetBottleId,
+        result.fractionToDeduct,
         line.staffId,
         conn
       )
+
+      selectedBottleId = targetBottleId
+
     } else {
-      // Bottle sale — sell a sealed bottle
+      // ═════════════════════════════════════════════════════════════════════════
+      // Sealed bottle sale — no change from V1
+      // ═════════════════════════════════════════════════════════════════════════
+      
       lineTotal = line.unitPrice * line.quantity
 
       await InventoryEngine.sellSealedBottle(
@@ -207,13 +334,14 @@ export class TabManager {
 
     const now = new Date()
 
-    // Insert BarTabLine
+    // Insert BarTabLine with bottleId tracking
     const tabLine = await models.BarTabLine.create({
       userId:          tab.userId,
       branchId:        tab.branchId,
       tabId:           tab._id,
       inventoryItemId: line.inventoryItemId,
       servingId:       line.servingId ?? undefined,
+      bottleId:        selectedBottleId ?? undefined,  // NEW: track which bottle was used
       itemName:        line.itemName,
       servingName:     line.servingName ?? '',
       quantity:        line.quantity,
@@ -240,6 +368,7 @@ export class TabManager {
         tabLineId:       String(tabLine._id),
         inventoryItemId: line.inventoryItemId,
         servingId:       line.servingId ?? null,
+        bottleId:        selectedBottleId ?? null,
         itemName:        line.itemName,
         servingName:     line.servingName ?? '',
         quantity:        line.quantity,
@@ -252,6 +381,8 @@ export class TabManager {
     return {
       tab:     updatedTab,
       tabLine: tabLine.toObject(),
+      bottleAutoOpened,
+      openedBottle,
     }
   }
 
@@ -492,6 +623,90 @@ export class TabManager {
     const remaining = total - amountPaid
 
     return { subtotal, discountAmount, total, amountPaid, remaining }
+  }
+
+  /**
+   * Close a synthetic direct sale tab immediately and mark it as paid.
+   *
+   * Unlike regular tabs, synthetic tabs skip the 'billing' status and go
+   * straight from 'open' to 'paid'. Payment information is embedded directly.
+   *
+   * @param tabId          - The synthetic BarTab _id
+   * @param paymentDetails - Payment method and related details
+   * @param conn           - Tenant mongoose connection
+   * @returns The updated BarTab document (plain object)
+   * @throws Error('TAB_NOT_SYNTHETIC') if tab is not marked as synthetic
+   */
+  static async closeSyntheticTab(
+    tabId: string,
+    paymentDetails: {
+      paymentMethod: 'cash' | 'card' | 'mobile_money' | 'credit'
+      amountPaid: number
+      mpesaCode?: string
+      mpesaPhone?: string
+      staffId: string
+    },
+    conn: mongoose.Connection
+  ): Promise<Record<string, unknown>> {
+    const models = getModels(conn)
+
+    const tab = await models.BarTab.findById(tabId)
+    if (!tab) {
+      throw new Error('TAB_NOT_FOUND')
+    }
+
+    if (!(tab as any).isSyntheticDirectSale) {
+      throw new Error('TAB_NOT_SYNTHETIC')
+    }
+
+    // Synthetic tabs can be closed from 'open' status (skip billing)
+    // This is intentional - they go directly from open → paid
+
+    const now = new Date()
+
+    // Build payment record
+    const paymentDoc: Record<string, unknown> = {
+      amount:     paymentDetails.amountPaid,
+      method:     paymentDetails.paymentMethod,
+      recordedBy: paymentDetails.staffId,
+      recordedAt: now,
+    }
+
+    if (paymentDetails.paymentMethod === 'mobile_money') {
+      if (paymentDetails.mpesaCode)  paymentDoc.mpesaCode  = paymentDetails.mpesaCode
+      if (paymentDetails.mpesaPhone) paymentDoc.mpesaPhone = paymentDetails.mpesaPhone
+    }
+
+    // Update tab: add payment, mark as paid, close it
+    const payments = (tab.payments as Array<Record<string, unknown>>) ?? []
+    payments.push(paymentDoc)
+    tab.payments   = payments
+    tab.amountPaid = paymentDetails.amountPaid
+    tab.status     = 'paid'
+    tab.closedAt   = now
+    tab.updatedAt  = now
+    await tab.save()
+
+    // Audit log
+    await models.BarAuditLog.create({
+      userId:        tab.userId,
+      branchId:      tab.branchId,
+      staffId:       paymentDetails.staffId,
+      operation:     'TAB_CLOSED',
+      referenceId:   String(tab._id),
+      referenceType: 'BarTab',
+      details: {
+        tabId:         String(tab._id),
+        tabNumber:     tab.tabNumber,
+        type:          'synthetic_direct_sale',
+        total:         tab.total,
+        amountPaid:    paymentDetails.amountPaid,
+        paymentMethod: paymentDetails.paymentMethod,
+      },
+      timestamp: now,
+    })
+
+    return tab.toObject()
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────

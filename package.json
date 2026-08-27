@@ -6,7 +6,17 @@
     "dev": "next dev --turbo",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "audit:bar": "tsx scripts/audit-bar-data.ts",
+    "audit:bar:all": "tsx scripts/audit-bar-data.ts --all",
+    "fix:bar": "tsx scripts/fix-bar-data-issues.ts",
+    "indexes:bar": "tsx scripts/add-bar-indexes.ts",
+    "indexes:bar:all": "tsx scripts/add-bar-indexes.ts --all",
+    "test:inventory": "tsx scripts/test-inventory-api.ts",
+    "test:servings": "tsx scripts/test-serving-sales.ts",
+    "test:products": "tsx scripts/test-products-sold.ts",
+    "test:complete": "tsx scripts/test-complete-bar-system.ts",
+    "diagnose:bar": "tsx scripts/diagnose-bar-simple.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
@@ -79,6 +89,7 @@
     "@types/react-dom": "19.2.3",
     "postcss": "^8.5",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
     "typescript": "5.7.3"
   },
   "pnpm": {
