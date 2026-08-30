@@ -439,8 +439,11 @@ function PaymentPageContent() {
 
           {/* Customer Selection */}
           <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Customer:
+            </label>
             {selectedCustomer ? (
-              <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+              <div className="flex items-center justify-between bg-green-50 border-2 border-green-300 rounded-lg px-4 py-3 shadow-sm">
                 <div>
                   <p className="text-sm font-semibold text-green-800">{selectedCustomer.name}</p>
                   <p className="text-xs text-green-600">
@@ -449,24 +452,45 @@ function PaymentPageContent() {
                   </p>
                 </div>
                 <button onClick={() => setSelectedCustomer(null)} className="text-green-600 hover:text-red-500">
-                  <X size={16} />
+                  <X size={18} />
                 </button>
               </div>
             ) : (
               <button
                 onClick={() => setShowCustomerSearch(true)}
-                className="w-full flex items-center gap-2 border border-dashed border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-500 hover:border-green-400 hover:text-green-600 transition-colors"
+                className="w-full flex items-center justify-center gap-2 bg-blue-50 border-2 border-blue-200 hover:border-blue-400 rounded-lg px-4 py-3 text-sm font-medium text-blue-700 hover:bg-blue-100 hover:text-blue-800 transition-all shadow-sm"
               >
-                <Search size={14} /> Select Customer (optional — defaults to "Cash Sale")
+                <Search size={16} /> Select Customer (optional)
               </button>
+            )}
+            {!selectedCustomer && (
+              <p className="text-xs text-gray-500 mt-1 text-center">Defaults to "Cash Sale" if not selected</p>
             )}
           </div>
 
           {/* Action Buttons */}
-          <div className="grid grid-cols-3 gap-2 mb-6">
-            <Button variant="outline" onClick={cancelOrder} disabled={processing}>Cancel Order</Button>
-            <Button variant="secondary" disabled={processing} onClick={holdOrder}>Hold Order</Button>
-            <Button onClick={() => setShowPaymentDialog(true)} disabled={processing} className="bg-green-600 hover:bg-green-700 text-white">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-6">
+            <Button 
+              variant="outline" 
+              onClick={cancelOrder} 
+              disabled={processing}
+              className="rounded-full"
+            >
+              Cancel Order
+            </Button>
+            <Button 
+              variant="secondary" 
+              disabled={processing} 
+              onClick={holdOrder}
+              className="rounded-full"
+            >
+              Hold Order
+            </Button>
+            <Button 
+              onClick={() => setShowPaymentDialog(true)} 
+              disabled={processing} 
+              className="bg-green-600 hover:bg-green-700 text-white rounded-full col-span-2 sm:col-span-1"
+            >
               Process Payment
             </Button>
           </div>

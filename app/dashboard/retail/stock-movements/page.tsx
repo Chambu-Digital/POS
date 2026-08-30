@@ -6,7 +6,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
   DialogContent,
@@ -18,6 +17,7 @@ import { Search, Calendar, TrendingUp, TrendingDown, Package, AlertCircle, Plus 
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { RecordMovementModal } from '@/components/inventory/record-movement-modal'
+import { cn } from '@/lib/utils'
 
 interface StockMovement {
   _id: string
@@ -247,99 +247,105 @@ function StockMovementsPageContent() {
         </CardContent>
       </Card>
 
-      {/* Movement Types Tabs */}
-      <Tabs value={activeType} onValueChange={(v) => setActiveType(v as MovementType)} className="space-y-4">
-        <TabsList className="grid grid-cols-9 w-full">
-          {MOVEMENT_TYPES.map((type) => (
-            <TabsTrigger key={type.value} value={type.value}>
-              {type.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+      {/* Movement Types Pills */}
+      <div className="flex flex-wrap gap-2">
+        {MOVEMENT_TYPES.map((type) => (
+          <Button
+            key={type.value}
+            onClick={() => setActiveType(type.value)}
+            variant={activeType === type.value ? 'default' : 'outline'}
+            className={cn(
+              'rounded-full whitespace-nowrap',
+              activeType === type.value && 'shadow-sm'
+            )}
+            size="sm"
+          >
+            {type.label}
+          </Button>
+        ))}
+      </div>
 
-        <TabsContent value={activeType} className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Movement History</CardTitle>
-              <CardDescription>
-                {activeType === 'all' 
-                  ? 'All stock movements'
-                  : `${getMovementLabel(activeType)} movements`
-                }
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <div className="text-center py-8">Loading movements...</div>
-              ) : movements.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  {search ? 'No movements found matching your search.' : 'No movements recorded yet.'}
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Product</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Quantity</TableHead>
-                        <TableHead>Before</TableHead>
-                        <TableHead>After</TableHead>
-                        <TableHead>Supplier</TableHead>
-                        <TableHead>Reference</TableHead>
-                        <TableHead>Staff</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {movements.map((movement) => (
-                        <TableRow
-                          key={movement._id}
-                          className="cursor-pointer hover:bg-muted/50"
-                          onClick={() => openDetailModal(movement)}
-                        >
-                          <TableCell className="whitespace-nowrap">
-                            {new Date(movement.timestamp).toLocaleDateString()}
-                            <br />
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(movement.timestamp).toLocaleTimeString()}
-                            </span>
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            {movement.productId?.productName || 'Unknown'}
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={getMovementColor(movement.type)}>
-                              <span className="flex items-center gap-1">
-                                {getMovementIcon(movement.type)}
-                                {getMovementLabel(movement.type)}
-                              </span>
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            {formatQuantity(movement.quantity, movement.type)}
-                          </TableCell>
-                          <TableCell>{movement.previousStock}</TableCell>
-                          <TableCell className="font-semibold">{movement.newStock}</TableCell>
-                          <TableCell>
-                            {movement.supplierId?.name || movement.supplierName || '-'}
-                          </TableCell>
-                          <TableCell className="text-sm">
-                            {movement.reference || movement.orderNumber || '-'}
-                          </TableCell>
-                          <TableCell className="text-sm">
-                            {movement.staffId?.name || '-'}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      {/* Movement History Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Movement History</CardTitle>
+          <CardDescription>
+            {activeType === 'all' 
+              ? 'All stock movements'
+              : `${getMovementLabel(activeType)} movements`
+            }
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="text-center py-8">Loading movements...</div>
+          ) : movements.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              {search ? 'No movements found matching your search.' : 'No movements recorded yet.'}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Product</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Quantity</TableHead>
+                    <TableHead>Before</TableHead>
+                    <TableHead>After</TableHead>
+                    <TableHead>Supplier</TableHead>
+                    <TableHead>Reference</TableHead>
+                    <TableHead>Staff</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {movements.map((movement) => (
+                    <TableRow
+                      key={movement._id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => openDetailModal(movement)}
+                    >
+                      <TableCell className="whitespace-nowrap">
+                        {new Date(movement.timestamp).toLocaleDateString()}
+                        <br />
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(movement.timestamp).toLocaleTimeString()}
+                        </span>
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {movement.productId?.productName || 'Unknown'}
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={getMovementColor(movement.type)}>
+                          <span className="flex items-center gap-1">
+                            {getMovementIcon(movement.type)}
+                            {getMovementLabel(movement.type)}
+                          </span>
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {formatQuantity(movement.quantity, movement.type)}
+                      </TableCell>
+                      <TableCell>{movement.previousStock}</TableCell>
+                      <TableCell className="font-semibold">{movement.newStock}</TableCell>
+                      <TableCell>
+                        {movement.supplierId?.name || movement.supplierName || '-'}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {movement.reference || movement.orderNumber || '-'}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {movement.staffId?.name || '-'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Movement Detail Modal */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
