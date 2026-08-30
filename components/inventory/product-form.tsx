@@ -19,14 +19,16 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { toast } from 'sonner'
-import { Check, ChevronsUpDown, ImagePlus, X, Loader2 } from 'lucide-react'
+import { Check, ChevronsUpDown, ImagePlus, X, Loader2, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ProductImage } from '@/components/ui/product-image'
+import { QuickAddSupplierDialog } from '@/components/suppliers/quick-add-supplier-dialog'
 
 interface Product {
   _id?: string
   productName: string
   category: string
+  supplierId?: string
   variant?: string
   brand?: string
   model?: string
@@ -48,7 +50,10 @@ interface ProductFormProps {
 export function ProductForm({ product, onSuccess }: ProductFormProps) {
   const [loading, setLoading] = useState(false)
   const [categories, setCategories] = useState<string[]>([])
+  const [suppliers, setSuppliers] = useState<Array<{ _id: string; name: string }>>([])
   const [categoryOpen, setCategoryOpen] = useState(false)
+  const [supplierOpen, setSupplierOpen] = useState(false)
+  const [quickAddSupplierOpen, setQuickAddSupplierOpen] = useState(false)
   const [images, setImages] = useState<string[]>(product?.images || [])
   const [uploadingImages, setUploadingImages] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -57,6 +62,7 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
     product || {
       productName: '',
       category: '',
+      supplierId: '',
       variant: '',
       brand: '',
       model: '',
@@ -73,6 +79,7 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
 
   useEffect(() => {
     fetchCategories()
+    fetchSuppliers()
   }, [])
 
   // Sync images when product prop changes (e.g. switching edit targets)
@@ -89,6 +96,18 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
       }
     } catch (error) {
       console.error('Failed to load categories:', error)
+    }
+  }
+
+  async function fetchSuppliers() {
+    try {
+      const response = await fetch('/api/suppliers')
+      if (response.ok) {
+        const data = await response.json()
+        setSuppliers(data.suppliers || [])
+      }
+    } catch (error) {
+      console.error('Failed to load suppliers:', error)
     }
   }
 
@@ -196,6 +215,13 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
     }
   }
 
+  function handleQuickAddSupplierSuccess(newSupplier: { _id: string; name: string }) {
+    // Add to suppliers list
+    setSuppliers(prev => [...prev, newSupplier])
+    // Auto-select the new supplier
+    setFormData(prev => ({ ...prev, supplierId: newSupplier._id }))
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-3 gap-4">
@@ -211,7 +237,7 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
           />
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-2 col-span-2">
           <Label htmlFor="category">Category *</Label>
           <Popover open={categoryOpen} onOpenChange={setCategoryOpen}>
             <PopoverTrigger asChild>
@@ -269,6 +295,82 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             disabled={loading}
             required
           />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="supplier">Supplier</Label>
+          <div className="flex gap-2">
+            <Popover open={supplierOpen} onOpenChange={setSupplierOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={supplierOpen}
+                  className="flex-1 justify-between"
+                  disabled={loading}
+                  type="button"
+                >
+                  {formData.supplierId
+                    ? suppliers.find((s) => s._id === formData.supplierId)?.name || 'Select supplier...'
+                    : 'Select supplier...'}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-full p-0">
+                <Command>
+                  <CommandInput placeholder="Search supplier..." />
+                  <CommandList>
+                    <CommandEmpty>No suppliers found.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        value=""
+                        onSelect={() => {
+                          setFormData({ ...formData, supplierId: '' })
+                          setSupplierOpen(false)
+                        }}
+                      >
+                        <Check
+                          className={cn(
+                            'mr-2 h-4 w-4',
+                            !formData.supplierId ? 'opacity-100' : 'opacity-0'
+                          )}
+                        />
+                        <span className="text-muted-foreground italic">None</span>
+                      </CommandItem>
+                      {suppliers.map((supplier) => (
+                        <CommandItem
+                          key={supplier._id}
+                          value={supplier.name}
+                          onSelect={() => {
+                            setFormData({ ...formData, supplierId: supplier._id })
+                            setSupplierOpen(false)
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              'mr-2 h-4 w-4',
+                              formData.supplierId === supplier._id ? 'opacity-100' : 'opacity-0'
+                            )}
+                          />
+                          {supplier.name}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => setQuickAddSupplierOpen(true)}
+              disabled={loading}
+              title="Add new supplier"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -481,6 +583,13 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
           {loading ? 'Saving...' : product ? 'Update' : 'Create'}
         </Button>
       </div>
+
+      {/* Quick Add Supplier Dialog */}
+      <QuickAddSupplierDialog
+        open={quickAddSupplierOpen}
+        onOpenChange={setQuickAddSupplierOpen}
+        onSuccess={handleQuickAddSupplierSuccess}
+      />
     </form>
   )
 }

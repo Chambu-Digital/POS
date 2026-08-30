@@ -36,6 +36,9 @@ export async function POST(request: NextRequest) {
     const data = await request.json()
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
 
+    // Generate unique order number FIRST (needed for ledger entries)
+    const orderNumber = await generateOrderNumber(models, ownerId)
+
     // ── Deduct stock and record ledger entry for each item ───────────────────
     for (const item of data.items) {
       if (!item.productId) continue
@@ -56,7 +59,7 @@ export async function POST(request: NextRequest) {
           await (models as any).StockLedger.create({
             userId:        ownerId,
             productId:     productObjId,
-            staffId:       payload.type === 'staff' ? payload.userId : null,
+            staffId:       payload.type === 'staff' ? new Types.ObjectId(payload.userId) : null,
             type:          'SALE',
             quantity:      -item.quantity,
             previousStock,
@@ -64,12 +67,15 @@ export async function POST(request: NextRequest) {
             orderNumber,
             timestamp:     new Date(),
           })
-        } catch { /* ledger failure must never block a sale */ }
-      } catch { /* product not found — skip silently */ }
+        } catch (ledgerError) {
+          // Log but don't fail the sale
+          console.error('[sales] StockLedger creation failed:', ledgerError)
+        }
+      } catch (productError) {
+        // Log but continue with other products
+        console.error('[sales] Product processing failed:', productError)
+      }
     }
-
-    // Generate unique order number
-    const orderNumber = await generateOrderNumber(models, ownerId)
 
     // Handle credit payment
     let customerId = data.customerId || null

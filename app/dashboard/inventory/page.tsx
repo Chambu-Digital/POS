@@ -21,6 +21,8 @@ import { PermissionGuard } from '@/components/auth/permission-guard'
 import { ProductForm } from '@/components/inventory/product-form'
 import { ImportModal } from '@/components/inventory/import-modal'
 import { CategoryManager } from '@/components/inventory/category-manager'
+import { StockInModal } from '@/components/inventory/stock-in-modal'
+import { StockCountModal } from '@/components/inventory/stock-count-modal'
 import { ProductImage } from '@/components/ui/product-image'
 
 interface Product {
@@ -52,6 +54,8 @@ function InventoryPageContent() {
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [isViewOpen, setIsViewOpen] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
+  const [isStockInOpen, setIsStockInOpen] = useState(false)
+  const [isStockCountOpen, setIsStockCountOpen] = useState(false)
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false)
 
   useEffect(() => {
@@ -59,10 +63,33 @@ function InventoryPageContent() {
   }, [])
 
   useEffect(() => {
-    const filtered = products.filter((p) =>
-      p.productName.toLowerCase().includes(search.toLowerCase()) ||
-      p.category.toLowerCase().includes(search.toLowerCase())
-    )
+    const searchLower = search.toLowerCase()
+    const filtered = products.filter((p) => {
+      // Search across multiple fields
+      const productName = p.productName?.toLowerCase() || ''
+      const category = p.category?.toLowerCase() || ''
+      const brand = (p as any).brand?.toLowerCase() || ''
+      const model = (p as any).model?.toLowerCase() || ''
+      const variant = (p as any).variant?.toLowerCase() || ''
+      const description = p.description?.toLowerCase() || ''
+      const barcode = (p as any).barcode?.toLowerCase() || ''
+      
+      // Search by price (convert to string for partial matching)
+      const buyingPrice = p.buyingPrice?.toString() || ''
+      const sellingPrice = p.sellingPrice?.toString() || ''
+      
+      return (
+        productName.includes(searchLower) ||
+        category.includes(searchLower) ||
+        brand.includes(searchLower) ||
+        model.includes(searchLower) ||
+        variant.includes(searchLower) ||
+        description.includes(searchLower) ||
+        barcode.includes(searchLower) ||
+        buyingPrice.includes(searchLower) ||
+        sellingPrice.includes(searchLower)
+      )
+    })
     setFilteredProducts(filtered)
   }, [search, products])
 
@@ -128,7 +155,7 @@ function InventoryPageContent() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{products.length}</div>
-            <p className="text-sm text-muted-foreground">Estimated Sales</p>
+            <p className="text-sm text-muted-foreground">Estimated Profit</p>
             <p className="text-lg font-semibold text-primary mt-2">
               KSh {(products.reduce((sum, p) => sum + (p.stock * (p.sellingPrice - p.buyingPrice)), 0)).toLocaleString()}
             </p>
@@ -154,9 +181,28 @@ function InventoryPageContent() {
           </CardHeader>
           <CardContent className="space-y-2">
             <Button
+              onClick={() => setIsStockInOpen(true)}
+              className="w-full"
+              size="sm"
+              variant="default"
+            >
+              <Plus size={16} className="mr-2" />
+              Stock In
+            </Button>
+            <Button
+              onClick={() => setIsStockCountOpen(true)}
+              className="w-full"
+              size="sm"
+              variant="outline"
+            >
+              <Plus size={16} className="mr-2" />
+              Stock Count
+            </Button>
+            <Button
               onClick={() => setIsCreateOpen(true)}
               className="w-full"
               size="sm"
+              variant="outline"
             >
               <Plus size={16} className="mr-2" />
               Create Item
@@ -198,7 +244,7 @@ function InventoryPageContent() {
           <div className="flex items-center gap-4">
             <Search size={20} className="text-muted-foreground" />
             <Input
-              placeholder="Search products..."
+              placeholder="Search by name, brand, model, price, barcode..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="flex-1"
@@ -465,6 +511,26 @@ function InventoryPageContent() {
       <CategoryManager
         open={isCategoryManagerOpen}
         onOpenChange={setIsCategoryManagerOpen}
+      />
+
+      {/* Stock In Modal */}
+      <StockInModal
+        open={isStockInOpen}
+        onOpenChange={setIsStockInOpen}
+        onSuccess={() => {
+          setIsStockInOpen(false)
+          fetchProducts()
+        }}
+      />
+
+      {/* Stock Count Modal */}
+      <StockCountModal
+        open={isStockCountOpen}
+        onOpenChange={setIsStockCountOpen}
+        onSuccess={() => {
+          setIsStockCountOpen(false)
+          fetchProducts()
+        }}
       />
     </div>
   )

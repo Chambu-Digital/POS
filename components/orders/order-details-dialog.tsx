@@ -16,7 +16,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { CheckCircle2, ChevronDown, Printer, Edit } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Printer, Edit, Package } from 'lucide-react'
+import { ReturnModal } from '@/components/sales/return-modal'
 
 interface OrderItem {
   productId: {
@@ -48,6 +49,8 @@ interface OrderDetailsDialogProps {
 
 export function OrderDetailsDialog({ open, onOpenChange, order }: OrderDetailsDialogProps) {
   const [showNoteInput, setShowNoteInput] = useState(false)
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false)
+  const [reloadTrigger, setReloadTrigger] = useState(0)
 
   if (!order) return null
 
@@ -88,9 +91,13 @@ export function OrderDetailsDialog({ open, onOpenChange, order }: OrderDetailsDi
         <div className="space-y-6">
           {/* Status Badge */}
           <div className="flex justify-center">
-            <Badge className="bg-green-100 text-green-700 hover:bg-green-100 px-4 py-2 text-base">
+            <Badge className={`px-4 py-2 text-base ${
+              (order as any).status === 'refunded'
+                ? 'bg-red-100 text-red-700 hover:bg-red-100'
+                : 'bg-green-100 text-green-700 hover:bg-green-100'
+            }`}>
               <CheckCircle2 className="h-4 w-4 mr-2" />
-              Completed
+              {(order as any).status === 'refunded' ? 'Refunded' : 'Completed'}
             </Badge>
           </div>
 
@@ -132,10 +139,20 @@ export function OrderDetailsDialog({ open, onOpenChange, order }: OrderDetailsDi
               <Printer className="h-4 w-4 mr-2" />
               Print Receipt
             </Button>
+            {(order as any).status !== 'refunded' && (
+              <Button
+                className="flex-1"
+                variant="outline"
+                onClick={() => setIsReturnModalOpen(true)}
+              >
+                <Package className="h-4 w-4 mr-2" />
+                Return Items
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="secondary" className="flex-1">
-                  More... <ChevronDown className="h-4 w-4 ml-2" />
+                <Button variant="secondary">
+                  <ChevronDown className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
@@ -291,6 +308,17 @@ export function OrderDetailsDialog({ open, onOpenChange, order }: OrderDetailsDi
             )}
           </div>
         </div>
+
+        {/* Return Modal */}
+        <ReturnModal
+          open={isReturnModalOpen}
+          onOpenChange={setIsReturnModalOpen}
+          sale={order as any}
+          onSuccess={() => {
+            setReloadTrigger(prev => prev + 1)
+            // Optionally close the details dialog or refresh
+          }}
+        />
       </DialogContent>
     </Dialog>
   )

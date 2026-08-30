@@ -10,6 +10,7 @@ import bcryptjs from 'bcryptjs'
 export const productSchema = new mongoose.Schema(
   {
     userId:       { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    supplierId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier' },
     category:     { type: String, required: true },
     productName:  { type: String, required: true },
     variant:      String,
@@ -429,13 +430,23 @@ export const stockLedgerSchema = new mongoose.Schema(
     staffId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
     type: {
       type: String,
-      enum: ['SALE', 'ADJUSTMENT', 'RETURN', 'IMPORT', 'MANUAL'],
+      enum: ['STOCK_IN', 'SALE', 'RETURN', 'DAMAGE', 'WASTAGE', 'EXPIRED', 'LOSS', 'ADJUSTMENT', 'IMPORT', 'MANUAL'],
       required: true,
     },
     quantity:        { type: Number, required: true },   // negative = stock out, positive = stock in
     previousStock:   { type: Number, required: true },
     newStock:        { type: Number, required: true },
+    
+    // Stock In specific fields
+    supplierId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier' },
+    supplierName:    { type: String, default: '' },      // denormalized for history
+    unitCost:        { type: Number },                   // cost per unit for this movement
+    totalCost:       { type: Number },                   // total value of this movement
+    reference:       { type: String, default: '' },      // invoice/PO number
+    
+    // General fields
     reason:          { type: String, default: '' },
+    notes:           { type: String, default: '' },
     orderNumber:     { type: String, default: '' },
     timestamp:       { type: Date, default: Date.now },
   },
@@ -443,7 +454,30 @@ export const stockLedgerSchema = new mongoose.Schema(
 )
 stockLedgerSchema.index({ userId: 1, productId: 1, timestamp: -1 })
 stockLedgerSchema.index({ userId: 1, saleId: 1 })
+stockLedgerSchema.index({ userId: 1, supplierId: 1, timestamp: -1 })
+stockLedgerSchema.index({ userId: 1, type: 1, timestamp: -1 })
 stockLedgerSchema.index({ userId: 1, timestamp: -1 })
+
+// ── Supplier ───────────────────────────────────────────────────────────────────
+// Manages supplier/vendor information for retail inventory.
+// Tracks who supplies products and purchase history.
+export const supplierSchema = new mongoose.Schema(
+  {
+    userId:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    name:          { type: String, required: true, trim: true },
+    contactPerson: { type: String, default: '', trim: true },
+    phone:         { type: String, default: '', trim: true },
+    email:         { type: String, default: '', trim: true },
+    address:       { type: String, default: '', trim: true },
+    notes:         { type: String, default: '' },
+    isActive:      { type: Boolean, default: true },
+    createdAt:     { type: Date, default: Date.now },
+    updatedAt:     { type: Date, default: Date.now },
+  },
+  { collection: 'suppliers' }
+)
+supplierSchema.index({ userId: 1, isActive: 1 })
+supplierSchema.index({ userId: 1, name: 1 })
 
 // ── DrugBatch ─────────────────────────────────────────────────────────────────
 // Tracks individual stock batches per drug for FEFO, expiry, and batch recall
