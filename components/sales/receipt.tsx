@@ -13,6 +13,18 @@ interface ReceiptItem {
   discount: number     // 0 for rentals
   total: number
   rateType?: string    // e.g. 'hourly', 'daily' — rentals only
+  // Return tracking
+  quantityReturned?: number
+  returnCondition?: 'resellable' | 'damaged'
+}
+
+interface ReturnEntry {
+  productName: string
+  quantity: number
+  price: number
+  condition: 'resellable' | 'damaged'
+  reason: string
+  returnedAt: string
 }
 
 interface ReceiptProps {
@@ -42,6 +54,11 @@ interface ReceiptProps {
   depositPaymentMethod?: string
   paperSize?: '58mm' | '80mm'
   onPrintComplete?: () => void
+  // Return tracking
+  returns?: ReturnEntry[]
+  totalReturned?: number
+  isPartiallyReturned?: boolean
+  isFullyReturned?: boolean
 }
 export interface ReceiptRef {
   print: () => void
@@ -72,6 +89,10 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
   depositPaymentMethod,
   paperSize = '58mm',
   onPrintComplete,
+  returns,
+  totalReturned,
+  isPartiallyReturned,
+  isFullyReturned,
 }, ref) => {
   const receiptRef = useRef<HTMLDivElement>(null)
 
@@ -130,6 +151,9 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
                 .payment-info { margin: 20px 0; padding: 10px; background-color: #f9f9f9; border: 1px solid #ddd; }
                 .payment-info div { margin: 3px 0; font-size: 11px; }
                 .pending-notice { margin: 15px 0; padding: 10px; background: #fff8e1; border: 1px solid #f0c040; border-radius: 4px; text-align: center; font-size: 11px; font-weight: bold; }
+                .return-notice { margin: 15px 0; padding: 10px; background: #fee; border: 1px solid #faa; border-radius: 4px; text-align: center; font-size: 11px; font-weight: bold; color: #c00; }
+                .returned-item { text-decoration: line-through; color: #999; }
+                .returned-badge { display: inline-block; background: #fee; color: #c00; padding: 2px 6px; border-radius: 3px; font-size: 9px; margin-left: 6px; font-weight: bold; }
                 .footer { margin-top: 30px; text-align: center; font-size: 11px; border-top: 1px solid #ddd; padding-top: 15px; }
                 .served-by { margin: 15px 0; text-align: center; font-size: 11px; font-style: italic; }
               </style>
@@ -202,32 +226,55 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
           </tr>
         </thead>
         <tbody>
-          {items.map((item, index) => (
-            <tr key={index}>
-              <td className="text-center">{item.quantity}</td>
-              <td>
-                {item.productName}
-                {(item.brand || item.model || item.variant) && (
-                  <div style={{ fontSize: '10px', color: '#666' }}>
-                    {[item.brand, item.model, item.variant].filter(Boolean).join(' - ')}
-                  </div>
-                )}
-              </td>
-              <td className="text-right">
-                {item.price.toFixed(2)}{isRental ? rateLabel(item.rateType) : ''}
-              </td>
-              {!isSlip && <td className="text-right">{item.total.toFixed(2)}</td>}
-            </tr>
-          ))}
+          {items.map((item, index) => {
+            const hasReturns = item.quantityReturned && item.quantityReturned > 0
+            const allReturned = item.quantityReturned === item.quantity
+            
+            return (
+              <tr key={index} className={allReturned ? 'returned-item' : ''}>
+                <td className="text-center">
+                  {item.quantity}
+                  {hasReturns && (
+                    <span className="returned-badge">
+                      -{item.quantityReturned} RTN
+                    </span>
+                  )}
+                </td>
+                <td>
+                  {item.productName}
+                  {(item.brand || item.model || item.variant) && (
+                    <div style={{ fontSize: '10px', color: '#666' }}>
+                      {[item.brand, item.model, item.variant].filter(Boolean).join(' - ')}
+                    </div>
+                  )}
+                  {hasReturns && (
+                    <div style={{ fontSize: '9px', color: '#c00', marginTop: '2px' }}>
+                      {item.returnCondition === 'damaged' ? '⚠ Damaged' : '✓ Restocked'}
+                    </div>
+                  )}
+                </td>
+                <td className="text-right">
+                  {item.price.toFixed(2)}{isRental ? rateLabel(item.rateType) : ''}
+                </td>
+                {!isSlip && <td className="text-right">{item.total.toFixed(2)}</td>}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
+
+      {/* Return notice */}
+      {(isPartiallyReturned || isFullyReturned) && (
+        <div className="return-notice">
+          {isFullyReturned ? 'FULLY REFUNDED' : 'PARTIALLY REFUNDED'}
+        </div>
+      )}
 
       <div style={{ textAlign: 'center', margin: '10px 0', fontSize: '11px' }}>
         <strong>{items.length} Item{items.length !== 1 ? 's' : ''}</strong>
       </div>
 
-      {/* T
-otals — only for non-slip */}
+      {/* Totals — only for non-slip */}
       {!isSlip && (
         <div className="totals">
           <div className="totals-row">
@@ -238,6 +285,12 @@ otals — only for non-slip */}
             <div className="totals-row">
               <div className="totals-label">Discount</div>
               <div className="totals-value">- {discount.toFixed(2)}</div>
+            </div>
+          )}
+          {totalReturned != null && totalReturned > 0 && (
+            <div className="totals-row">
+              <div className="totals-label">Amount Refunded</div>
+              <div className="totals-value" style={{ color: '#c00' }}>- {totalReturned.toFixed(2)}</div>
             </div>
           )}
           {deposit != null && deposit > 0 && (

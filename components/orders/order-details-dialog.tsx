@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import React, { useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -29,6 +29,21 @@ interface OrderItem {
   discount: number
 }
 
+interface ReturnItem {
+  productId?: string
+  productName: string
+  quantity: number
+  price: number
+  condition: 'resellable' | 'damaged'
+  reason: string
+  notes?: string
+  returnedBy?: {
+    _id: string
+    name: string
+  }
+  returnedAt: string
+}
+
 interface OrderDetailsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -44,13 +59,42 @@ interface OrderDetailsDialogProps {
     staffId?: {
       name: string
     }
+    status?: string
+    returns?: ReturnItem[]
+    totalReturned?: number
+    isPartiallyReturned?: boolean
+    isFullyReturned?: boolean
   } | null
 }
 
-export function OrderDetailsDialog({ open, onOpenChange, order }: OrderDetailsDialogProps) {
+export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: OrderDetailsDialogProps) {
   const [showNoteInput, setShowNoteInput] = useState(false)
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false)
-  const [reloadTrigger, setReloadTrigger] = useState(0)
+  const [order, setOrder] = useState(initialOrder)
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Sync order with prop changes
+  React.useEffect(() => {
+    setOrder(initialOrder)
+  }, [initialOrder])
+
+  // Refresh order data from API
+  async function refreshOrder() {
+    if (!order?._id) return
+    
+    setRefreshing(true)
+    try {
+      const response = await fetch(`/api/sales/${order._id}`)
+      if (response.ok) {
+        const data = await response.json()
+        setOrder(data)
+      }
+    } catch (error) {
+      console.error('Failed to refresh order:', error)
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   if (!order) return null
 
@@ -92,12 +136,18 @@ export function OrderDetailsDialog({ open, onOpenChange, order }: OrderDetailsDi
           {/* Status Badge */}
           <div className="flex justify-center">
             <Badge className={`px-4 py-2 text-base ${
-              (order as any).status === 'refunded'
+              order.status === 'refunded' || order.isFullyReturned
                 ? 'bg-red-100 text-red-700 hover:bg-red-100'
+                : order.status === 'partially_refunded' || order.isPartiallyReturned
+                ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-100'
                 : 'bg-green-100 text-green-700 hover:bg-green-100'
             }`}>
               <CheckCircle2 className="h-4 w-4 mr-2" />
-              {(order as any).status === 'refunded' ? 'Refunded' : 'Completed'}
+              {order.status === 'refunded' || order.isFullyReturned
+                ? 'Fully Refunded'
+                : order.status === 'partially_refunded' || order.isPartiallyReturned
+                ? 'Partially Refunded'
+                : 'Completed'}
             </Badge>
           </div>
 
@@ -139,7 +189,7 @@ export function OrderDetailsDialog({ open, onOpenChange, order }: OrderDetailsDi
               <Printer className="h-4 w-4 mr-2" />
               Print Receipt
             </Button>
-            {(order as any).status !== 'refunded' && (
+            {(order.status !== 'refunded' && !order.isFullyReturned) && (
               <Button
                 className="flex-1"
                 variant="outline"
@@ -164,6 +214,114 @@ export function OrderDetailsDialog({ open, onOpenChange, order }: OrderDetailsDi
           </div>
 
           <Separator />
+
+          {/* Returns Section */}
+          {order.returns && order.returns.length > 0 && (
+            <>
+              <div>
+                <h3 className="font-semibold text-lg mb-4 text-red-600">Returned Items</h3>
+                
+                {/* Desktop Table */}
+                <div className="hidden md:block border border-red-200 rounded-lg overflow-hidden bg-red-50/30">
+                  <table className="w-full">
+                    <thead className="bg-red-100/50">
+                      <tr>
+                        <th className="text-left p-3 font-medium">Item</th>
+                        <th className="text-right p-3 font-medium">Qty Returned</th>
+                        <th className="text-right p-3 font-medium">Value</th>
+                        <th className="text-left p-3 font-medium">Condition</th>
+                        <th className="text-left p-3 font-medium">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {order.returns.map((returnItem, index) => (
+                        <tr key={index} className="border-t border-red-200">
+                          <td className="p-3">
+                            <div>
+                              <p className="font-medium">{returnItem.productName}</p>
+                              {returnItem.reason && (
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Reason: {returnItem.reason}
+                                </p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3 text-right">{returnItem.quantity}</td>
+                          <td className="p-3 text-right">
+                            {formatCurrency(returnItem.price * returnItem.quantity)}
+                          </td>
+                          <td className="p-3">
+                            <Badge variant={returnItem.condition === 'resellable' ? 'default' : 'destructive'} className="text-xs">
+                              {returnItem.condition === 'resellable' ? '✓ Restocked' : '✗ Damaged'}
+                            </Badge>
+                          </td>
+                          <td className="p-3 text-sm">
+                            {new Date(returnItem.returnedAt).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card Layout */}
+                <div className="md:hidden space-y-3">
+                  {order.returns.map((returnItem, index) => (
+                    <div key={index} className="border border-red-200 rounded-lg p-4 space-y-2 bg-red-50/30">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <p className="font-semibold text-sm">{returnItem.productName}</p>
+                          {returnItem.reason && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Reason: {returnItem.reason}
+                            </p>
+                          )}
+                        </div>
+                        <Badge variant={returnItem.condition === 'resellable' ? 'default' : 'destructive'} className="text-xs">
+                          {returnItem.condition === 'resellable' ? 'Restocked' : 'Damaged'}
+                        </Badge>
+                      </div>
+                      
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                          <p className="text-muted-foreground">Qty</p>
+                          <p className="font-semibold">{returnItem.quantity}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Value</p>
+                          <p className="font-semibold">{formatCurrency(returnItem.price * returnItem.quantity)}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Date</p>
+                          <p className="font-semibold text-xs">
+                            {new Date(returnItem.returnedAt).toLocaleDateString('en-US', { month: 'short', day: '2-digit' })}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {order.totalReturned !== undefined && order.totalReturned > 0 && (
+                  <div className="mt-3 p-3 bg-red-100/50 border border-red-200 rounded-lg">
+                    <div className="flex justify-between items-center">
+                      <span className="font-semibold text-red-700">Total Refunded Value:</span>
+                      <span className="font-bold text-red-700 text-lg">
+                        {formatCurrency(order.totalReturned)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+            </>
+          )}
 
           {/* Product Order List */}
           <div>
@@ -315,8 +473,7 @@ export function OrderDetailsDialog({ open, onOpenChange, order }: OrderDetailsDi
           onOpenChange={setIsReturnModalOpen}
           sale={order as any}
           onSuccess={() => {
-            setReloadTrigger(prev => prev + 1)
-            // Optionally close the details dialog or refresh
+            refreshOrder()
           }}
         />
       </DialogContent>

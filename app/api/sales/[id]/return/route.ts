@@ -17,7 +17,7 @@ interface ReturnItem {
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const payload = await getAuthPayload()
@@ -27,12 +27,23 @@ export async function POST(
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
     const staffId = payload.type === 'staff' ? payload.userId : null
 
-    const body = await request.json()
-    const { items, reason, notes } = body as {
+    // Await params before accessing properties
+    const { id } = await params
+
+    // Parse request body with error handling
+    let body: {
       items: ReturnItem[]
       reason: string
       notes?: string
     }
+    
+    try {
+      body = await request.json()
+    } catch (parseError) {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+    }
+
+    const { items, reason, notes } = body
 
     // Validate
     if (!items || items.length === 0) {
@@ -44,7 +55,7 @@ export async function POST(
     }
 
     // Get sale
-    const saleId = new Types.ObjectId(params.id)
+    const saleId = new Types.ObjectId(id)
     const sale = await models.Sale.findOne({
       _id: saleId,
       userId: ownerId,
@@ -56,6 +67,7 @@ export async function POST(
 
     // Process returns
     const processedItems: any[] = []
+    const returnEntries: any[] = []
     
     for (const returnItem of items) {
       if (!returnItem.productId || returnItem.quantity <= 0) continue
@@ -112,6 +124,19 @@ export async function POST(
         timestamp: new Date(),
       })
 
+      // Build return entry for sale document
+      returnEntries.push({
+        productId: productObjId,
+        productName: returnItem.productName,
+        quantity: returnItem.quantity,
+        price: returnItem.price,
+        condition: returnItem.condition,
+        reason: reason.trim(),
+        notes: notes?.trim() || '',
+        returnedBy: staffId ? new Types.ObjectId(staffId) : null,
+        returnedAt: new Date(),
+      })
+
       processedItems.push({
         productName: returnItem.productName,
         quantity: returnItem.quantity,
@@ -120,11 +145,29 @@ export async function POST(
       })
     }
 
-    // Update sale status to refunded (or partially refunded if needed)
-    await models.Sale.findByIdAndUpdate(saleId, {
-      status: 'refunded',
-      updatedAt: new Date(),
-    })
+    // Calculate total returned value
+    const totalReturnedValue = returnEntries.reduce((sum, entry) => {
+      return sum + (entry.quantity * entry.price)
+    }, 0)
+
+    // Determine if this is a full or partial return
+    const totalOriginalQuantity = sale.items.reduce((sum: number, item: any) => sum + item.quantity, 0)
+    const totalReturnedQuantity = returnEntries.reduce((sum, entry) => sum + entry.quantity, 0)
+    const isFullyReturned = totalReturnedQuantity >= totalOriginalQuantity
+
+    // Append returns to sale and update status
+    const updateData: any = {
+      $push: { returns: { $each: returnEntries } },
+      $inc: { totalReturned: totalReturnedValue },
+      $set: {
+        isPartiallyReturned: !isFullyReturned,
+        isFullyReturned: isFullyReturned,
+        status: isFullyReturned ? 'refunded' : 'partially_refunded',
+        updatedAt: new Date(),
+      },
+    }
+
+    await models.Sale.findByIdAndUpdate(saleId, updateData)
 
     return NextResponse.json({
       success: true,
