@@ -149,7 +149,15 @@ async function generateInventoryReport(models: any, userId: string) {
 
   const totalProducts = products.length
   const totalStockValue = products.reduce(
-    (sum, p) => sum + (p.stock * (p.costPrice || 0)),
+    (sum, p) => sum + (p.stock * (p.sellingPrice || 0)),
+    0
+  )
+  const totalStockValueAtCost = products.reduce(
+    (sum, p) => sum + (p.stock * (p.buyingPrice || 0)),
+    0
+  )
+  const estimatedProfit = products.reduce(
+    (sum, p) => sum + (p.stock * ((p.sellingPrice || 0) - (p.buyingPrice || 0))),
     0
   )
   const lowStockItems = products.filter((p) => p.stock < (p.lowStockThreshold || 10)).length
@@ -159,10 +167,11 @@ async function generateInventoryReport(models: any, userId: string) {
   const byCategory = products.reduce((acc: any, product) => {
     const cat = product.category || 'Uncategorized'
     if (!acc[cat]) {
-      acc[cat] = { category: cat, count: 0, value: 0 }
+      acc[cat] = { category: cat, count: 0, value: 0, valueAtCost: 0 }
     }
     acc[cat].count += 1
-    acc[cat].value += product.stock * (product.costPrice || 0)
+    acc[cat].value += product.stock * (product.sellingPrice || 0)
+    acc[cat].valueAtCost += product.stock * (product.buyingPrice || 0)
     return acc
   }, {})
 
@@ -173,6 +182,8 @@ async function generateInventoryReport(models: any, userId: string) {
       summary: {
         totalProducts,
         totalStockValue,
+        totalStockValueAtCost,
+        estimatedProfit,
         lowStockItems,
         outOfStockItems,
       },
@@ -200,8 +211,8 @@ async function generateProfitReport(models: any, userId: string, startDate: Date
     totalRevenue += sale.total
     // Calculate cost based on items
     for (const item of sale.items) {
-      if (item.productId && item.productId.costPrice) {
-        totalCost += item.productId.costPrice * item.quantity
+      if (item.productId && item.productId.buyingPrice) {
+        totalCost += item.productId.buyingPrice * item.quantity
       }
     }
   }

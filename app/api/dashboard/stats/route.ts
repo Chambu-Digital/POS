@@ -149,6 +149,8 @@ export async function GET(request: NextRequest) {
           total: products.length,
           totalStock: products.reduce((s, p: any) => s + p.stock, 0),
           stockValue: products.reduce((s, p: any) => s + (p.stock * p.sellingPrice), 0),
+          stockValueAtCost: products.reduce((s, p: any) => s + (p.stock * (p.buyingPrice || 0)), 0),
+          estimatedProfit: products.reduce((s, p: any) => s + (p.stock * ((p.sellingPrice || 0) - (p.buyingPrice || 0))), 0),
           lowStockItems: products.filter((p: any) => p.stock < (p.lowStockThreshold || 10)).length,
           outOfStockItems: products.filter((p: any) => p.stock === 0).length,
         },

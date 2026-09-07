@@ -50,19 +50,29 @@ export default function ReportsPage() {
   )
 }
 
+interface ReportType {
+  value: string
+  label: string
+  description: string
+}
+
 function ReportsPageContent() {
   const [reports, setReports] = useState<Report[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [selectedReport, setSelectedReport] = useState<Report | null>(null)
+  const [availableReportTypes, setAvailableReportTypes] = useState<ReportType[]>([])
+  const [enabledFeatures, setEnabledFeatures] = useState<Record<string, boolean>>({})
 
   // Form state
-  const [reportType, setReportType] = useState('sales')
+  const [reportType, setReportType] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
 
   useEffect(() => {
     fetchReports()
+    fetchReportTypes()
+    fetchFeatures()
     // Set default dates (last 30 days to today)
     const end = new Date()
     const start = new Date()
@@ -70,6 +80,35 @@ function ReportsPageContent() {
     setEndDate(end.toISOString().split('T')[0])
     setStartDate(start.toISOString().split('T')[0])
   }, [])
+
+  async function fetchFeatures() {
+    try {
+      const response = await fetch('/api/tenant/config')
+      if (response.ok) {
+        const data = await response.json()
+        setEnabledFeatures(data.features || {})
+      }
+    } catch (error) {
+      console.error('Failed to fetch features:', error)
+    }
+  }
+
+  async function fetchReportTypes() {
+    try {
+      const response = await fetch('/api/reports/types')
+      if (response.ok) {
+        const data = await response.json()
+        setAvailableReportTypes(data.reportTypes || [])
+        // Set default report type to first available
+        if (data.reportTypes && data.reportTypes.length > 0) {
+          setReportType(data.reportTypes[0].value)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch report types:', error)
+      toast.error('Failed to load report types')
+    }
+  }
 
   async function fetchReports() {
     try {
@@ -233,15 +272,20 @@ function ReportsPageContent() {
               <Label>Report Type</Label>
               <Select value={reportType} onValueChange={setReportType}>
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue placeholder="Select report type" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="sales">Sales Report</SelectItem>
-                  <SelectItem value="inventory">Inventory Report</SelectItem>
-                  <SelectItem value="profit">Profit Report</SelectItem>
-                  <SelectItem value="kitchen">Kitchen Report</SelectItem>
-                  <SelectItem value="bar">Bar Report</SelectItem>
-                  <SelectItem value="rental">Rental Services Report</SelectItem>
+                  {availableReportTypes.length > 0 ? (
+                    availableReportTypes.map((type) => (
+                      <SelectItem key={type.value} value={type.value}>
+                        {type.label}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem value="sales" disabled>
+                      Loading...
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -266,7 +310,7 @@ function ReportsPageContent() {
 
             <Button
               onClick={generateReport}
-              disabled={generating}
+              disabled={generating || !reportType || availableReportTypes.length === 0}
               className="w-full"
             >
               {generating ? (
@@ -298,14 +342,23 @@ function ReportsPageContent() {
               <div className="space-y-6">
                 {/* Summary Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {Object.entries(selectedReport.data.summary).map(([key, value]) => {
+                  {Object.entries(selectedReport.data.summary)
+                    .filter(([key]) => {
+                      // Filter out module-specific revenue if module not enabled
+                      if (key === 'barRevenue' && !enabledFeatures['bar.tabs']) return false
+                      if (key === 'kdsRevenue' && !enabledFeatures['kds.chef']) return false
+                      if (key === 'rentalRevenue' && !enabledFeatures['rentals.bookings']) return false
+                      return true
+                    })
+                    .map(([key, value]) => {
                     const LABELS: Record<string, string> = {
                       totalSales: 'Total Orders', totalRevenue: 'Total Revenue', totalDiscount: 'Total Discounts',
                       averageSaleValue: 'Avg Order Value', posRevenue: 'POS Revenue', barRevenue: 'Bar Revenue',
                       kdsRevenue: 'Kitchen Revenue', rentalRevenue: 'Rental Revenue',
-                      totalProducts: 'Total Products', totalStockValue: 'Stock Value',
+                      totalProducts: 'Total Products', totalStockValue: 'Stock Value (Retail)',
+                      totalStockValueAtCost: 'Value At Cost', estimatedProfit: 'Estimated Profit',
                       lowStockItems: 'Low Stock Items', outOfStockItems: 'Out of Stock',
-                      totalCost: 'Total Cost', totalProfit: 'Net Profit', profitMargin: 'Profit Margin (%)',
+                      totalCost: 'Total Cost', totalProfit: 'Net Profit', profitMargin: 'Profit Margin',
                       totalOrders: 'Total Orders', completedOrders: 'Completed', pendingOrders: 'Pending',
                       tablesServed: 'Tables Served', avgPrepMins: 'Avg Prep (min)',
                       averageOrderValue: 'Avg Order Value',
@@ -313,9 +366,12 @@ function ReportsPageContent() {
                       cancelledBookings: 'Cancelled', totalDeposits: 'Total Deposits',
                     }
                     const label = LABELS[key] || key.replace(/([A-Z])/g, ' $1').trim()
-                    const isMonetary = ['revenue','profit','cost','value','discount','deposit'].some(k => key.toLowerCase().includes(k))
+                    const isMonetary = ['revenue','profit','cost','value','discount','deposit'].some(k => key.toLowerCase().includes(k)) && key !== 'profitMargin'
+                    const isPercentage = key === 'profitMargin'
                     const formatted = typeof value === 'number'
-                      ? isMonetary ? `KES ${(value as number).toLocaleString()}` : (value as number).toLocaleString()
+                      ? isMonetary ? `KES ${(value as number).toLocaleString()}` 
+                        : isPercentage ? `${(value as number).toFixed(2)}%`
+                        : (value as number).toLocaleString()
                       : String(value)
                     return (
                       <Card key={key}>
@@ -334,22 +390,24 @@ function ReportsPageContent() {
                     <p className="text-sm font-semibold text-gray-700 mb-2">Revenue by Source</p>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       {[
-                        { key: 'pos',    label: 'POS',     color: 'text-gray-800'   },
-                        { key: 'bar',    label: 'Bar',     color: 'text-green-700'  },
-                        { key: 'kds',    label: 'Kitchen', color: 'text-blue-700'   },
-                        { key: 'rental', label: 'Rentals', color: 'text-purple-700' },
-                      ].map(({ key, label, color }) => {
-                        const d = (selectedReport.data as any).sourceBreakdown[key]
-                        if (!d) return null
-                        return (
-                          <Card key={key}>
-                            <CardContent className="pt-4 pb-4">
-                              <p className={`text-lg font-bold ${color}`}>KES {d.revenue.toLocaleString()}</p>
-                              <p className="text-xs text-muted-foreground">{label} · {d.count} orders</p>
-                            </CardContent>
-                          </Card>
-                        )
-                      })}
+                        { key: 'pos',    label: 'POS',     color: 'text-gray-800',   feature: 'pos.sales' },
+                        { key: 'bar',    label: 'Bar',     color: 'text-green-700',  feature: 'bar.tabs' },
+                        { key: 'kds',    label: 'Kitchen', color: 'text-blue-700',   feature: 'kds.chef' },
+                        { key: 'rental', label: 'Rentals', color: 'text-purple-700', feature: 'rentals.bookings' },
+                      ]
+                        .filter(({ feature }) => enabledFeatures[feature])
+                        .map(({ key, label, color }) => {
+                          const d = (selectedReport.data as any).sourceBreakdown[key]
+                          if (!d) return null
+                          return (
+                            <Card key={key}>
+                              <CardContent className="pt-4 pb-4">
+                                <p className={`text-lg font-bold ${color}`}>KES {d.revenue.toLocaleString()}</p>
+                                <p className="text-xs text-muted-foreground">{label} · {d.count} orders</p>
+                              </CardContent>
+                            </Card>
+                          )
+                        })}
                     </div>
                   </div>
                 )}

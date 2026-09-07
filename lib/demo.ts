@@ -84,6 +84,8 @@ export function getDemoDashboardStats() {
       total: products.length,
       totalStock: products.reduce((s, p) => s + p.stock, 0),
       stockValue: products.reduce((s, p) => s + p.stock * p.sellingPrice, 0),
+      stockValueAtCost: products.reduce((s, p) => s + p.stock * p.buyingPrice, 0),
+      estimatedProfit: products.reduce((s, p) => s + p.stock * (p.sellingPrice - p.buyingPrice), 0),
       lowStockItems: products.filter(p => p.stock > 0 && p.stock < p.lowStockThreshold).length,
       outOfStockItems: products.filter(p => p.stock === 0).length,
     },

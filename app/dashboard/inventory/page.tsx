@@ -139,6 +139,8 @@ function InventoryPageContent() {
 
   const totalStock = products.reduce((sum, p) => sum + p.stock, 0)
   const stockValue = products.reduce((sum, p) => sum + (p.stock * p.sellingPrice), 0)
+  const stockValueAtCost = products.reduce((sum, p) => sum + (p.stock * p.buyingPrice), 0)
+  const estimatedProfit = products.reduce((sum, p) => sum + (p.stock * (p.sellingPrice - p.buyingPrice)), 0)
 
   return (
     <div className="space-y-8">
@@ -148,17 +150,19 @@ function InventoryPageContent() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-medium">Items</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{products.length}</div>
-            <p className="text-sm text-muted-foreground">Estimated Profit</p>
-            <p className="text-lg font-semibold text-primary mt-2">
-              KSh {(products.reduce((sum, p) => sum + (p.stock * (p.sellingPrice - p.buyingPrice)), 0)).toLocaleString()}
-            </p>
+          <CardContent className="space-y-4">
+            <div>
+              <div className="text-2xl font-bold">{products.length}</div>
+            </div>
+            <div>
+              <CardTitle className="text-sm font-medium">Estimated Profit</CardTitle>
+              <div className="text-2xl font-bold text-green-600 mt-2">KSh {estimatedProfit.toLocaleString()}</div>
+            </div>
           </CardContent>
         </Card>
 
@@ -166,77 +170,74 @@ function InventoryPageContent() {
           <CardHeader>
             <CardTitle className="text-sm font-medium">Total Stock</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalStock.toLocaleString()}</div>
-            <p className="text-sm text-muted-foreground">Stock Value</p>
-            <p className="text-lg font-semibold text-primary mt-2">
-              KSh {stockValue.toLocaleString()}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Actions</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Button
-              onClick={() => setIsStockInOpen(true)}
-              className="w-full"
-              size="sm"
-              variant="default"
-            >
-              <Plus size={16} className="mr-2" />
-              Stock In
-            </Button>
-            <Button
-              onClick={() => setIsStockCountOpen(true)}
-              className="w-full"
-              size="sm"
-              variant="outline"
-            >
-              <Plus size={16} className="mr-2" />
-              Stock Count
-            </Button>
-            <Button
-              onClick={() => setIsCreateOpen(true)}
-              className="w-full"
-              size="sm"
-              variant="outline"
-            >
-              <Plus size={16} className="mr-2" />
-              Create Item
-            </Button>
-            <Button
-              onClick={() => setIsImportOpen(true)}
-              variant="outline"
-              className="w-full"
-              size="sm"
-            >
-              <Upload size={16} className="mr-2" />
-              Import Items
-            </Button>
-            <Button
-              onClick={handleDownloadTemplate}
-              variant="outline"
-              className="w-full"
-              size="sm"
-            >
-              <Download size={16} className="mr-2" />
-              Download Template
-            </Button>
-            <Button
-              onClick={() => setIsCategoryManagerOpen(true)}
-              variant="outline"
-              className="w-full"
-              size="sm"
-            >
-              <FolderTree size={16} className="mr-2" />
-              Manage Categories
-            </Button>
+          <CardContent className="space-y-4">
+            <div>
+              <div className="text-2xl font-bold">{totalStock.toLocaleString()}</div>
+            </div>
+            <div>
+              <CardTitle className="text-sm font-medium">Stock Value At Cost</CardTitle>
+              <div className="text-2xl font-bold text-primary mt-2">KSh {stockValueAtCost.toLocaleString()}</div>
+            </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Actions Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">Quick Actions</CardTitle>
+        </CardHeader>
+        <CardContent className="flex gap-2 flex-wrap">
+          <Button
+            onClick={() => setIsStockInOpen(true)}
+            size="sm"
+            variant="default"
+          >
+            <Plus size={16} className="mr-2" />
+            Stock In
+          </Button>
+          <Button
+            onClick={() => setIsStockCountOpen(true)}
+            size="sm"
+            variant="outline"
+          >
+            <Plus size={16} className="mr-2" />
+            Stock Count
+          </Button>
+          <Button
+            onClick={() => setIsCreateOpen(true)}
+            size="sm"
+            variant="outline"
+          >
+            <Plus size={16} className="mr-2" />
+            Create Item
+          </Button>
+          <Button
+            onClick={() => setIsImportOpen(true)}
+            variant="outline"
+            size="sm"
+          >
+            <Upload size={16} className="mr-2" />
+            Import Items
+          </Button>
+          <Button
+            onClick={handleDownloadTemplate}
+            variant="outline"
+            size="sm"
+          >
+            <Download size={16} className="mr-2" />
+            Download Template
+          </Button>
+          <Button
+            onClick={() => setIsCategoryManagerOpen(true)}
+            variant="outline"
+            size="sm"
+          >
+            <FolderTree size={16} className="mr-2" />
+            Manage Categories
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* Search and Table */}
       <Card>
