@@ -8,12 +8,15 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { normaliseFeatures, normalisePermissions } from '@/lib/modules'
+import { apiGet, handleApiError } from '@/lib/api-client'
+import { LoadingOrOffline } from '@/components/offline-indicator'
 
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6']
 
 export default function DashboardPage() {
   const [stats, setStats]   = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [isOffline, setIsOffline] = useState(false)
   const [period, setPeriod]   = useState('30')
 
   // Access control
@@ -42,12 +45,18 @@ export default function DashboardPage() {
   useEffect(() => { fetchStats() }, [period])
 
   async function fetchStats() {
-    try {
-      setLoading(true)
-      const res = await fetch(`/api/dashboard/stats?days=${period}`)
-      if (res.ok) setStats((await res.json()).stats)
-    } catch { /* silent */ }
-    finally { setLoading(false) }
+    setLoading(true)
+    setIsOffline(false)
+    
+    const result = await apiGet<{ stats: any }>(`/api/dashboard/stats?days=${period}`)
+    
+    if (result.success && result.data) {
+      setStats(result.data.stats)
+    } else if (result.error) {
+      setIsOffline(result.error.isOffline)
+    }
+    
+    setLoading(false)
   }
 
   // Can this user see a given feature key?
@@ -61,11 +70,8 @@ export default function DashboardPage() {
   const showKds     = can('kds.orders') || can('kds.chef') || can('kds.waiter')
   const showRentals = can('rentals.bookings') || can('rentals.manage')
 
-  if (loading) return <div className="flex items-center justify-center h-screen"><div className="text-lg">Loading dashboard...</div></div>
-  if (!stats)  return <div className="flex items-center justify-center h-screen"><div className="text-lg text-muted-foreground">No data available</div></div>
-
-  // ── Staff view — minimal, no sensitive business data ──────────────────────
-  if (stats.isStaffView) {
+  // Staff view — minimal, no sensitive business data
+  if (!loading && !isOffline && stats?.isStaffView) {
     return (
       <div className="space-y-6">
         <div>
@@ -120,8 +126,21 @@ export default function DashboardPage() {
     )
   }
 
+  // Owner/Manager view with full stats
   return (
-    <div className="space-y-6">
+    <LoadingOrOffline
+      isLoading={loading}
+      isOffline={isOffline}
+      onRetry={fetchStats}
+      loadingText="Loading dashboard..."
+      offlineMessage="Unable to load dashboard data. Please check your connection."
+    >
+      {!stats ? (
+        <div className="flex items-center justify-center h-screen">
+          <div className="text-lg text-muted-foreground">No data available</div>
+        </div>
+      ) : (
+        <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -373,6 +392,8 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+    )}
+    </LoadingOrOffline>
   )
 }
 

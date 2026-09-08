@@ -10,6 +10,9 @@ import { Search, ChevronLeft, ChevronRight, UtensilsCrossed, ShoppingCart, Beer,
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { OrderDetailsDialog } from '@/components/orders/order-details-dialog'
+import { apiGet } from '@/lib/api-client'
+import { LoadingOrOffline } from '@/components/offline-indicator'
+import { handleApiError } from '@/lib/api-client'
 
 interface SaleItem {
   productId: {
@@ -164,6 +167,7 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'bar' | 'rental' }) {
   const [sales, setSales]           = useState<Sale[]>([])
   const [filteredSales, setFiltered] = useState<Sale[]>([])
   const [loading, setLoading]       = useState(true)
+  const [isOffline, setIsOffline]   = useState(false)
   const [search, setSearch]         = useState('')
   const [dateRange, setDateRange]   = useState({ start: '', end: '' })
   const [currentPage, setCurrentPage] = useState(1)
@@ -183,14 +187,19 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'bar' | 'rental' }) {
   }, [])
 
   async function fetchSales() {
-    try {
-      setLoading(true)
-      const res = await fetch('/api/sales')
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json()
-      setSales(data.sales || [])
-    } catch { toast.error('Failed to load orders') }
-    finally { setLoading(false) }
+    setLoading(true)
+    setIsOffline(false)
+    
+    const result = await apiGet<{ sales: Sale[] }>('/api/sales')
+    
+    if (result.success && result.data) {
+      setSales(result.data.sales || [])
+    } else if (result.error) {
+      setIsOffline(result.error.isOffline)
+      toast.error(handleApiError(result.error, 'Failed to load orders'))
+    }
+    
+    setLoading(false)
   }
 
   function applyFilters() {
@@ -314,21 +323,26 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'bar' | 'rental' }) {
       )}
 
       {/* ── Table — flat, no card wrapper ── */}
-      <div className="bg-white">
-        {/* Column headers */}
-        <div className="grid grid-cols-[36px_1fr_150px_130px_80px] border-b border-gray-200 px-3 py-2">
-          <span className="text-xs font-semibold text-gray-500">#</span>
-          <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">↕ Order</span>
-          <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">↕ Time</span>
-          <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">↕ Amount</span>
-          <span className="text-xs font-semibold text-gray-500">Mode</span>
-        </div>
+      <LoadingOrOffline
+        isLoading={loading}
+        isOffline={isOffline}
+        onRetry={fetchSales}
+        loadingText="Loading orders..."
+        offlineMessage="Unable to load orders. Please check your connection."
+      >
+        <div className="bg-white">
+          {/* Column headers */}
+          <div className="grid grid-cols-[36px_1fr_150px_130px_80px] border-b border-gray-200 px-3 py-2">
+            <span className="text-xs font-semibold text-gray-500">#</span>
+            <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">↕ Order</span>
+            <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">↕ Time</span>
+            <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">↕ Amount</span>
+            <span className="text-xs font-semibold text-gray-500">Mode</span>
+          </div>
 
-        {loading ? (
-          <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
-        ) : filteredSales.length === 0 ? (
-          <div className="py-16 text-center text-sm text-gray-400">No orders found</div>
-        ) : (
+          {filteredSales.length === 0 ? (
+            <div className="py-16 text-center text-sm text-gray-400">No orders found</div>
+          ) : (
           paginated.map((sale) => {
             const orderNum  = (sale as any).orderNumber || `ORD-${sale._id.slice(-5).toUpperCase()}`
             const staffName = (sale.staffId as any)?.firstName
@@ -374,7 +388,8 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'bar' | 'rental' }) {
             )
           })
         )}
-      </div>
+        </div>
+      </LoadingOrOffline>
 
       {/* ── Pagination ── */}
       <div className="flex items-center justify-end gap-1 pt-1">
@@ -414,6 +429,7 @@ function KitchenOrdersTab() {
   const [orders, setOrders]     = useState<KitchenOrder[]>([])
   const [filtered, setFiltered] = useState<KitchenOrder[]>([])
   const [loading, setLoading]   = useState(true)
+  const [isOffline, setIsOffline] = useState(false)
   const [search, setSearch]     = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [dateRange, setDateRange] = useState({ start: '', end: '' })
@@ -425,17 +441,21 @@ function KitchenOrdersTab() {
   useEffect(() => { applyFilters(); setCurrentPage(1) }, [search, statusFilter, dateRange, orders])
 
   async function fetchOrders() {
-    try {
-      setLoading(true)
-      const res = await fetch('/api/kds?status=all')
-      if (!res.ok) throw new Error('Failed')
-      const data = await res.json()
-      // Fetch all including collected — use a broader query
-      const res2 = await fetch('/api/kds/all')
-      const allData = res2.ok ? await res2.json() : data
-      setOrders(allData.orders || data.orders || [])
-    } catch { toast.error('Failed to load kitchen orders') }
-    finally { setLoading(false) }
+    setLoading(true)
+    setIsOffline(false)
+    
+    const result = await apiGet<{ orders: KitchenOrder[] }>('/api/kds?status=all')
+    
+    if (result.success && result.data) {
+      // Try to fetch all orders including collected
+      const result2 = await apiGet<{ orders: KitchenOrder[] }>('/api/kds/all')
+      setOrders(result2.success && result2.data ? result2.data.orders || [] : result.data.orders || [])
+    } else if (result.error) {
+      setIsOffline(result.error.isOffline)
+      toast.error(handleApiError(result.error, 'Failed to load kitchen orders'))
+    }
+    
+    setLoading(false)
   }
 
   function applyFilters() {
@@ -512,12 +532,18 @@ function KitchenOrdersTab() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {loading ? <div className="text-center py-8">Loading...</div>
-          : filtered.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No kitchen orders found
-            </div>
-          ) : (
+          <LoadingOrOffline
+            isLoading={loading}
+            isOffline={isOffline}
+            onRetry={fetchOrders}
+            loadingText="Loading kitchen orders..."
+            offlineMessage="Unable to load kitchen orders. Please check your connection."
+          >
+            {filtered.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                No kitchen orders found
+              </div>
+            ) : (
             <>
               <div className="space-y-3">
                 {paginated.map(order => (
@@ -580,7 +606,8 @@ function KitchenOrdersTab() {
                 </div>
               )}
             </>
-          )}
+            )}
+          </LoadingOrOffline>
         </CardContent>
       </Card>
     </div>

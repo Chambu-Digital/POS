@@ -20,10 +20,6 @@ import { BranchSelector } from '@/components/branch-selector'
 const STATIC_TOP = [
   { label: 'Dashboard', href: '/dashboard', adminOnly: false, permission: null },
 ]
-const STATIC_BOTTOM = [
-  { label: 'Staff',    href: '/dashboard/staff',    adminOnly: true,  permission: null },
-  { label: 'Settings', href: '/dashboard/settings', adminOnly: true,  permission: null },
-]
 
 const FEATURES_CACHE_KEY = 'sidebar_tenant_features'
 const LOGO_CACHE_KEY     = 'sidebar_logo'
@@ -181,6 +177,8 @@ export function Sidebar() {
     '/dashboard/retail/reports':   ['/dashboard/reports'],
     '/dashboard/retail/expenses':  ['/dashboard/expenses'],
     '/dashboard/retail/customers': ['/dashboard/customers'],
+    '/dashboard/customers':        ['/dashboard/retail/customers'],
+    '/dashboard/suppliers':        ['/dashboard/retail/suppliers'],
   }
 
   function isActive(href: string): boolean {
@@ -346,6 +344,8 @@ export function Sidebar() {
 
   // Renders a standard module (Retail, Rentals, Pharmacy)
   function renderModule(mod: typeof MODULES[number]) {
+    // Core module is rendered separately as flat items
+    if (mod.key === 'core') return null
     // Service is rendered separately with its sub-domain structure
     if (mod.key === 'service') return renderServiceModule()
 
@@ -384,6 +384,18 @@ export function Sidebar() {
         )}
       </div>
     )
+  }
+
+  // Renders core features as flat items (Customers, Suppliers, Staff, Settings)
+  function renderCoreFeatures() {
+    const coreModule = MODULES.find(m => m.key === 'core')
+    if (!coreModule) return null
+
+    const visibleFeatures = coreModule.features.filter(
+      f => features[f.key] === true && canSeeFeature(f)
+    )
+
+    return visibleFeatures.map(renderNavItem)
   }
 
   return (
@@ -432,11 +444,15 @@ export function Sidebar() {
               <>
                 {STATIC_TOP.filter(canSeeStatic).map(renderNavItem)}
 
+                {/* Business modules */}
                 <div className="space-y-1 py-1">
                   {MODULES.map(renderModule)}
                 </div>
 
-                {STATIC_BOTTOM.filter(canSeeStatic).map(renderNavItem)}
+                {/* Core features at bottom as flat items */}
+                <div className="pt-3 mt-3 border-t border-[hsl(var(--sidebar-foreground))]/10 space-y-0.5">
+                  {renderCoreFeatures()}
+                </div>
               </>
             )}
           </nav>

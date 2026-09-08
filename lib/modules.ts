@@ -26,6 +26,10 @@ import {
   UtensilsCrossed,
   BedDouble,
   Pill,
+  Users,
+  Truck,
+  UserCog,
+  Settings,
 } from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 
@@ -66,6 +70,50 @@ export interface ModuleDefinition {
    * The staff permissions modal uses this to label each module group.
    */
   icon?: React.ComponentType<LucideProps>
+}
+
+// ── 0. Core (Essential Resources) ──────────────────────────────────────────────
+// Core features are business-wide resources available to all modules.
+// Always enabled by default. Not module-specific.
+export const CORE_MODULE: ModuleDefinition = {
+  key: 'core',
+  label: 'Core',
+  description: 'Essential business resources',
+  defaultOn: true,
+  features: [
+    {
+      key: 'core.customers',
+      label: 'Customers',
+      description: 'Customer management and credit accounts',
+      href: '/dashboard/customers',
+      adminOnly: false,
+      defaultOn: true,
+    },
+    {
+      key: 'core.suppliers',
+      label: 'Suppliers',
+      description: 'Supplier management and purchase tracking',
+      href: '/dashboard/suppliers',
+      adminOnly: false,
+      defaultOn: true,
+    },
+    {
+      key: 'core.staff',
+      label: 'Staff',
+      description: 'Employee management and permissions',
+      href: '/dashboard/staff',
+      adminOnly: true,
+      defaultOn: true,
+    },
+    {
+      key: 'core.settings',
+      label: 'Settings',
+      description: 'Business settings and configuration',
+      href: '/dashboard/settings',
+      adminOnly: true,
+      defaultOn: true,
+    },
+  ],
 }
 
 // ── 1. Retail (was: POS) ───────────────────────────────────────────────────────
@@ -123,30 +171,6 @@ export const RETAIL_MODULE: ModuleDefinition = {
       description: 'Expense tracking and approval',
       href: '/dashboard/retail/expenses',
       adminOnly: false,
-      defaultOn: true,
-    },
-    {
-      key: 'pos.customers',
-      label: 'Customers',
-      description: 'Customer management and credit accounts',
-      href: '/dashboard/retail/customers',
-      adminOnly: false,
-      defaultOn: true,
-    },
-    {
-      key: 'pos.suppliers',
-      label: 'Suppliers',
-      description: 'Manage suppliers and track purchases',
-      href: '/dashboard/retail/suppliers',
-      adminOnly: true,
-      defaultOn: true,
-    },
-    {
-      key: 'pos.settings',
-      label: 'Settings',
-      description: 'Shop settings and configuration',
-      href: '/dashboard/settings',
-      adminOnly: true,
       defaultOn: true,
     },
   ],
@@ -255,15 +279,6 @@ export const SERVICE_MODULE: ModuleDefinition & { features: ServiceModuleFeature
       defaultOn: true,
       subDomain: 'bar',
     },
-    {
-      key: 'bar.customers',
-      label: 'Customers',
-      description: 'Manage bar customers and credit accounts',
-      href: '/dashboard/retail/customers',
-      adminOnly: false,
-      defaultOn: true,
-      subDomain: 'bar',
-    },
   ],
 }
 
@@ -352,6 +367,7 @@ export const PHARMACY_MODULE: ModuleDefinition = {
 // ── Master module list ─────────────────────────────────────────────────────────
 // Order determines sidebar rendering order.
 export const MODULES: ModuleDefinition[] = [
+  CORE_MODULE,
   RETAIL_MODULE,
   SERVICE_MODULE,
   RENTALS_MODULE,
@@ -388,6 +404,11 @@ export const LEGACY_KEY_MAP: Record<string, string> = {
   expenses:       'pos.expenses',
   // Old dotted artefacts from earlier migration scripts
   'kds.display':  'kds.chef',
+  // Core feature migrations (moved from pos.* to core.*)
+  'pos.customers': 'core.customers',
+  'pos.suppliers': 'core.suppliers',
+  'pos.settings':  'core.settings',
+  'bar.customers': 'core.customers',
 }
 
 /**
@@ -471,8 +492,8 @@ export const DEFAULT_STAFF_PERMISSIONS: Record<string, boolean> = {
   'pos.stock-movements': true,
   'pos.reports':      false,
   'pos.expenses':     false,
-  'pos.customers':    false,
-  'pos.suppliers':    false,
+  'core.customers':   false,
+  'core.suppliers':   false,
   'kds.orders':       true,
   'kds.chef':         true,
   'kds.waiter':       true,
@@ -483,7 +504,6 @@ export const DEFAULT_STAFF_PERMISSIONS: Record<string, boolean> = {
   'bar.inventory':    false,
   'bar.reports':      false,
   'bar.admin':        false,
-  'bar.customers':    false,
   'rentals.bookings': false,
   'rentals.manage':   false,
   'pharmacy.pos':          false,
@@ -501,8 +521,8 @@ export const DEFAULT_MANAGER_PERMISSIONS: Record<string, boolean> = {
   'pos.stock-movements': true,
   'pos.reports':      true,
   'pos.expenses':     true,
-  'pos.customers':    true,
-  'pos.suppliers':    true,
+  'core.customers':   true,
+  'core.suppliers':   true,
   'kds.orders':       true,
   'kds.chef':         true,
   'kds.waiter':       true,
@@ -513,7 +533,6 @@ export const DEFAULT_MANAGER_PERMISSIONS: Record<string, boolean> = {
   'bar.inventory':    false,
   'bar.reports':      false,
   'bar.admin':        false,
-  'bar.customers':    true,
   'rentals.bookings': false,
   'rentals.manage':   false,
   'pharmacy.pos':          false,
@@ -526,8 +545,21 @@ export const DEFAULT_MANAGER_PERMISSIONS: Record<string, boolean> = {
 /** Normalises a permissions object — only keys explicitly set to true are granted */
 export function normalisePermissions(raw: Record<string, boolean>): Record<string, boolean> {
   const out: Record<string, boolean> = {}
-  for (const f of ALL_FEATURES) {
-    out[f.key] = raw[f.key] === true
+  
+  // First, apply legacy key mapping for backward compatibility
+  const mapped: Record<string, boolean> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (k in LEGACY_KEY_MAP) {
+      mapped[LEGACY_KEY_MAP[k]] = v
+    } else {
+      mapped[k] = v
+    }
   }
+  
+  // Then, populate all known features
+  for (const f of ALL_FEATURES) {
+    out[f.key] = mapped[f.key] === true
+  }
+  
   return out
 }

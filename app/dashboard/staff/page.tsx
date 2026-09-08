@@ -15,6 +15,8 @@ import { toast } from 'sonner'
 import {
   MODULES, DEFAULT_STAFF_PERMISSIONS, DEFAULT_MANAGER_PERMISSIONS, normalisePermissions,
 } from '@/lib/modules'
+import { apiGet, apiPost, apiPut, apiDelete, handleApiError } from '@/lib/api-client'
+import { LoadingOrOffline } from '@/components/offline-indicator'
 
 interface Staff {
   _id: string
@@ -168,6 +170,7 @@ export default function StaffPage() {
   const [staff, setStaff]           = useState<Staff[]>([])
   const [owner, setOwner]           = useState<Staff | null>(null)
   const [loading, setLoading]       = useState(true)
+  const [isOffline, setIsOffline]   = useState(false)
   const [search, setSearch]         = useState('')
 
   // View modal
@@ -237,11 +240,18 @@ export default function StaffPage() {
 
   async function fetchStaff() {
     setLoading(true)
-    try {
-      const res = await fetch('/api/staff')
-      if (res.ok) { const d = await res.json(); setStaff(d.staff || []) }
-    } catch { toast.error('Failed to load staff') }
-    finally { setLoading(false) }
+    setIsOffline(false)
+    
+    const result = await apiGet<{ staff: Staff[] }>('/api/staff')
+    
+    if (result.success && result.data) {
+      setStaff(result.data.staff || [])
+    } else if (result.error) {
+      setIsOffline(result.error.isOffline)
+      toast.error(handleApiError(result.error, 'Failed to load staff'))
+    }
+    
+    setLoading(false)
   }
 
   function openView(s: Staff) {
@@ -287,13 +297,11 @@ export default function StaffPage() {
   async function patchStaff(id: string, data: Partial<Staff> & { password?: string }) {
     // Owner is updated via /api/auth/me PATCH
     if (owner && id === owner._id) {
-      const res = await fetch('/api/auth/me', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to update') }
-      const { user } = await res.json()
+      const result = await apiPut<{ user: any }>('/api/auth/me', data)
+      if (!result.success || !result.data) {
+        throw new Error(result.error?.message || 'Failed to update')
+      }
+      const user = result.data.user
       const updated: Staff = {
         ...owner,
         name: [user.firstName, user.middleName, user.lastName].filter(Boolean).join(' ') || user.shopName || user.email,
@@ -308,13 +316,11 @@ export default function StaffPage() {
       setViewStaff(v => v?._id === id ? updated : v)
       return updated
     }
-    const res = await fetch(`/api/staff/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Failed to update') }
-    const updated: Staff = await res.json()
+    const result = await apiPut<Staff>(`/api/staff/${id}`, data)
+    if (!result.success || !result.data) {
+      throw new Error(result.error?.message || 'Failed to update')
+    }
+    const updated = result.data
     setStaff(s => s.map(x => x._id === id ? updated : x))
     setViewStaff(v => v?._id === id ? updated : v)
     return updated
@@ -341,13 +347,11 @@ export default function StaffPage() {
         setViewStaff(updated)
         setViewOpen(true)
       } else {
-        const res = await fetch('/api/staff', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(form),
-        })
-        if (!res.ok) { const d = await res.json(); throw new Error(d.error) }
-        const created: Staff = await res.json()
+        const result = await apiPost<Staff>('/api/staff', form)
+        if (!result.success || !result.data) {
+          throw new Error(result.error?.message || 'Failed to create employee')
+        }
+        const created = result.data
         toast.success('Employee created')
         setFormOpen(false)
         setStaff(s => [created, ...s])
@@ -363,12 +367,14 @@ export default function StaffPage() {
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this employee?')) return
-    const res = await fetch(`/api/staff/${id}`, { method: 'DELETE' })
-    if (res.ok) {
+    const result = await apiDelete(`/api/staff/${id}`)
+    if (result.success) {
       setStaff(s => s.filter(x => x._id !== id))
       setViewOpen(false)
       toast.success('Deleted')
-    } else toast.error('Failed to delete')
+    } else {
+      toast.error(handleApiError(result.error, 'Failed to delete'))
+    }
   }
 
   async function saveRole() {
@@ -435,13 +441,18 @@ export default function StaffPage() {
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="py-16 text-center text-gray-400 text-sm">Loading…</div>
-        ) : filtered.length === 0 ? (
-          <div className="py-16 text-center text-gray-400 text-sm">
-            {search ? 'No employees match your search.' : 'No employees yet. Create your first one.'}
-          </div>
-        ) : (
+        <LoadingOrOffline
+          isLoading={loading}
+          isOffline={isOffline}
+          onRetry={fetchStaff}
+          loadingText="Loading staff..."
+          offlineMessage="Unable to load staff. Please check your connection."
+        >
+          {filtered.length === 0 ? (
+            <div className="py-16 text-center text-gray-400 text-sm">
+              {search ? 'No employees match your search.' : 'No employees yet. Create your first one.'}
+            </div>
+          ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/60">
@@ -501,7 +512,8 @@ export default function StaffPage() {
               ))}
             </tbody>
           </table>
-        )}
+          )}
+        </LoadingOrOffline>
       </div>
 
       {/* ── VIEW EMPLOYEE MODAL ─────────────────────────────────────────────── */}
@@ -625,7 +637,38 @@ export default function StaffPage() {
           <DialogTitle className="sr-only">Add / Revoke Permissions</DialogTitle>
           <h3 className="font-bold text-gray-900 mb-4">Add / Revoke Permissions</h3>
           <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-            {MODULES.map(mod => {
+            {/* Core Resources Section */}
+            {MODULES.filter(m => m.key === 'core').map(mod => {
+              const coreFeatures = mod.features.filter(f => !f.adminOnly)
+              if (coreFeatures.length === 0) return null
+              
+              return (
+                <div key={mod.key} className="border-2 border-blue-300 rounded-lg overflow-hidden bg-blue-50/30">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-blue-100 border-b border-blue-200">
+                    <span className="text-xs font-bold text-blue-800 uppercase tracking-wide">
+                      Core Resources
+                    </span>
+                    <span className="ml-auto text-[10px] px-2 py-0.5 bg-blue-200 text-blue-700 rounded font-semibold">
+                      ESSENTIAL
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 py-2.5">
+                    {coreFeatures.map(f => (
+                      <label key={f.key} className="flex items-center gap-2 cursor-pointer">
+                        <Checkbox
+                          checked={!!editPerms[f.key]}
+                          onCheckedChange={v => setEditPerms(p => ({ ...p, [f.key]: !!v }))}
+                        />
+                        <span className="text-xs text-gray-700">{f.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+
+            {/* Business Modules Section */}
+            {MODULES.filter(m => m.key !== 'core').map(mod => {
               const ModIcon = mod.icon
               return (
                 <div key={mod.key} className="border border-gray-200 rounded-lg overflow-hidden">

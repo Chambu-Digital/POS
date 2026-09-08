@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { apiGet, apiPost, apiPut, apiPatch, handleApiError } from '@/lib/api-client'
+import { LoadingOrOffline } from '@/components/offline-indicator'
 
 interface LedgerEntry {
   date: string
@@ -29,7 +31,7 @@ interface Customer {
 
 export default function CustomersPage() {
   return (
-    <PermissionGuard requiredPermission="pos.customers">
+    <PermissionGuard requiredPermission="core.customers">
       <CustomersContent />
     </PermissionGuard>
   )
@@ -38,6 +40,7 @@ export default function CustomersPage() {
 function CustomersContent() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
+  const [isOffline, setIsOffline] = useState(false)
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
 
@@ -69,10 +72,19 @@ function CustomersContent() {
 
   async function load() {
     setLoading(true)
-    try {
-      const res = await fetch(`/api/customers?search=${encodeURIComponent(search)}`)
-      if (res.ok) { const d = await res.json(); setCustomers(d.customers || []) }
-    } catch { toast.error('Failed to load customers') }
+    setIsOffline(false)
+    
+    const result = await apiGet<{ customers: Customer[] }>(`/api/customers?search=${encodeURIComponent(search)}`)
+    
+    if (result.success && result.data) {
+      setCustomers(result.data.customers || [])
+    } else if (result.error) {
+      setIsOffline(result.error.isOffline)
+      if (!result.error.isOffline) {
+        toast.error(handleApiError(result.error, 'Failed to load customers'))
+      }
+    }
+    
     setLoading(false)
   }
 
@@ -204,13 +216,18 @@ function CustomersContent() {
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        {loading ? (
-          <div className="py-16 text-center text-gray-400 text-sm">Loading...</div>
-        ) : customers.length === 0 ? (
-          <div className="py-16 text-center text-gray-400 text-sm">
-            {search ? 'No customers match your search.' : 'No customers yet. Add your first one.'}
-          </div>
-        ) : (
+        <LoadingOrOffline
+          isLoading={loading}
+          isOffline={isOffline}
+          onRetry={load}
+          loadingText="Loading customers..."
+          offlineMessage="Unable to load customers. Please check your connection."
+        >
+          {customers.length === 0 ? (
+            <div className="py-16 text-center text-gray-400 text-sm">
+              {search ? 'No customers match your search.' : 'No customers yet. Add your first one.'}
+            </div>
+          ) : (
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
@@ -324,7 +341,8 @@ function CustomersContent() {
               ))}
             </tbody>
           </table>
-        )}
+          )}
+        </LoadingOrOffline>
       </div>
 
       {/* Add Customer Dialog */}

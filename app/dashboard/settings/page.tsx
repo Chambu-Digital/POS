@@ -14,6 +14,8 @@ import {
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { resolveMediaUrl } from '@/lib/media-url'
+import { apiGet, apiPut, handleApiError } from '@/lib/api-client'
+import { LoadingOrOffline } from '@/components/offline-indicator'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface GeneralSettings {
@@ -97,6 +99,7 @@ function Section({ title, desc, children }: { title: string; desc?: string; chil
 // ── Main page ────────────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const [loading, setLoading]       = useState(true)
+  const [isOffline, setIsOffline]   = useState(false)
   const [saving, setSaving]         = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
@@ -189,21 +192,24 @@ export default function SettingsPage() {
 
   async function loadSettings() {
     setLoading(true)
-    try {
-      const res = await fetch('/api/settings')
-      if (!res.ok) throw new Error('Failed to load')
-      const { settings } = await res.json()
+    setIsOffline(false)
+    
+    const result = await apiGet<{ settings: any }>('/api/settings')
+    
+    if (result.success && result.data) {
+      const settings = result.data.settings
       if (settings?.general)       setGeneral(s => ({ ...s, ...settings.general }))
       if (settings?.features)      setFeatures(s => ({ ...s, ...settings.features }))
       if (settings?.notifications) setNotifications(s => ({ ...s, ...settings.notifications }))
       if (settings?.payment)       setPayment(s => ({ ...s, ...settings.payment }))
       if (settings?.receipt)       setReceipt(s => ({ ...s, ...settings.receipt }))
       setDirty(false)
-    } catch {
-      toast.error('Failed to load settings')
-    } finally {
-      setLoading(false)
+    } else if (result.error) {
+      setIsOffline(result.error.isOffline)
+      toast.error(handleApiError(result.error, 'Failed to load settings'))
     }
+    
+    setLoading(false)
   }
 
   async function saveSettings() {
@@ -242,16 +248,15 @@ export default function SettingsPage() {
     }
   }
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="flex items-center gap-2 text-gray-500">
-        <RefreshCw size={16} className="animate-spin" /> Loading settings…
-      </div>
-    </div>
-  )
-
   return (
-    <div className="-mx-6 -mt-6 min-h-screen bg-gray-50">
+    <LoadingOrOffline
+      isLoading={loading}
+      isOffline={isOffline}
+      onRetry={loadSettings}
+      loadingText="Loading settings..."
+      offlineMessage="Unable to load settings. Please check your connection."
+    >
+      <div className="-mx-6 -mt-6 min-h-screen bg-gray-50">
       {/* ── Page header ── */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div>
@@ -690,5 +695,6 @@ export default function SettingsPage() {
         </main>
       </div>
     </div>
+    </LoadingOrOffline>
   )
 }

@@ -322,6 +322,7 @@ export default function TenantForm({ initial, ownerEmail: initialOwnerEmail }: P
 
         <div className="space-y-3">
           {MODULES.map(mod => {
+            const isCore = mod.key === 'core'
             const modOn   = isModuleOn(mod.key, features)
             const isOpen  = expanded[mod.key] && modOn
             const ModIcon = mod.icon
@@ -334,7 +335,11 @@ export default function TenantForm({ initial, ownerEmail: initialOwnerEmail }: P
               <div
                 key={mod.key}
                 className={`rounded-xl border-2 transition-colors overflow-hidden ${
-                  modOn ? 'border-green-400 bg-green-50/40' : 'border-gray-200 bg-white'
+                  isCore 
+                    ? 'border-blue-400 bg-blue-50/40' 
+                    : modOn 
+                      ? 'border-green-400 bg-green-50/40' 
+                      : 'border-gray-200 bg-white'
                 }`}
               >
                 {/* Module header row */}
@@ -346,17 +351,25 @@ export default function TenantForm({ initial, ownerEmail: initialOwnerEmail }: P
                       className="sr-only peer"
                       checked={modOn}
                       onChange={e => toggleModule(mod.key, e.target.checked)}
+                      disabled={isCore}
                     />
-                    <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-green-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-500"></div>
+                    <div className={`w-9 h-5 ${isCore ? 'bg-blue-500' : 'bg-gray-200'} peer-focus:outline-none peer-focus:ring-2 ${isCore ? 'peer-focus:ring-blue-500' : 'peer-focus:ring-green-500'} rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all ${isCore ? 'peer-checked:bg-blue-500' : 'peer-checked:bg-green-500'}`}></div>
                   </label>
 
                   {/* Icon + name */}
                   <div className="flex items-center gap-2 flex-1 min-w-0">
-                    {ModIcon && <ModIcon size={16} className={modOn ? 'text-green-600' : 'text-gray-400'} />}
+                    {ModIcon && <ModIcon size={16} className={isCore ? 'text-blue-600' : modOn ? 'text-green-600' : 'text-gray-400'} />}
                     <div>
-                      <p className={`text-sm font-semibold ${modOn ? 'text-green-800' : 'text-gray-600'}`}>
-                        {mod.label}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className={`text-sm font-semibold ${isCore ? 'text-blue-800' : modOn ? 'text-green-800' : 'text-gray-600'}`}>
+                          {mod.label}
+                        </p>
+                        {isCore && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-700 border border-blue-200">
+                            ESSENTIAL
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-gray-400 leading-tight">{mod.description}</p>
                     </div>
                   </div>
@@ -375,7 +388,12 @@ export default function TenantForm({ initial, ownerEmail: initialOwnerEmail }: P
 
                 {/* Feature checkboxes — shown when module is on and expanded */}
                 {isOpen && (
-                  <div className="border-t border-green-100 px-4 pb-4 pt-3 bg-white/60">
+                  <div className={`border-t ${isCore ? 'border-blue-100' : 'border-green-100'} px-4 pb-4 pt-3 bg-white/60`}>
+                    {isCore && (
+                      <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                        ⚠️ <strong>Warning:</strong> Disabling core features may limit basic functionality across all modules.
+                      </div>
+                    )}
                     {mod.key === 'service' ? (
                       // Service: split into Kitchen and Bar sub-sections
                       <div className="grid md:grid-cols-2 gap-4">
