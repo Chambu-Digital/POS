@@ -9,6 +9,8 @@ import {
   branchSchema, inventorySchema, inventoryTransactionSchema,
   barBrandSchema, barInventoryItemSchema, barServingSchema, barBottleSchema,
   barTabSchema, barTabLineSchema, barAuditLogSchema, barBottleAuditSchema,
+  barStockMovementSchema, barReservationSchema,
+  purchaseOrderSchema, restockPlanSchema,
 } from '@/lib/models/schemas'
 
 export function getModels(conn: mongoose.Connection) {
@@ -40,7 +42,11 @@ export function getModels(conn: mongoose.Connection) {
     BarBottle:        conn.models.BarBottle        || conn.model('BarBottle',        barBottleSchema),
     BarTab:           conn.models.BarTab           || conn.model('BarTab',           barTabSchema),
     BarTabLine:       conn.models.BarTabLine       || conn.model('BarTabLine',       barTabLineSchema),
+    BarReservation:   conn.models.BarReservation   || conn.model('BarReservation',   barReservationSchema),
     BarAuditLog:      conn.models.BarAuditLog      || conn.model('BarAuditLog',      barAuditLogSchema),
     BarBottleAudit:   conn.models.BarBottleAudit   || conn.model('BarBottleAudit',   barBottleAuditSchema),
+    BarStockMovement: conn.models.BarStockMovement || conn.model('BarStockMovement', barStockMovementSchema),
+    PurchaseOrder:    conn.models.PurchaseOrder    || conn.model('PurchaseOrder',    purchaseOrderSchema),
+    RestockPlan:      conn.models.RestockPlan      || conn.model('RestockPlan',      restockPlanSchema),
   }
 }

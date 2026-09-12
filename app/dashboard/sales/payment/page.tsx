@@ -50,9 +50,6 @@ function PaymentPageContent() {
   // Source context — set by whichever POS page wrote pendingSale
   const [saleEndpoint, setSaleEndpoint] = useState('/api/sales')
   const [returnUrl,    setReturnUrl]    = useState('/dashboard/sales')
-  // Bar tab context — when set, payment closes the tab instead of creating a standalone sale
-  const [activeTabId,   setActiveTabId]   = useState<string | null>(null)
-  const [activeTabName, setActiveTabName] = useState<string | null>(null)
   const [selectedPayment, setSelectedPayment] = useState<string>('')
   const [paymentAmount, setPaymentAmount] = useState<string>('')
   const [mpesaCode, setMpesaCode] = useState<string>('')
@@ -88,9 +85,6 @@ function PaymentPageContent() {
         setCartDiscount(data.cartDiscount || 0)
         if (data.saleEndpoint) setSaleEndpoint(data.saleEndpoint)
         if (data.returnUrl)    setReturnUrl(data.returnUrl)
-        // Tab-specific fields — if present we close a tab instead of creating a new sale
-        if (data.activeTabId)   setActiveTabId(data.activeTabId)
-        if (data.activeTabName) setActiveTabName(data.activeTabName)
         const subtotal = (data.cart || []).reduce(
           (sum: number, item: CartItem) => sum + item.sellingPrice * item.quantity - item.discount, 0
         )
@@ -192,126 +186,27 @@ function PaymentPageContent() {
       }
 
       if (isOnline()) {
-        let result: any
+        // ── Standard sale ───────────────────────────────────────
+        const response = await fetch(saleEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(saleData),
+        })
 
-        if (activeTabId) {
-          // ── Tab checkout: save payment to tab then close it ──────────────
-          // 1. Import tab cache helpers dynamically (client-only)
-          const { markTabBilling, markTabPaid, getTab } = await import('@/lib/bar-tabs-cache')
-          const tab = getTab(activeTabId)
-          const serverId = tab?.serverId
-
-          if (serverId) {
-            // ── Step 1: Push current cart lines to the server tab ──────────
-            // The tab's lines only existed in localStorage. Sync them now so
-            // the server has accurate items before close creates the Sale record.
-            // We clear existing server lines by sending all current cart items.
-            // Each line is sent individually; errors are non-fatal — the sale
-            // proceeds and pos-sale is used as fallback if lines fail to push.
-            let linesSynced = true
-            for (const item of cart) {
-              try {
-                const rawId     = (item.productId || '').trim()
-                const isServing = rawId.includes('__')
-                const invItemId = isServing ? rawId.split('__')[0] : rawId
-                const servingName = isServing ? rawId.split('__').slice(1).join('__') : ''
-
-                const lineRes = await fetch(`/api/bar/tabs/${serverId}/lines`, {
-                  method:  'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    inventoryItemId: invItemId,
-                    servingId:       null,   // servingId not stored in cart; name used for display
-                    quantity:        item.quantity,
-                    unitPrice:       item.sellingPrice,
-                    itemName:        item.productName,
-                    servingName:     servingName || '',
-                    discount:        item.discount,
-                  }),
-                })
-                if (!lineRes.ok) { linesSynced = false }
-              } catch { linesSynced = false }
-            }
-
-            // If lines failed to sync, fall back to pos-sale which handles
-            // everything independently without requiring a server tab.
-            if (!linesSynced) {
-              console.warn('[payment] Tab lines sync failed, falling back to pos-sale')
-              const fallback = await fetch(saleEndpoint, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(saleData),
-              })
-              if (!fallback.ok) { const e = await fallback.json(); throw new Error(e.error) }
-              result = await fallback.json()
-              markTabPaid(activeTabId)
-              // Skip the tab close flow
-            } else {
-              // ── Step 2: Move tab to billing ────────────────────────────────
-              await fetch(`/api/bar/tabs/${serverId}`, {
-                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: 'billing' }),
-              })
-              // ── Step 3: Record payment ─────────────────────────────────────
-              await fetch(`/api/bar/tabs/${serverId}/payments`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  amount:     parseFloat(paymentAmount),
-                  method:     selectedPayment,
-                  mpesaCode:  selectedPayment === 'mobile_money' ? mpesaCode  : undefined,
-                  mpesaPhone: selectedPayment === 'mobile_money' ? mpesaPhone : undefined,
-                }),
-              })
-              // ── Step 4: Close tab — server creates the Sale record ─────────
-              const closeRes = await fetch(`/api/bar/tabs/${serverId}/close`, { method: 'POST' })
-              if (!closeRes.ok) {
-                const err = await closeRes.json()
-                throw new Error(err.error || 'Failed to close tab')
-              }
-              result = await closeRes.json()
-              markTabPaid(activeTabId)
-            }
-          } else {
-            // ── Tab has no serverId (created offline, not yet synced) ──────────
-            // Store pending payment in localStorage and fall through to pos-sale.
-            markTabBilling(activeTabId, {
-              paymentMethod: selectedPayment,
-              amountPaid:    parseFloat(paymentAmount),
-              mpesaCode:     selectedPayment === 'mobile_money' ? mpesaCode  : undefined,
-              mpesaPhone:    selectedPayment === 'mobile_money' ? mpesaPhone : undefined,
-              customerId:    selectedCustomer?._id,
-              customerName:  selectedCustomer?.name,
+        if (!response.ok) {
+          const err = await response.json()
+          // Handle ID requirement error for credit sales
+          if (err.requiresId) {
+            setIdRequiredError({
+              customerId: err.customerId,
+              customerName: err.customerName,
             })
-            const fallback = await fetch(saleEndpoint, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(saleData),
-            })
-            if (!fallback.ok) { const e = await fallback.json(); throw new Error(e.error) }
-            result = await fallback.json()
-            markTabPaid(activeTabId)
+            throw new Error('ID required for credit')
           }
-        } else {
-          // ── Standard sale (no tab) ───────────────────────────────────────
-          const response = await fetch(saleEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(saleData),
-          })
-
-          if (!response.ok) {
-            const err = await response.json()
-            // Handle ID requirement error for credit sales
-            if (err.requiresId) {
-              setIdRequiredError({
-                customerId: err.customerId,
-                customerName: err.customerName,
-              })
-              throw new Error('ID required for credit')
-            }
-            throw new Error(err.error || 'Failed to complete sale')
-          }
-
-          result = await response.json()
+          throw new Error(err.error || 'Failed to complete sale')
         }
+
+        const result = await response.json()
 
         const orderNumber = result.sale?.orderNumber || result.tab?.tabNumber || `ORD-${String(result.sale?._id ?? '').slice(-5).toUpperCase()}`
 
@@ -429,7 +324,7 @@ function PaymentPageContent() {
       <Card>
         <CardContent className="p-6">
           <h1 className="text-2xl font-bold text-center mb-6">
-            {activeTabName ? `Close Tab — ${activeTabName}` : 'Select Payment Method'}
+            Select Payment Method
           </h1>
 
           <div className="flex justify-between items-center mb-4">
@@ -697,7 +592,7 @@ function PaymentPageContent() {
               <Label className="text-sm font-medium mb-2 block">
                 {selectedPayment === 'cash' ? 'Cash Received' : selectedPayment === 'credit' ? 'Amount Paid Now (0 if full credit)' : 'Amount'}
               </Label>
-              <Input type="number" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} placeholder="Enter amount" step="0.01" />
+              <Input type="number" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} placeholder="Enter amount" step="0.01" onFocus={(e) => e.target.select()} />
               {selectedPayment === 'cash' && parseFloat(paymentAmount) > 0 && (
                 <div className={`mt-2 flex justify-between px-3 py-2 rounded-lg text-sm font-semibold ${change >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
                   <span>Change</span>

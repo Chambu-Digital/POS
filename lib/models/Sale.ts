@@ -59,7 +59,7 @@ const saleSchema = new mongoose.Schema(
     notes: String,
     source: {
       type: String,
-      enum: ['pos', 'bar', 'kds', 'rental'],
+      enum: ['pos', 'rental'],
       default: 'pos',
     },
     // Extra metadata for rental orders

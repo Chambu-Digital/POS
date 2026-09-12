@@ -6,24 +6,18 @@
 //
 // Phase 1 reorganisation
 // ──────────────────────
-// User-facing modules are now: Retail, Service, Rentals, Pharmacy.
-// "Service" consolidates KDS (Kitchen) and Bar into one workspace.
+// User-facing modules are now: Retail, Rentals, Pharmacy.
 //
-// Internal feature/permission keys are UNCHANGED:
+// Internal feature/permission keys:
 //   pos.*        — Retail features
-//   kds.*        — Service → Kitchen features
-//   bar.*        — Service → Bar features
 //   rentals.*    — Rentals features
 //   pharmacy.*   — Pharmacy features
 //
 // All stored tenant feature documents and staff permission records continue to
 // work without any database migration — the key strings are preserved verbatim.
-//
-// The only change visible to the user is the navigation grouping and labels.
 
 import {
   ShoppingCart,
-  UtensilsCrossed,
   BedDouble,
   Pill,
   Users,
@@ -47,17 +41,8 @@ export interface ModuleFeature {
   defaultOn: boolean
 }
 
-// ── Service sub-domain marker ──────────────────────────────────────────────────
-// Features inside the Service module carry a subDomain so the sidebar can
-// render separate Kitchen and Bar sections within the single Service group.
-export type ServiceSubDomain = 'kitchen' | 'bar'
-
-export interface ServiceModuleFeature extends ModuleFeature {
-  subDomain: ServiceSubDomain
-}
-
 export interface ModuleDefinition {
-  /** Top-level module key, e.g. 'retail', 'service', 'rentals', 'pharmacy' */
+  /** Top-level module key, e.g. 'retail', 'rentals', 'pharmacy' */
   key: string
   /** User-facing label shown in the sidebar and admin panel */
   label: string
@@ -94,6 +79,14 @@ export const CORE_MODULE: ModuleDefinition = {
       label: 'Suppliers',
       description: 'Supplier management and purchase tracking',
       href: '/dashboard/suppliers',
+      adminOnly: false,
+      defaultOn: true,
+    },
+    {
+      key: 'core.restocking',
+      label: 'Restocking',
+      description: 'Purchase order generation and intelligent restocking analysis',
+      href: '/dashboard/restocking',
       adminOnly: false,
       defaultOn: true,
     },
@@ -176,113 +169,7 @@ export const RETAIL_MODULE: ModuleDefinition = {
   ],
 }
 
-// ── 2. Service (consolidates KDS + Bar) ───────────────────────────────────────
-// Internal keys remain kds.* and bar.* — no stored data changes required.
-// Features carry a `subDomain` property used by the sidebar to render
-// nested "Kitchen" and "Bar" sections within the Service group.
-export const SERVICE_MODULE: ModuleDefinition & { features: ServiceModuleFeature[] } = {
-  key: 'service',
-  label: 'Service',
-  description: 'Kitchen display and bar tab management',
-  defaultOn: true,
-  icon: UtensilsCrossed,
-  features: [
-    // ── Kitchen sub-domain ──────────────────────────────────────────────────
-    {
-      key: 'kds.menu',
-      label: 'Menu Management',
-      description: 'Manage restaurant menu items',
-      href: '/dashboard/service/kitchen/menu',
-      adminOnly: true,
-      defaultOn: true,
-      subDomain: 'kitchen',
-    },
-    {
-      key: 'kds.inventory',
-      label: 'Kitchen Inventory',
-      description: 'Track restaurant stock and supplies',
-      href: '/dashboard/service/kitchen/inventory',
-      adminOnly: true,
-      defaultOn: true,
-      subDomain: 'kitchen',
-    },
-    {
-      key: 'kds.orders',
-      label: 'Create Order',
-      description: 'Waiter creates new kitchen orders',
-      href: '/dashboard/service/kitchen/orders',
-      adminOnly: false,
-      defaultOn: true,
-      subDomain: 'kitchen',
-    },
-    {
-      key: 'kds.chef',
-      label: 'Chef View',
-      description: 'Kitchen display for chefs',
-      href: '/dashboard/service/kitchen/chef',
-      adminOnly: false,
-      defaultOn: true,
-      subDomain: 'kitchen',
-    },
-    {
-      key: 'kds.waiter',
-      label: 'Waiter View',
-      description: 'Order pickup and serving',
-      href: '/dashboard/service/kitchen/waiter',
-      adminOnly: false,
-      defaultOn: true,
-      subDomain: 'kitchen',
-    },
-    {
-      key: 'kds.history',
-      label: 'Kitchen History',
-      description: 'View all kitchen orders',
-      href: '/dashboard/service/kitchen/history',
-      adminOnly: false,
-      defaultOn: true,
-      subDomain: 'kitchen',
-    },
-    // ── Bar sub-domain ──────────────────────────────────────────────────────
-    {
-      key: 'bar.tabs',
-      label: 'POS',
-      description: 'Bar point of sale — sell drinks and servings',
-      href: '/dashboard/bar/pos',
-      adminOnly: false,
-      defaultOn: true,
-      subDomain: 'bar',
-    },
-    {
-      key: 'bar.inventory',
-      label: 'Inventory',
-      description: 'Manage bar inventory and stock',
-      href: '/dashboard/service/bar/inventory',
-      adminOnly: true,
-      defaultOn: true,
-      subDomain: 'bar',
-    },
-    {
-      key: 'bar.reports',
-      label: 'Reports',
-      description: 'View bar sales and performance reports',
-      href: '/dashboard/service/bar/reports',
-      adminOnly: true,
-      defaultOn: true,
-      subDomain: 'bar',
-    },
-    {
-      key: 'bar.admin',
-      label: 'Administration',
-      description: 'Manage brands and bar settings',
-      href: '/dashboard/service/bar/brands',
-      adminOnly: true,
-      defaultOn: true,
-      subDomain: 'bar',
-    },
-  ],
-}
-
-// ── 3. Rentals ─────────────────────────────────────────────────────────────────
+// ── 2. Rentals ─────────────────────────────────────────────────────────────────
 export const RENTALS_MODULE: ModuleDefinition = {
   key: 'rentals',
   label: 'Rentals',
@@ -369,7 +256,6 @@ export const PHARMACY_MODULE: ModuleDefinition = {
 export const MODULES: ModuleDefinition[] = [
   CORE_MODULE,
   RETAIL_MODULE,
-  SERVICE_MODULE,
   RENTALS_MODULE,
   PHARMACY_MODULE,
 ]
@@ -379,7 +265,7 @@ export const MODULES: ModuleDefinition[] = [
 /** Flat list of all features across all modules */
 export const ALL_FEATURES: ModuleFeature[] = MODULES.flatMap(m => m.features)
 
-/** Default feature flags for new tenants: { 'pos.sales': true, 'bar.tabs': true, ... } */
+/** Default feature flags for new tenants: { 'pos.sales': true, ... } */
 export const DEFAULT_MODULE_FEATURES: Record<string, boolean> = Object.fromEntries(
   ALL_FEATURES.map(f => [f.key, f.defaultOn])
 )
@@ -388,27 +274,18 @@ export const DEFAULT_MODULE_FEATURES: Record<string, boolean> = Object.fromEntri
 // Tenant feature documents and staff permission records may contain old flat keys
 // (pre-dotted) or the previous dotted keys under the old module structure.
 // This map ensures stored values continue to resolve correctly.
-//
-// IMPORTANT: The internal kds.* and bar.* keys have NOT changed — only the
-// user-facing module grouping changed from "KDS"/"Bar" to "Service → Kitchen"
-// /"Service → Bar". No new legacy entries are needed for this reorganisation.
 export const LEGACY_KEY_MAP: Record<string, string> = {
   // Pre-dotted flat keys (original migration)
   pos:            'pos.sales',
-  kitchenDisplay: 'kds.chef',
-  bar:            'bar.tabs',
   rentals:        'rentals.bookings',
   orders:         'pos.orders',
   inventory:      'pos.inventory',
   reports:        'pos.reports',
   expenses:       'pos.expenses',
-  // Old dotted artefacts from earlier migration scripts
-  'kds.display':  'kds.chef',
   // Core feature migrations (moved from pos.* to core.*)
   'pos.customers': 'core.customers',
   'pos.suppliers': 'core.suppliers',
   'pos.settings':  'core.settings',
-  'bar.customers': 'core.customers',
 }
 
 /**
@@ -424,24 +301,16 @@ export function normaliseFeatures(raw: Record<string, boolean>): Record<string, 
       out[k] = v
     }
   }
-  // Backward compat: existing tenants with bar enabled retain all bar sub-features.
-  if (raw['bar'] === true || raw['bar.tabs'] === true) {
-    out['bar.tabs']      = true
-    out['bar.inventory'] = true
-    out['bar.reports']   = true
-    out['bar.admin']     = true
-  }
   return out
 }
 
 /**
  * Given a set of selected module keys, returns a full feature flags record.
- * Accepts both old top-level keys ('pos', 'kds') and new ones ('retail', 'service').
+ * Accepts both old top-level keys ('pos') and new ones ('retail').
  */
 export function modulesToFeatures(selectedModuleKeys: string[]): Record<string, boolean> {
   const normalised = selectedModuleKeys.map(k => {
     if (k === 'pos') return 'retail'
-    if (k === 'kds') return 'service'
     return k
   })
   const out: Record<string, boolean> = {}
@@ -457,7 +326,7 @@ export function modulesToFeatures(selectedModuleKeys: string[]): Record<string, 
 /**
  * Given a feature flags record, returns the set of new module keys that are
  * enabled (at least one feature in the module is true).
- * Returns 'retail', 'service', 'rentals', 'pharmacy'.
+ * Returns 'retail', 'rentals', 'pharmacy'.
  */
 export function featuresToModuleKeys(features: Record<string, boolean>): string[] {
   return MODULES
@@ -465,24 +334,7 @@ export function featuresToModuleKeys(features: Record<string, boolean>): string[
     .map(mod => mod.key)
 }
 
-// ── Service sub-domain helpers ─────────────────────────────────────────────────
-
-/** Returns only the Kitchen features from the Service module. */
-export function getKitchenFeatures(): ServiceModuleFeature[] {
-  return (SERVICE_MODULE.features as ServiceModuleFeature[]).filter(
-    f => f.subDomain === 'kitchen'
-  )
-}
-
-/** Returns only the Bar features from the Service module. */
-export function getBarFeatures(): ServiceModuleFeature[] {
-  return (SERVICE_MODULE.features as ServiceModuleFeature[]).filter(
-    f => f.subDomain === 'bar'
-  )
-}
-
 // ── Staff permission defaults ──────────────────────────────────────────────────
-// Internal keys are unchanged — these match existing stored staff records.
 
 /** Default permissions for a new cashier/employee */
 export const DEFAULT_STAFF_PERMISSIONS: Record<string, boolean> = {
@@ -494,16 +346,7 @@ export const DEFAULT_STAFF_PERMISSIONS: Record<string, boolean> = {
   'pos.expenses':     false,
   'core.customers':   false,
   'core.suppliers':   false,
-  'kds.orders':       true,
-  'kds.chef':         true,
-  'kds.waiter':       true,
-  'kds.history':      true,
-  'kds.menu':         false,
-  'kds.inventory':    false,
-  'bar.tabs':         true,
-  'bar.inventory':    false,
-  'bar.reports':      false,
-  'bar.admin':        false,
+  'core.restocking':  false,
   'rentals.bookings': false,
   'rentals.manage':   false,
   'pharmacy.pos':          false,
@@ -523,16 +366,7 @@ export const DEFAULT_MANAGER_PERMISSIONS: Record<string, boolean> = {
   'pos.expenses':     true,
   'core.customers':   true,
   'core.suppliers':   true,
-  'kds.orders':       true,
-  'kds.chef':         true,
-  'kds.waiter':       true,
-  'kds.history':      true,
-  'kds.menu':         false,
-  'kds.inventory':    false,
-  'bar.tabs':         false,
-  'bar.inventory':    false,
-  'bar.reports':      false,
-  'bar.admin':        false,
+  'core.restocking':  true,
   'rentals.bookings': false,
   'rentals.manage':   false,
   'pharmacy.pos':          false,

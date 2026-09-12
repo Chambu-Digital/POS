@@ -4,7 +4,6 @@ import {
   updateSyncTime,
   isOnline,
 } from './indexeddb'
-import { syncBarTabs } from './bar-tabs-cache'
 
 export async function syncPendingSales() {
   if (!isOnline()) {
@@ -39,9 +38,6 @@ export async function syncPendingSales() {
       }
       await updateSyncTime()
     }
-
-    // Also sync any unsynced bar tabs
-    await syncBarTabs()
 
     console.log('[sync] Sync completed')
     return true

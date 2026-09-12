@@ -436,8 +436,9 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             id="stock"
             name="stock"
             type="number"
-            value={formData.stock}
+            value={formData.stock || ''}
             onChange={handleChange}
+            onFocus={(e) => e.target.select()}
             required
             disabled={loading}
           />
@@ -449,8 +450,9 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             id="lowStockThreshold"
             name="lowStockThreshold"
             type="number"
-            value={(formData as any).lowStockThreshold ?? 10}
+            value={(formData as any).lowStockThreshold ?? ''}
             onChange={handleChange}
+            onFocus={(e) => e.target.select()}
             disabled={loading}
             placeholder="e.g. 10"
           />
@@ -464,8 +466,9 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             name="buyingPrice"
             type="number"
             step="0.01"
-            value={formData.buyingPrice}
+            value={formData.buyingPrice || ''}
             onChange={handleChange}
+            onFocus={(e) => e.target.select()}
             required
             disabled={loading}
           />
@@ -478,8 +481,9 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             name="sellingPrice"
             type="number"
             step="0.01"
-            value={formData.sellingPrice}
+            value={formData.sellingPrice || ''}
             onChange={handleChange}
+            onFocus={(e) => e.target.select()}
             required
             disabled={loading}
           />
@@ -492,8 +496,9 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             name="wholeSale"
             type="number"
             step="0.01"
-            value={formData.wholeSale}
+            value={formData.wholeSale || ''}
             onChange={handleChange}
+            onFocus={(e) => e.target.select()}
             disabled={loading}
           />
         </div>

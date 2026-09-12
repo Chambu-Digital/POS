@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Search, ChevronLeft, ChevronRight, UtensilsCrossed, ShoppingCart, Beer, BedDouble, Download } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, ShoppingCart, BedDouble, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { OrderDetailsDialog } from '@/components/orders/order-details-dialog'
@@ -32,7 +32,7 @@ interface Sale {
   discount: number
   paymentMethod: string
   status?: 'completed' | 'pending' | 'held' | 'refunded'
-  source?: 'pos' | 'bar' | 'kds' | 'rental'
+  source?: 'pos' | 'rental'
   createdAt: string
   notes?: string
   staffId?: {
@@ -49,29 +49,6 @@ interface Sale {
     customerName?: string
     customerPhone?: string
   }
-}
-
-interface KitchenOrderItem {
-  itemId: string
-  name: string
-  quantity: number
-  notes?: string
-  category: string
-}
-
-interface KitchenOrder {
-  _id: string
-  orderNumber: string
-  tableNumber: string
-  waiterName: string
-  coverCount: number
-  items: KitchenOrderItem[]
-  status: 'pending' | 'acknowledged' | 'preparing' | 'ready' | 'collected'
-  priority: string
-  totalAmount: number
-  createdAt: string
-  collectedAt?: string
-  specialInstructions?: string
 }
 
 export default function OrdersPage() {
@@ -105,9 +82,7 @@ function OrdersPageContent() {
     return features[key] === true && permissions[key] === true
   }
 
-  const showBar     = can('bar.tabs')
   const showRentals = can('rentals.bookings') || can('rentals.manage')
-  const showKds     = can('kds.display')
 
   return (
     <div className="space-y-4">
@@ -116,40 +91,29 @@ function OrdersPageContent() {
           <TabsTrigger value="sales" className="flex items-center gap-2">
             Sales Orders
           </TabsTrigger>
-          {showBar && (
-            <TabsTrigger value="bar" className="flex items-center gap-2">
-              Bar Orders
-            </TabsTrigger>
-          )}
           {showRentals && (
             <TabsTrigger value="rental" className="flex items-center gap-2">
               Rental Orders
             </TabsTrigger>
           )}
-          {showKds && (
-            <TabsTrigger value="kitchen" className="flex items-center gap-2">
-              Kitchen Orders
-            </TabsTrigger>
-          )}
         </TabsList>
         <TabsContent value="sales" className="mt-4"><SalesOrdersTab source="pos" /></TabsContent>
-        {showBar     && <TabsContent value="bar"     className="mt-4"><SalesOrdersTab source="bar" /></TabsContent>}
         {showRentals && <TabsContent value="rental"  className="mt-4"><SalesOrdersTab source="rental" /></TabsContent>}
-        {showKds     && <TabsContent value="kitchen" className="mt-4"><KitchenOrdersTab /></TabsContent>}
       </Tabs>
     </div>
   )
 }
 
 // ── Status icon ───────────────────────────────────────────────────────────────
-function StatusDot({ status }: { status: 'completed' | 'pending' | 'held' | 'refunded' }) {
+function StatusDot({ status }: { status?: 'completed' | 'pending' | 'held' | 'refunded' | 'partially_refunded' }) {
   const cfg = {
-    completed: { icon: '✓', border: 'border-green-500', text: 'text-green-600', bg: 'bg-white',      label: 'Completed' },
-    pending:   { icon: '…', border: 'border-amber-400', text: 'text-amber-500', bg: 'bg-white',      label: 'Pending'   },
-    held:      { icon: '⏸', border: 'border-blue-400',  text: 'text-blue-500',  bg: 'bg-white',      label: 'On Hold'   },
-    refunded:  { icon: '↩', border: 'border-red-400',   text: 'text-red-500',   bg: 'bg-white',      label: 'Refunded'  },
+    completed:           { icon: '✓', border: 'border-green-500',  text: 'text-green-600',  bg: 'bg-white', label: 'Completed' },
+    pending:             { icon: '…', border: 'border-amber-400',  text: 'text-amber-500',  bg: 'bg-white', label: 'Pending'   },
+    held:                { icon: '⏸', border: 'border-blue-400',   text: 'text-blue-500',   bg: 'bg-white', label: 'On Hold'   },
+    refunded:            { icon: '↩', border: 'border-red-400',    text: 'text-red-500',    bg: 'bg-white', label: 'Refunded'  },
+    partially_refunded:  { icon: '⤴', border: 'border-orange-400', text: 'text-orange-500', bg: 'bg-white', label: 'Partial Refund' },
   }
-  const c = cfg[status]
+  const c = cfg[status || 'completed']
   return (
     <span className="relative group flex items-center justify-center">
       <span className={`w-5 h-5 rounded-full border-2 ${c.border} ${c.bg} flex items-center justify-center`}>
@@ -163,7 +127,7 @@ function StatusDot({ status }: { status: 'completed' | 'pending' | 'held' | 'ref
 }
 
 // ── Sales Orders Tab ──────────────────────────────────────────────────────────
-function SalesOrdersTab({ source }: { source: 'pos' | 'bar' | 'rental' }) {
+function SalesOrdersTab({ source }: { source: 'pos' | 'rental' }) {
   const [sales, setSales]           = useState<Sale[]>([])
   const [filteredSales, setFiltered] = useState<Sale[]>([])
   const [loading, setLoading]       = useState(true)
@@ -204,7 +168,7 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'bar' | 'rental' }) {
 
   function applyFilters() {
     let f = [...sales]
-    // Filter by source: pos = no source (legacy) or source === 'pos'; bar = source === 'bar'; rental = source === 'rental'
+    // Filter by source: pos = no source (legacy) or source === 'pos'; rental = source === 'rental'
     if (source === 'pos') {
       f = f.filter(s => !s.source || s.source === 'pos')
     } else {
@@ -412,204 +376,6 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'bar' | 'rental' }) {
       </div>
 
       <OrderDetailsDialog open={dialogOpen} onOpenChange={setDialogOpen} order={selectedOrder} />
-    </div>
-  )
-}
-
-// ── Kitchen Orders Tab ────────────────────────────────────────────────────────
-const STATUS_STYLES: Record<string, string> = {
-  pending:      'bg-blue-100 text-blue-700 border-blue-200',
-  acknowledged: 'bg-purple-100 text-purple-700 border-purple-200',
-  preparing:    'bg-orange-100 text-orange-700 border-orange-200',
-  ready:        'bg-green-100 text-green-700 border-green-200',
-  collected:    'bg-gray-100 text-gray-600 border-gray-200',
-}
-
-function KitchenOrdersTab() {
-  const [orders, setOrders]     = useState<KitchenOrder[]>([])
-  const [filtered, setFiltered] = useState<KitchenOrder[]>([])
-  const [loading, setLoading]   = useState(true)
-  const [isOffline, setIsOffline] = useState(false)
-  const [search, setSearch]     = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [dateRange, setDateRange] = useState({ start: '', end: '' })
-  const [currentPage, setCurrentPage] = useState(1)
-  const [expanded, setExpanded] = useState<string | null>(null)
-  const itemsPerPage = 10
-
-  useEffect(() => { fetchOrders() }, [])
-  useEffect(() => { applyFilters(); setCurrentPage(1) }, [search, statusFilter, dateRange, orders])
-
-  async function fetchOrders() {
-    setLoading(true)
-    setIsOffline(false)
-    
-    const result = await apiGet<{ orders: KitchenOrder[] }>('/api/kds?status=all')
-    
-    if (result.success && result.data) {
-      // Try to fetch all orders including collected
-      const result2 = await apiGet<{ orders: KitchenOrder[] }>('/api/kds/all')
-      setOrders(result2.success && result2.data ? result2.data.orders || [] : result.data.orders || [])
-    } else if (result.error) {
-      setIsOffline(result.error.isOffline)
-      toast.error(handleApiError(result.error, 'Failed to load kitchen orders'))
-    }
-    
-    setLoading(false)
-  }
-
-  function applyFilters() {
-    let f = [...orders]
-    if (search) f = f.filter(o =>
-      o.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
-      o.tableNumber.includes(search) ||
-      o.waiterName.toLowerCase().includes(search.toLowerCase()) ||
-      o.items.some(i => i.name.toLowerCase().includes(search.toLowerCase()))
-    )
-    if (statusFilter !== 'all') f = f.filter(o => o.status === statusFilter)
-    if (dateRange.start) f = f.filter(o => new Date(o.createdAt) >= new Date(dateRange.start))
-    if (dateRange.end)   f = f.filter(o => new Date(o.createdAt) <= new Date(dateRange.end))
-    setFiltered(f)
-  }
-
-  const paginated  = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
-  const totalPages = Math.ceil(filtered.length / itemsPerPage)
-
-  // Summary counts
-  const counts = orders.reduce((acc, o) => {
-    acc[o.status] = (acc[o.status] || 0) + 1
-    return acc
-  }, {} as Record<string, number>)
-
-  return (
-    <div className="space-y-4">
-      {/* Summary pills */}
-      <div className="flex gap-3 flex-wrap">
-        {[
-          { key: 'all',         label: 'All',         count: orders.length },
-          { key: 'pending',     label: 'Pending',     count: counts.pending     || 0 },
-          { key: 'preparing',   label: 'Preparing',   count: counts.preparing   || 0 },
-          { key: 'ready',       label: 'Ready',       count: counts.ready       || 0 },
-          { key: 'collected',   label: 'Completed',   count: counts.collected   || 0 },
-        ].map(s => (
-          <button key={s.key} onClick={() => setStatusFilter(s.key)}
-            className={`px-4 py-2 rounded-full text-sm font-semibold border transition-colors ${
-              statusFilter === s.key
-                ? 'bg-green-600 text-white border-green-600'
-                : 'bg-white text-gray-600 border-gray-200 hover:border-green-400'
-            }`}>
-            {s.label} ({s.count})
-          </button>
-        ))}
-      </div>
-
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-4 space-y-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search by order #, table, waiter, or item..." value={search}
-              onChange={e => setSearch(e.target.value)} className="pl-10" />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-sm font-medium">From Date</label>
-              <Input type="date" value={dateRange.start} onChange={e => setDateRange({ ...dateRange, start: e.target.value })} />
-            </div>
-            <div>
-              <label className="text-sm font-medium">To Date</label>
-              <Input type="date" value={dateRange.end} onChange={e => setDateRange({ ...dateRange, end: e.target.value })} />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Orders list */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            Kitchen Orders ({filtered.length})
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <LoadingOrOffline
-            isLoading={loading}
-            isOffline={isOffline}
-            onRetry={fetchOrders}
-            loadingText="Loading kitchen orders..."
-            offlineMessage="Unable to load kitchen orders. Please check your connection."
-          >
-            {filtered.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                No kitchen orders found
-              </div>
-            ) : (
-            <>
-              <div className="space-y-3">
-                {paginated.map(order => (
-                  <div key={order._id} className="border rounded-lg overflow-hidden">
-                    {/* Row */}
-                    <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-accent transition-colors"
-                      onClick={() => setExpanded(expanded === order._id ? null : order._id)}>
-                      <div className="flex items-center gap-4">
-                        <span className="font-mono font-bold text-green-700 text-base">{order.orderNumber}</span>
-                        <div>
-                          <p className="font-semibold text-sm">Table {order.tableNumber} · {order.coverCount} cover{order.coverCount !== 1 ? 's' : ''}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {order.waiterName} · {new Date(order.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {order.totalAmount > 0 && (
-                          <span className="font-bold text-sm text-green-700">KES {order.totalAmount.toLocaleString()}</span>
-                        )}
-                        <Badge className={`border text-xs ${STATUS_STYLES[order.status]}`}>
-                          {order.status.toUpperCase()}
-                        </Badge>
-                        <span className="text-muted-foreground text-xs">{order.items.length} item{order.items.length !== 1 ? 's' : ''}</span>
-                      </div>
-                    </div>
-                    {/* Expanded items */}
-                    {expanded === order._id && (
-                      <div className="border-t bg-gray-50 px-4 py-3 space-y-2">
-                        {order.items.map((item, i) => (
-                          <div key={i} className="flex justify-between text-sm">
-                            <span className="font-medium">×{item.quantity} {item.name}</span>
-                            {item.notes && <span className="text-amber-600 italic text-xs">{item.notes}</span>}
-                          </div>
-                        ))}
-                        {order.specialInstructions && (
-                          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mt-2">
-                             {order.specialInstructions}
-                          </p>
-                        )}
-                        {order.collectedAt && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Completed: {new Date(order.collectedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-              {totalPages > 1 && (
-                <div className="flex justify-between items-center mt-6">
-                  <Button variant="outline" onClick={() => setCurrentPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1}>
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <span className="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
-                  <Button variant="outline" onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages}>
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
-            </>
-            )}
-          </LoadingOrOffline>
-        </CardContent>
-      </Card>
     </div>
   )
 }

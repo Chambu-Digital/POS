@@ -20,6 +20,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { FloatingCartButton } from '@/components/sales/floating-cart-button'
+import { CartModal } from '@/components/sales/cart-modal'
 import { useOffline } from '@/hooks/use-offline'
 import {
   cacheProducts,
@@ -89,6 +90,7 @@ function SalesPageContent() {
   })
   const [loading, setLoading] = useState(true)
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
+  const [isCartModalOpen, setIsCartModalOpen] = useState(false)
   const isOffline = useOffline()
   const cartRef = useRef<HTMLDivElement>(null)
   const productsRef = useRef<HTMLDivElement>(null)
@@ -347,7 +349,12 @@ function SalesPageContent() {
   }
 
   function scrollToCart() {
-    cartRef.current?.scrollIntoView({ behavior: 'auto' })
+    // On mobile, open the cart modal instead of scrolling
+    if (window.innerWidth < 1024) { // lg breakpoint
+      setIsCartModalOpen(true)
+    } else {
+      cartRef.current?.scrollIntoView({ behavior: 'auto' })
+    }
   }
 
   function scrollToTop() {
@@ -559,9 +566,9 @@ function SalesPageContent() {
                         </Button>
                         <Input
                           type="number"
-                          value={item.quantity}
+                          value={item.quantity || ''}
                           onChange={(e) => updateQuantity(item.productId, parseInt(e.target.value) || 0)}
-                          onFocus={enterEditing}
+                          onFocus={(e) => { e.target.select(); enterEditing(); }}
                           onBlur={exitEditing}
                           className="w-10 h-6 text-center text-xs p-0"
                         />
@@ -578,6 +585,7 @@ function SalesPageContent() {
                           placeholder="Disc."
                           value={item.discount || ''}
                           onChange={(e) => updateDiscount(item.productId, parseFloat(e.target.value) || 0)}
+                          onFocus={(e) => e.target.select()}
                           className="w-16 h-6 text-xs"
                         />
                         <p className="text-xs font-semibold ml-auto whitespace-nowrap">
@@ -607,6 +615,7 @@ function SalesPageContent() {
                     placeholder="Discount"
                     value={cartDiscount || ''}
                     onChange={(e) => setCartDiscount(parseFloat(e.target.value) || 0)}
+                    onFocus={(e) => e.target.select()}
                     className="h-8 w-24"
                   />
                 </div>
@@ -631,6 +640,21 @@ function SalesPageContent() {
 
       {/* Floating Cart Button - Mobile Only */}
       <FloatingCartButton itemCount={cart.length} onClick={scrollToCart} />
+
+      {/* Cart Modal - Mobile Only */}
+      <CartModal
+        isOpen={isCartModalOpen}
+        onClose={() => setIsCartModalOpen(false)}
+        cart={cart}
+        cartDiscount={cartDiscount}
+        onUpdateQuantity={updateQuantity}
+        onUpdateDiscount={updateDiscount}
+        onRemoveFromCart={removeFromCart}
+        onUpdateCartDiscount={setCartDiscount}
+        onCompleteSale={completeSale}
+        onEnterEditing={enterEditing}
+        onExitEditing={exitEditing}
+      />
 
       {/* Scanner feedback overlay */}
       <ScannerFeedback state={scannerState} lastResult={lastResult} />

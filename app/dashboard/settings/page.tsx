@@ -9,7 +9,7 @@ import { Separator } from '@/components/ui/separator'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Store, Bell, CreditCard, Receipt, Shield, Save, RefreshCw,
-  UtensilsCrossed, Settings2, Upload, Globe, Building2,
+  UtensilsCrossed, Settings2, Upload, Globe, Building2, Package,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -43,14 +43,19 @@ interface ReceiptSettings {
   showLogo: boolean; showTaxId: boolean; showAddress: boolean; showPhone: boolean
   customMessage: string; paperSize: '58mm' | '80mm'
 }
+interface RestockingSettings {
+  lowStockThreshold: number; criticalStockThreshold: number
+  defaultLeadTime: number; safetyBuffer: number
+}
 
-type NavKey = 'general' | 'payment' | 'notifications' | 'receipt' | 'features' | 'security'
+type NavKey = 'general' | 'payment' | 'notifications' | 'receipt' | 'features' | 'security' | 'restocking'
 
 const NAV: { key: NavKey; label: string; desc: string; icon: React.ElementType }[] = [
   { key: 'general',       label: 'General',       desc: 'Store info & branding',  icon: Settings2       },
   { key: 'payment',       label: 'Payments',      desc: 'Methods & tax',          icon: CreditCard      },
   { key: 'notifications', label: 'Notifications', desc: 'Alerts & reports',       icon: Bell            },
   { key: 'receipt',       label: 'Receipt',       desc: 'Print & layout',         icon: Receipt         },
+  { key: 'restocking',    label: 'Restocking',    desc: 'Inventory thresholds',   icon: Package         },
   // { key: 'features',      label: 'Features',      desc: 'KDS, shifts & more',     icon: UtensilsCrossed },
   { key: 'security',      label: 'Security',      desc: 'Password & sessions',    icon: Shield          },
 ]
@@ -133,6 +138,12 @@ export default function SettingsPage() {
     showLogo: true, showTaxId: true, showAddress: true, showPhone: true,
     customMessage: 'Thank You For Shopping With Us!', paperSize: '58mm',
   })
+  const [restocking, setRestocking] = useState<RestockingSettings>({
+    lowStockThreshold: 7,
+    criticalStockThreshold: 3,
+    defaultLeadTime: 7,
+    safetyBuffer: 2,
+  })
 
   // Refs to always have latest state for autoSave
   const generalRef       = useRef(general)
@@ -140,11 +151,13 @@ export default function SettingsPage() {
   const notificationsRef = useRef(notifications)
   const paymentRef       = useRef(payment)
   const receiptRef       = useRef(receipt)
+  const restockingRef    = useRef(restocking)
   useEffect(() => { generalRef.current = general },             [general])
   useEffect(() => { featuresRef.current = features },           [features])
   useEffect(() => { notificationsRef.current = notifications }, [notifications])
   useEffect(() => { paymentRef.current = payment },             [payment])
   useEffect(() => { receiptRef.current = receipt },             [receipt])
+  useEffect(() => { restockingRef.current = restocking },       [restocking])
 
   // Helpers that also mark form dirty
   const upGeneral       = (v: Partial<GeneralSettings>)       => { setGeneral(p => ({ ...p, ...v }));       setDirty(true) }
@@ -152,6 +165,7 @@ export default function SettingsPage() {
   const upNotifications = (v: Partial<NotificationSettings>)  => { setNotifications(p => ({ ...p, ...v })); setDirty(true) }
   const upPayment       = (v: Partial<PaymentSettings>)       => { setPayment(p => ({ ...p, ...v }));       setDirty(true) }
   const upReceipt       = (v: Partial<ReceiptSettings>)       => { setReceipt(p => ({ ...p, ...v }));       setDirty(true) }
+  const upRestocking    = (v: Partial<RestockingSettings>)    => { setRestocking(p => ({ ...p, ...v }));    setDirty(true) }
 
   // Auto-save: immediately persist a toggle change without requiring Save button
   async function autoSave(patch: {
@@ -160,6 +174,7 @@ export default function SettingsPage() {
     notifications?: Partial<NotificationSettings>
     payment?: Partial<PaymentSettings>
     receipt?: Partial<ReceiptSettings>
+    restocking?: Partial<RestockingSettings>
   }) {
     setAutoSaving(true)
     try {
@@ -169,6 +184,7 @@ export default function SettingsPage() {
         notifications: { ...notificationsRef.current, ...(patch.notifications || {}) },
         payment:       { ...paymentRef.current,       ...(patch.payment       || {}) },
         receipt:       { ...receiptRef.current,       ...(patch.receipt       || {}) },
+        restocking:    { ...restockingRef.current,    ...(patch.restocking    || {}) },
       }
       const res = await fetch('/api/settings', {
         method: 'PUT',
@@ -203,6 +219,7 @@ export default function SettingsPage() {
       if (settings?.notifications) setNotifications(s => ({ ...s, ...settings.notifications }))
       if (settings?.payment)       setPayment(s => ({ ...s, ...settings.payment }))
       if (settings?.receipt)       setReceipt(s => ({ ...s, ...settings.receipt }))
+      if (settings?.restocking)    setRestocking(s => ({ ...s, ...settings.restocking }))
       setDirty(false)
     } else if (result.error) {
       setIsOffline(result.error.isOffline)
@@ -218,7 +235,7 @@ export default function SettingsPage() {
       const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ general, features, notifications, payment, receipt }),
+        body: JSON.stringify({ general, features, notifications, payment, receipt, restocking }),
       })
       if (!res.ok) throw new Error()
       toast.success('Settings saved')
@@ -668,6 +685,90 @@ export default function SettingsPage() {
                 checked={features.shiftsEnabled} onChange={v => { upFeatures({ shiftsEnabled: v }); autoSave({ features: { shiftsEnabled: v } }) }} />
               <ToggleRow label="Discounts" desc="Allow discounts to be applied on sales"
                 checked={features.discountsEnabled} onChange={v => { upFeatures({ discountsEnabled: v }); autoSave({ features: { discountsEnabled: v } }) }} />
+            </Section>
+          )}
+
+          {/* ══ RESTOCKING ═══════════════════════════════════════════════════ */}
+          {activeNav === 'restocking' && (
+            <Section title="Restocking Configuration" desc="Configure global thresholds for inventory restocking analysis">
+              <SettingRow 
+                label="Low Stock Threshold (days)" 
+                desc="Alert when stock coverage drops below this many days. Used for velocity-based analysis."
+              >
+                <div className="max-w-xs">
+                  <Input 
+                    type="number" 
+                    min="1" 
+                    max="90"
+                    value={restocking.lowStockThreshold}
+                    onChange={e => upRestocking({ lowStockThreshold: parseInt(e.target.value) || 7 })}
+                    className="focus-visible:ring-green-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Default: 7 days</p>
+                </div>
+              </SettingRow>
+
+              <SettingRow 
+                label="Critical Stock Threshold (days)" 
+                desc="Flag items as critical when coverage drops below this threshold."
+              >
+                <div className="max-w-xs">
+                  <Input 
+                    type="number" 
+                    min="1" 
+                    max="30"
+                    value={restocking.criticalStockThreshold}
+                    onChange={e => upRestocking({ criticalStockThreshold: parseInt(e.target.value) || 3 })}
+                    className="focus-visible:ring-green-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Default: 3 days</p>
+                </div>
+              </SettingRow>
+
+              <SettingRow 
+                label="Default Lead Time (days)" 
+                desc="Expected time between placing an order and receiving stock. Used as default for restocking calculations."
+              >
+                <div className="max-w-xs">
+                  <Input 
+                    type="number" 
+                    min="1" 
+                    max="90"
+                    value={restocking.defaultLeadTime}
+                    onChange={e => upRestocking({ defaultLeadTime: parseInt(e.target.value) || 7 })}
+                    className="focus-visible:ring-green-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Default: 7 days</p>
+                </div>
+              </SettingRow>
+
+              <SettingRow 
+                label="Safety Buffer (days)" 
+                desc="Extra buffer stock to account for demand variability and delivery delays."
+              >
+                <div className="max-w-xs">
+                  <Input 
+                    type="number" 
+                    min="0" 
+                    max="30"
+                    value={restocking.safetyBuffer}
+                    onChange={e => upRestocking({ safetyBuffer: parseInt(e.target.value) || 2 })}
+                    className="focus-visible:ring-green-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Default: 2 days</p>
+                </div>
+              </SettingRow>
+
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg mt-6">
+                <h4 className="font-semibold text-sm text-blue-900 mb-2">How these settings work</h4>
+                <ul className="text-xs text-blue-800 space-y-1">
+                  <li>• <strong>Velocity analysis</strong> calculates daily sales rate from your transaction history</li>
+                  <li>• <strong>Days remaining</strong> = Current Stock ÷ Daily Velocity</li>
+                  <li>• Items are flagged for restock when days remaining &lt; lead time</li>
+                  <li>• <strong>Recommended quantity</strong> = (Velocity × Lead Time) + (Velocity × Safety Buffer)</li>
+                  <li>• These are global defaults; you can override per-product in the product edit page</li>
+                </ul>
+              </div>
             </Section>
           )}
 

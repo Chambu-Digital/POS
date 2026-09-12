@@ -25,6 +25,12 @@ export const productSchema = new mongoose.Schema(
     images:       { type: [String], default: [] },
     stock:        { type: Number, required: true, default: 0 },
     lowStockThreshold: { type: Number, default: 10 },
+    restocking: {
+      customLeadTime:      { type: Number },  // Override default lead time (days)
+      safetyBuffer:        { type: Number },  // Override default safety buffer (days)
+      reorderPoint:        { type: Number },  // Manual reorder point override
+      preferredSupplierId: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier' }
+    },
     createdAt:    { type: Date, default: Date.now },
     updatedAt:    { type: Date, default: Date.now },
   },
@@ -57,7 +63,7 @@ export const saleSchema = new mongoose.Schema(
     mpesaPhone:    String,
     creditApplied: { type: Number, default: 0 },
     notes:         String,
-    source:        { type: String, enum: ['pos', 'bar', 'kds', 'rental'], default: 'pos' },
+    source:        { type: String, enum: ['pos', 'rental'], default: 'pos' },
     rentalMeta: {
       bookingId:       { type: mongoose.Schema.Types.ObjectId },
       serviceName:     String,
@@ -168,13 +174,6 @@ export const staffSchema = new mongoose.Schema(
         'pos.inventory': true,
         'pos.reports': false,
         'pos.expenses': false,
-        'kds.menu': false,
-        'kds.inventory': false,
-        'kds.orders': false,
-        'kds.chef': false,
-        'kds.waiter': false,
-        'kds.history': false,
-        'bar.tabs': false,
         'rentals.bookings': false,
         'rentals.manage': false,
       }),
@@ -721,9 +720,14 @@ export const barBottleSchema = new mongoose.Schema(
     
     // NEW: Fractional state tracking (0.0 = empty, 1.0 = full)
     remainingFraction: { type: Number, default: 1.0, min: 0, max: 1 },
+    reservedFraction:  { type: Number, default: 0, min: 0, max: 1 },    // NEW: total reserved by tabs
+    availableFraction: { type: Number, default: 1.0, min: 0, max: 1 },  // NEW: remaining - reserved
     expectedFraction:  { type: Number, default: 1.0 },  // Always 1.0 for new bottles
     actualFraction:    { type: Number },  // remainingFraction at close time
     varianceFraction:  { type: Number },  // Waste/loss tracking
+    
+    // Reservation tracking metadata
+    lastReservationCheck: { type: Date },  // Performance optimization for capacity queries
     
     // DEPRECATED: Old unit-based tracking (kept for migration reference)
     expectedUnits:   { type: Number },
@@ -775,7 +779,12 @@ export const barTabSchema = new mongoose.Schema(
     tableNumber:    { type: String, default: '' },
     notes:          { type: String, default: '' },
     status:         { type: String, enum: ['open', 'hold', 'billing', 'paid'], default: 'open' },
-    isSyntheticDirectSale: { type: Boolean, default: false },  // NEW: marks instant direct sales
+    isSyntheticDirectSale: { type: Boolean, default: false },  // DEPRECATED: will be removed in v3
+    
+    // NEW: Reservation tracking
+    reservationIds:    { type: [mongoose.Schema.Types.ObjectId], default: [], ref: 'BarReservation' },
+    reservationsValid: { type: Boolean, default: true },  // Quick check if all reservations still valid
+    
     subtotal:       { type: Number, default: 0 },
     discountPct:    { type: Number, default: 0, min: 0, max: 100 },
     discountAmount: { type: Number, default: 0 },
@@ -806,12 +815,14 @@ export const barTabLineSchema = new mongoose.Schema(
     tabId:           { type: mongoose.Schema.Types.ObjectId, ref: 'BarTab', required: true },
     inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
     servingId:       { type: mongoose.Schema.Types.ObjectId, ref: 'BarServing' },  // null = bottle sale
-    bottleId:        { type: mongoose.Schema.Types.ObjectId, ref: 'BarBottle' },   // NEW: which bottle was used
+    bottleId:        { type: mongoose.Schema.Types.ObjectId, ref: 'BarBottle' },   // which bottle was used
+    reservationId:   { type: mongoose.Schema.Types.ObjectId, ref: 'BarReservation' },  // NEW: link to reservation
     itemName:        { type: String, required: true },   // denormalized for receipt display
     servingName:     { type: String, default: '' },      // denormalized for receipt display
     quantity:        { type: Number, required: true, min: 1 },
     unitPrice:       { type: Number, required: true },
     lineTotal:       { type: Number, required: true },
+    discount:        { type: Number, default: 0 },       // NEW: per-line discount
     addedBy:         { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
     addedAt:         { type: Date, default: Date.now },
     voided:          { type: Boolean, default: false },
@@ -823,6 +834,51 @@ export const barTabLineSchema = new mongoose.Schema(
 barTabLineSchema.index({ userId: 1, tabId: 1, addedAt: -1 })
 barTabLineSchema.index({ userId: 1, inventoryItemId: 1, addedAt: -1 })
 barTabLineSchema.index({ userId: 1, bottleId: 1 })  // NEW: bottle history lookups
+
+// ── BarReservation ─────────────────────────────────────────────────────────────
+// Temporary hold on bottle fractions to prevent overselling across concurrent tabs
+// Reservations bridge the gap between tab creation and payment completion
+export const barReservationSchema = new mongoose.Schema(
+  {
+    userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    tabId:           { type: mongoose.Schema.Types.ObjectId, ref: 'BarTab', required: true },
+    inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
+    servingId:       { type: mongoose.Schema.Types.ObjectId, ref: 'BarServing' },  // null = bottle sale
+    bottleId:        { type: mongoose.Schema.Types.ObjectId, ref: 'BarBottle', required: true },
+    
+    // Quantity tracking
+    fractionReserved: { type: Number, required: true, min: 0, max: 1 },  // amount held
+    quantity:         { type: Number, required: true, min: 1 },           // servings/bottles count
+    unitPrice:        { type: Number, required: true },                   // price per unit
+    
+    // Lifecycle status
+    status: {
+      type: String,
+      enum: ['reserved', 'committed', 'released', 'expired'],
+      default: 'reserved',
+      required: true,
+    },
+    
+    // Timestamps
+    createdAt:    { type: Date, default: Date.now, required: true },
+    expiresAt:    { type: Date, required: true },                       // TTL for auto-cleanup
+    committedAt:  { type: Date },                                       // when payment succeeded
+    releasedAt:   { type: Date },                                       // when cancelled/failed
+    
+    // Metadata
+    createdBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'Staff', required: true },
+    releaseReason: { type: String },  // 'payment_failed', 'tab_cancelled', 'TTL_EXPIRED', etc.
+  },
+  { collection: 'bar_reservations' }
+)
+
+// Indexes for reservation management
+barReservationSchema.index({ userId: 1, tabId: 1 })                           // Find all reservations for a tab
+barReservationSchema.index({ userId: 1, bottleId: 1, status: 1 })            // Calculate available capacity
+barReservationSchema.index({ status: 1, expiresAt: 1 })                      // TTL cleanup queries
+barReservationSchema.index({ userId: 1, inventoryItemId: 1, status: 1 })     // Product-level reporting
+barReservationSchema.index({ userId: 1, branchId: 1, createdAt: -1 })        // General queries
 
 // ── BarAuditLog ────────────────────────────────────────────────────────────────
 // Immutable ledger of all significant bar operations.
@@ -916,3 +972,165 @@ barBottleAuditSchema.index({ userId: 1, inventoryItemId: 1, closedAt: -1 })
 barBottleAuditSchema.index({ userId: 1, varianceFlag: 1, closedAt: -1 })  // high-variance queries
 barBottleAuditSchema.index({ userId: 1, closedBy: 1, closedAt: -1 })      // per-staff analysis
 // Immutable - no updates allowed after creation
+
+// ── BarStockMovement ───────────────────────────────────────────────────────────
+// Audit trail for all bar inventory stock changes.
+// Tracks automatic movements (sales, bottle openings) and manual adjustments
+// (breakage, spillage, stock-in, damage, theft, wastage).
+export const barStockMovementSchema = new mongoose.Schema(
+  {
+    userId:   { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    
+    // Movement type
+    type: {
+      type: String,
+      enum: [
+        'STOCK_IN',         // Supplier delivery
+        'BOTTLE_SALE',      // Full bottle sold
+        'SERVING_SALE',     // Serving poured (auto)
+        'BOTTLE_OPEN',      // Sealed → Open (for servings)
+        'BREAKAGE',         // Bottle broken
+        'SPILLAGE',         // Liquid wasted during pour
+        'DAMAGE',           // Damaged/unusable
+        'THEFT',            // Stock missing
+        'WASTAGE',          // Quality issues, expired
+        'TRANSFER_OUT',     // Sent to another branch/kitchen
+        'TRANSFER_IN',      // Received from another branch
+        'ADJUSTMENT',       // Manual stock correction
+        'RETURN',           // Return to supplier
+      ],
+      required: true,
+    },
+    
+    timestamp: { type: Date, default: Date.now },
+    
+    // What changed
+    inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
+    itemName:        { type: String, required: true },  // denormalized for fast display
+    brandName:       { type: String, default: '' },     // denormalized brand/category
+    
+    // Quantity tracking
+    quantity:      { type: Number, required: true },  // Bottles affected (can be negative)
+    previousStock: { type: Number, required: true },  // Before
+    newStock:      { type: Number, required: true },  // After
+    
+    // Cost tracking (for loss valuation)
+    unitCost:  { type: Number },  // Buying price per bottle
+    totalCost: { type: Number },  // Total value of movement
+    
+    // Context
+    staffId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    staffName: { type: String, default: '' },  // denormalized
+    tabId:     { type: mongoose.Schema.Types.ObjectId, ref: 'BarTab' },  // If related to a sale
+    bottleId:  { type: mongoose.Schema.Types.ObjectId, ref: 'BarBottle' },  // If related to a bottle
+    reference: { type: String, default: '' },  // Delivery note, invoice #, order number
+    reason:    { type: String, default: '' },  // Why (for manual adjustments)
+    notes:     { type: String, default: '' },
+  },
+  { collection: 'bar_stock_movements' }
+)
+barStockMovementSchema.index({ userId: 1, branchId: 1, timestamp: -1 })
+barStockMovementSchema.index({ userId: 1, inventoryItemId: 1, timestamp: -1 })
+barStockMovementSchema.index({ userId: 1, type: 1, timestamp: -1 })
+barStockMovementSchema.index({ userId: 1, staffId: 1, timestamp: -1 })
+// Immutable - movements are never updated or deleted
+
+// ── PurchaseOrder ──────────────────────────────────────────────────────────────
+// Purchase orders generated from restocking analysis
+// Does NOT automatically increase inventory - PO creation is separate from receiving
+const purchaseOrderItemSchema = new mongoose.Schema(
+  {
+    moduleItemId: { type: String, required: true },  // Reference back to source item
+    module:       { type: String, required: true },  // 'retail', 'bar', 'pharmacy', etc.
+    itemName:     { type: String, required: true },
+    quantity:     { type: Number, required: true, min: 1 },
+    unitPrice:    { type: Number, required: true, min: 0 },
+    lineTotal:    { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+)
+
+export const purchaseOrderSchema = new mongoose.Schema(
+  {
+    userId:       { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    poNumber:     { type: String, required: true, unique: true },  // e.g., 'PO-2026-001'
+    supplierId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier' },
+    supplierName: { type: String, required: true },
+    status:       { type: String, enum: ['draft', 'approved', 'sent', 'received', 'cancelled'], default: 'draft' },
+    items:        { type: [purchaseOrderItemSchema], required: true },
+    subtotal:     { type: Number, required: true, default: 0 },
+    total:        { type: Number, required: true, default: 0 },
+    notes:        { type: String, default: '' },
+    editHistory: [{
+      editedBy:    { type: mongoose.Schema.Types.ObjectId, refPath: 'editHistory.editedByModel' },
+      editedByModel: { type: String, enum: ['User', 'Staff'], default: 'User' },
+      editedAt:    { type: Date, default: Date.now },
+      changes: [{
+        field:     { type: String, required: true },
+        oldValue:  { type: mongoose.Schema.Types.Mixed },
+        newValue:  { type: mongoose.Schema.Types.Mixed },
+      }]
+    }],
+    createdBy:    { type: mongoose.Schema.Types.ObjectId, refPath: 'createdByModel' },
+    createdByModel: { type: String, enum: ['User', 'Staff'], default: 'User' },
+    createdAt:    { type: Date, default: Date.now },
+    updatedAt:    { type: Date, default: Date.now },
+  },
+  { collection: 'purchase_orders' }
+)
+purchaseOrderSchema.index({ userId: 1, createdAt: -1 })
+purchaseOrderSchema.index({ userId: 1, status: 1, createdAt: -1 })
+purchaseOrderSchema.index({ userId: 1, supplierId: 1, createdAt: -1 })
+purchaseOrderSchema.index({ poNumber: 1 }, { unique: true })
+purchaseOrderSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
+
+// ── RestockPlan ────────────────────────────────────────────────────────────────
+// History of restocking analysis and recommendations
+const restockRecommendationSchema = new mongoose.Schema(
+  {
+    moduleItemId:    { type: String, required: true },
+    module:          { type: String, required: true },
+    itemName:        { type: String, required: true },
+    currentStock:    { type: Number, required: true },
+    velocity:        { type: Number, required: true },  // average daily sales
+    daysRemaining:   { type: Number, required: true },
+    urgency:         { type: Number, required: true },  // leadTime / daysRemaining
+    recommendedQty:  { type: Number, required: true },
+    allocatedQty:    { type: Number, default: 0 },  // actual quantity allocated (may be partial)
+    unitPrice:       { type: Number, required: true },
+    totalCost:       { type: Number, required: true },
+    reason:          { type: String, default: '' },  // explanation for user
+    deferred:        { type: Boolean, default: false },
+    deferredReason:  { type: String, default: '' },
+  },
+  { _id: false }
+)
+
+export const restockPlanSchema = new mongoose.Schema(
+  {
+    userId:         { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:       { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    planType:       { type: String, enum: ['low-stock', 'generate', 'assisted'], required: true },
+    leadTimeDays:   { type: Number, required: true, default: 7 },
+    safetyBufferDays: { type: Number, default: 2 },
+    budget:         { type: Number },  // null for non-assisted plans
+    
+    recommendations: { type: [restockRecommendationSchema], default: [] },
+    
+    totalRecommendedCost: { type: Number, default: 0 },
+    totalAllocatedCost:   { type: Number, default: 0 },
+    itemsRecommended:     { type: Number, default: 0 },
+    itemsDeferred:        { type: Number, default: 0 },
+    
+    createdBy:    { type: mongoose.Schema.Types.ObjectId, refPath: 'createdByModel' },
+    createdByModel: { type: String, enum: ['User', 'Staff'], default: 'User' },
+    createdAt:    { type: Date, default: Date.now },
+    
+    purchaseOrderIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'PurchaseOrder' }],  // POs generated from this plan
+  },
+  { collection: 'restock_plans' }
+)
+restockPlanSchema.index({ userId: 1, createdAt: -1 })
+restockPlanSchema.index({ userId: 1, planType: 1, createdAt: -1 })

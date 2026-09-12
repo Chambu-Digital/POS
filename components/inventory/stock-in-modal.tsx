@@ -373,6 +373,7 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
                         min="1"
                         value={item.quantity || ''}
                         onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 0)}
+                        onFocus={(e) => e.target.select()}
                         placeholder="0"
                       />
                     </div>
@@ -387,6 +388,7 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
                         step="0.01"
                         value={item.unitCost || ''}
                         onChange={(e) => updateItem(index, 'unitCost', parseFloat(e.target.value) || 0)}
+                        onFocus={(e) => e.target.select()}
                         placeholder="0.00"
                       />
                     </div>

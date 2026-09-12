@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { Menu, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { resolveMediaUrl } from '@/lib/media-url'
@@ -10,8 +10,6 @@ import {
   MODULES,
   DEFAULT_MODULE_FEATURES,
   normaliseFeatures,
-  getKitchenFeatures,
-  getBarFeatures,
   type ModuleFeature,
 } from '@/lib/modules'
 import { BranchSelector } from '@/components/branch-selector'
@@ -26,11 +24,7 @@ const LOGO_CACHE_KEY     = 'sidebar_logo'
 
 // Routes that show a live animated dot indicator when active
 const LIVE_HREFS = new Set([
-  '/dashboard/service/kitchen',
-  '/dashboard/service/bar',
-  // Keep legacy paths alive during transition
-  '/dashboard/kds',
-  '/dashboard/bar',
+  '/dashboard',
 ])
 
 function readCachedFeatures(): Record<string, boolean> {
@@ -54,8 +48,10 @@ interface StaticItem {
 
 export function Sidebar() {
   const pathname = usePathname()
+  const router = useRouter()
   const [isOpen, setIsOpen]             = useState(false)
   const [mounted, setMounted]           = useState(false)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [userType, setUserType]         = useState<UserType>(null)
   const [shopName, setShopName]         = useState<string>('My Shop')
   const [shopLogo, setShopLogo]         = useState<string>('')
@@ -65,8 +61,6 @@ export function Sidebar() {
   const [selectedBranch, setSelectedBranch] = useState<any>(null)
   // Track which top-level module sections are collapsed
   const [collapsed, setCollapsed]       = useState<Record<string, boolean>>({})
-  // Track which Service sub-domains are collapsed ('kitchen' | 'bar')
-  const [serviceCollapsed, setServiceCollapsed] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     setFeatures(readCachedFeatures())
@@ -74,9 +68,21 @@ export function Sidebar() {
     setMounted(true)
 
     function loadUser() {
+      // Prevent API calls during logout
+      if (isLoggingOut) return
+
       fetch('/api/auth/me')
-        .then(res => res.json())
+        .then(res => {
+          // Handle 401 - session expired or logged out
+          if (res.status === 401) {
+            setIsLoggingOut(true)
+            router.push('/auth/login')
+            return null
+          }
+          return res.json()
+        })
         .then(data => {
+          if (!data) return
           if (data.user) {
             setUserType(data.user.type)
             setShopName(data.user.shopName || 'My Shop')
@@ -91,10 +97,21 @@ export function Sidebar() {
     }
 
     function loadFeatures() {
+      // Prevent API calls during logout
+      if (isLoggingOut) return
+
       fetch('/api/tenant/config')
-        .then(res => res.ok ? res.json() : null)
+        .then(res => {
+          // Handle 401 - session expired or logged out
+          if (res.status === 401) {
+            setIsLoggingOut(true)
+            router.push('/auth/login')
+            return null
+          }
+          return res.ok ? res.json() : null
+        })
         .then(data => {
-          if (!data) return
+          if (!data || isLoggingOut) return
           const normalised = normaliseFeatures(data.features || {})
           setFeatures(normalised)
           try { localStorage.setItem(FEATURES_CACHE_KEY, JSON.stringify(normalised)) } catch {}
@@ -102,9 +119,17 @@ export function Sidebar() {
         .catch(() => {})
 
       fetch('/api/settings')
-        .then(res => res.ok ? res.json() : null)
+        .then(res => {
+          // Handle 401 - session expired or logged out
+          if (res.status === 401) {
+            setIsLoggingOut(true)
+            router.push('/auth/login')
+            return null
+          }
+          return res.ok ? res.json() : null
+        })
         .then(data => {
-          if (!data) return
+          if (!data || isLoggingOut) return
           const logo = data.settings?.general?.logo || ''
           setShopLogo(logo)
           try { localStorage.setItem(LOGO_CACHE_KEY, logo) } catch {}
@@ -131,7 +156,21 @@ export function Sidebar() {
       window.removeEventListener('settings_updated', loadFeatures)
       clearInterval(interval)
     }
-  }, [])
+  }, [isLoggingOut, router])
+
+  // ── Logout handler ─────────────────────────────────────────────────────────
+  function handleLogout() {
+    // Set flag immediately to stop all API calls
+    setIsLoggingOut(true)
+    
+    // Redirect immediately for instant UX
+    router.push('/auth/login')
+    
+    // Fire logout API in background for proper server cleanup
+    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {
+      // Silent fail - user already redirected, cookie will be invalid anyway
+    })
+  }
 
   // ── Visibility helpers ─────────────────────────────────────────────────────
 
@@ -159,18 +198,6 @@ export function Sidebar() {
   // Maps canonical new paths to their legacy equivalents so that navigating
   // via old bookmarked URLs still highlights the correct sidebar item.
   const LEGACY_ACTIVE_MAP: Record<string, string[]> = {
-    '/dashboard/service/bar':             ['/dashboard/bar', '/dashboard/bar/pos'],
-    '/dashboard/service/bar/inventory':   ['/dashboard/bar/inventory'],
-    '/dashboard/service/bar/brands':      ['/dashboard/bar/brands'],
-    '/dashboard/service/bar/reports':     ['/dashboard/bar/reports'],
-    // Bar POS new canonical path — also matches old tabs landing
-    '/dashboard/bar/pos':                 ['/dashboard/service/bar', '/dashboard/bar'],
-    '/dashboard/service/kitchen/orders':  ['/dashboard/kds/orders', '/dashboard/kds'],
-    '/dashboard/service/kitchen/chef':    ['/dashboard/kds/chef'],
-    '/dashboard/service/kitchen/waiter':  ['/dashboard/kds/waiter'],
-    '/dashboard/service/kitchen/history': ['/dashboard/kds/history'],
-    '/dashboard/service/kitchen/menu':    ['/dashboard/kds/menu'],
-    '/dashboard/service/kitchen/inventory': ['/dashboard/kds/inventory'],
     '/dashboard/retail/sales':     ['/dashboard/sales'],
     '/dashboard/retail/orders':    ['/dashboard/orders'],
     '/dashboard/retail/inventory': ['/dashboard/inventory'],
@@ -191,14 +218,6 @@ export function Sidebar() {
       return legacyPaths.some(lp => pathname === lp || pathname.startsWith(lp + '/'))
     }
     return false
-  }
-
-  function isServiceActive(): boolean {
-    return (
-      pathname.startsWith('/dashboard/service') ||
-      pathname.startsWith('/dashboard/kds') ||
-      pathname.startsWith('/dashboard/bar')
-    )
   }
 
   // ── Render helpers ─────────────────────────────────────────────────────────
@@ -248,106 +267,10 @@ export function Sidebar() {
     )
   }
 
-  // Renders the special Service module with Kitchen and Bar sub-sections
-  function renderServiceModule() {
-    const kitchenFeatures = getKitchenFeatures().filter(
-      f => features[f.key] === true && canSeeFeature(f)
-    )
-    const barFeatures = getBarFeatures().filter(
-      f => features[f.key] === true && canSeeFeature(f)
-    )
-
-    if (kitchenFeatures.length === 0 && barFeatures.length === 0) return null
-
-    const serviceActive  = isServiceActive()
-    const moduleCollapsed = collapsed['service'] ?? false
-
-    return (
-      <div key="service">
-        {/* Service module header */}
-        <button
-          onClick={() => setCollapsed(prev => ({ ...prev, service: !prev['service'] }))}
-          className={cn(
-            'w-full flex items-center justify-between px-4 py-2.5 transition-colors text-sm font-medium',
-            serviceActive
-              ? 'text-[hsl(var(--sidebar-accent-foreground))]'
-              : 'text-[hsl(var(--sidebar-foreground))]/70 hover:text-[hsl(var(--sidebar-foreground))]'
-          )}
-        >
-          <span className="text-left">Service</span>
-          <span className="text-xs">{moduleCollapsed ? '▸' : '▾'}</span>
-        </button>
-
-        {!moduleCollapsed && (
-          <div className="ml-4 pl-3 border-l border-[hsl(var(--sidebar-foreground))]/10 space-y-2 mt-0.5">
-
-            {/* Kitchen sub-section */}
-            {kitchenFeatures.length > 0 && (
-              <div>
-                <button
-                  onClick={() => setServiceCollapsed(prev => ({ ...prev, kitchen: !prev['kitchen'] }))}
-                  className="w-full flex items-center justify-between px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-[hsl(var(--sidebar-foreground))]/50 hover:text-[hsl(var(--sidebar-foreground))]/80 transition-colors"
-                >
-                  <span>Kitchen</span>
-                  <span>{serviceCollapsed['kitchen'] ? '▸' : '▾'}</span>
-                </button>
-                {!serviceCollapsed['kitchen'] && (
-                  <div className="space-y-0.5">
-                    {kitchenFeatures.map(renderFeatureLink)}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Bar sub-section */}
-            {barFeatures.length > 0 && (
-              <div>
-                <button
-                  onClick={() => setServiceCollapsed(prev => ({ ...prev, bar: !prev['bar'] }))}
-                  className="w-full flex items-center justify-between px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-[hsl(var(--sidebar-foreground))]/50 hover:text-[hsl(var(--sidebar-foreground))]/80 transition-colors"
-                >
-                  <span>Bar</span>
-                  <span>{serviceCollapsed['bar'] ? '▸' : '▾'}</span>
-                </button>
-                {!serviceCollapsed['bar'] && (
-                  <div className="space-y-0.5">
-                    {barFeatures.map(f => {
-                      // Bar tabs is the landing page — show live dot when active
-                      const active  = isActive(f.href)
-                      const showDot = f.key === 'bar.tabs' && active
-                      return (
-                        <Link
-                          key={f.href}
-                          href={f.href}
-                          onClick={() => setIsOpen(false)}
-                          className={cn(
-                            'flex items-center justify-between px-3 py-2 transition-colors relative text-sm',
-                            active
-                              ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]'
-                              : 'text-[hsl(var(--sidebar-foreground))]/80 hover:bg-[hsl(var(--sidebar-accent))]/50 hover:text-[hsl(var(--sidebar-accent-foreground))]'
-                          )}
-                        >
-                          <span>{f.label}</span>
-                          {showDot && <span className="w-2 h-2 bg-orange-400 animate-pulse" />}
-                        </Link>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    )
-  }
-
   // Renders a standard module (Retail, Rentals, Pharmacy)
   function renderModule(mod: typeof MODULES[number]) {
     // Core module is rendered separately as flat items
     if (mod.key === 'core') return null
-    // Service is rendered separately with its sub-domain structure
-    if (mod.key === 'service') return renderServiceModule()
 
     const visibleFeatures = mod.features.filter(
       f => features[f.key] === true && canSeeFeature(f)
@@ -460,14 +383,16 @@ export function Sidebar() {
           {/* Logout */}
           <div className="pt-4 mt-auto border-t border-[hsl(var(--sidebar-foreground))]/10">
             <button
-              onClick={() =>
-                fetch('/api/auth/logout', { method: 'POST' }).then(() => {
-                  window.location.href = '/auth/login'
-                })
-              }
-              className="w-full flex items-center justify-between px-4 py-3 text-[hsl(var(--sidebar-foreground))] hover:bg-red-500/20 transition-colors text-sm font-medium"
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+              className={cn(
+                'w-full flex items-center justify-between px-4 py-3 transition-colors text-sm font-medium',
+                isLoggingOut
+                  ? 'text-[hsl(var(--sidebar-foreground))]/50 cursor-not-allowed'
+                  : 'text-[hsl(var(--sidebar-foreground))] hover:bg-red-500/20'
+              )}
             >
-              <span>Logout</span>
+              <span>{isLoggingOut ? 'Logging out...' : 'Logout'}</span>
               <span>→</span>
             </button>
           </div>

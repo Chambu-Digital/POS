@@ -27,6 +27,12 @@ function buildDefaults(user: { shopName?: string; email?: string; phone?: string
       showLogo: true, showTaxId: true, showAddress: true, showPhone: true,
       customMessage: 'Thank You For Shopping With Us!', paperSize: '58mm',
     },
+    restocking: {
+      lowStockThreshold: 7,      // days of coverage for "low stock" alert
+      criticalStockThreshold: 3, // days of coverage for "critical" alert
+      defaultLeadTime: 7,         // default restock cycle in days
+      safetyBuffer: 2,            // extra buffer days for safety stock
+    },
   }
 }
 
@@ -64,6 +70,7 @@ export async function GET(request: NextRequest) {
       notifications: mergeSection(defaults.notifications, (stored.notifications || {}) as object),
       payment:       mergeSection(defaults.payment,       (stored.payment       || {}) as object),
       receipt:       mergeSection(defaults.receipt,       (stored.receipt       || {}) as object),
+      restocking:    mergeSection(defaults.restocking,    (stored.restocking    || {}) as object),
     }
 
     return NextResponse.json({ settings })

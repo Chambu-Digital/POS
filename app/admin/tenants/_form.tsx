@@ -7,10 +7,7 @@ import {
   ALL_FEATURES,
   DEFAULT_MODULE_FEATURES,
   normaliseFeatures,
-  getKitchenFeatures,
-  getBarFeatures,
   type ModuleFeature,
-  type ServiceModuleFeature,
 } from '@/lib/modules'
 
 interface Cluster {
@@ -327,10 +324,6 @@ export default function TenantForm({ initial, ownerEmail: initialOwnerEmail }: P
             const isOpen  = expanded[mod.key] && modOn
             const ModIcon = mod.icon
 
-            // For Service, features are split by subDomain
-            const kitchenFeatures = mod.key === 'service' ? getKitchenFeatures() : []
-            const barFeatures     = mod.key === 'service' ? getBarFeatures()     : []
-
             return (
               <div
                 key={mod.key}
@@ -394,46 +387,27 @@ export default function TenantForm({ initial, ownerEmail: initialOwnerEmail }: P
                         ⚠️ <strong>Warning:</strong> Disabling core features may limit basic functionality across all modules.
                       </div>
                     )}
-                    {mod.key === 'service' ? (
-                      // Service: split into Kitchen and Bar sub-sections
-                      <div className="grid md:grid-cols-2 gap-4">
-                        <SubDomainGroup
-                          label="Restaurant / Kitchen"
-                          features={kitchenFeatures}
-                          values={features}
-                          onToggle={toggleFeature}
-                        />
-                        <SubDomainGroup
-                          label="Bar"
-                          features={barFeatures}
-                          values={features}
-                          onToggle={toggleFeature}
-                        />
-                      </div>
-                    ) : (
-                      // All other modules: flat checkbox list
-                      <div className="grid md:grid-cols-2 gap-x-6 gap-y-2">
-                        {mod.features.map(f => (
-                          <label key={f.key} className="flex items-start gap-2 cursor-pointer group">
-                            <input
-                              type="checkbox"
-                              checked={features[f.key] === true}
-                              onChange={e => toggleFeature(f.key, e.target.checked)}
-                              className="w-3.5 h-3.5 mt-0.5 rounded text-green-600 focus:ring-green-500 shrink-0"
-                            />
-                            <div>
-                              <span className="text-xs font-medium text-gray-700 group-hover:text-gray-900">
-                                {f.label}
-                                {f.adminOnly && (
-                                  <span className="ml-1 text-[10px] text-amber-600 font-normal">(admin)</span>
-                                )}
-                              </span>
-                              <p className="text-[11px] text-gray-400 leading-tight">{f.description}</p>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    )}
+                    <div className="grid sm:grid-cols-2 gap-x-4 gap-y-2">
+                      {mod.features.map((f: ModuleFeature) => (
+                        <label key={f.key} className="flex items-start gap-2 cursor-pointer group">
+                          <input
+                            type="checkbox"
+                            checked={features[f.key] === true}
+                            onChange={e => toggleFeature(f.key, e.target.checked)}
+                            className="w-3.5 h-3.5 mt-0.5 rounded text-green-600 focus:ring-green-500 shrink-0"
+                          />
+                          <div>
+                            <span className="text-xs font-medium text-gray-700 group-hover:text-gray-900">
+                              {f.label}
+                              {f.adminOnly && (
+                                <span className="ml-1 text-[10px] text-amber-600 font-normal">(admin)</span>
+                              )}
+                            </span>
+                            <p className="text-[11px] text-gray-400 leading-tight">{f.description}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
 
                     {/* Summary of enabled count */}
                     <p className="text-[11px] text-gray-400 mt-3">
