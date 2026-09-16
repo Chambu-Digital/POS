@@ -131,7 +131,8 @@ export async function GET(request: NextRequest) {
       createdAt: { $gte: last7Days } 
     }).lean() : []
     
-    [...salesLast7, ...hospitalitySalesLast7].forEach((sale: any) => {
+    const combinedSalesLast7 = [...salesLast7, ...hospitalitySalesLast7]
+    combinedSalesLast7.forEach((sale: any) => {
       const date = new Date(sale.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
       if (!salesByDay[date]) salesByDay[date] = { date, sales: 0, revenue: 0 }
       salesByDay[date].sales += 1
