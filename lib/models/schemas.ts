@@ -637,405 +637,6 @@ inventoryTransactionSchema.index({ userId: 1, referenceId: 1 })
 // Immutable - no updates allowed
 
 
-// ── BarBrand ───────────────────────────────────────────────────────────────────
-// Represents a spirits/wine/beer brand (e.g. Jameson, Tusker, Château Margaux)
-export const barBrandSchema = new mongoose.Schema(
-  {
-    userId:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    branchId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
-    name:        { type: String, required: true, trim: true },
-    description: { type: String, default: '' },
-    category:    { type: String, default: '' }, // e.g. 'whisky', 'vodka', 'wine', 'beer'
-    isArchived:  { type: Boolean, default: false },
-    createdAt:   { type: Date, default: Date.now },
-    updatedAt:   { type: Date, default: Date.now },
-  },
-  { collection: 'bar_brands' }
-)
-barBrandSchema.index({ userId: 1, name: 1 }, { unique: true })
-barBrandSchema.index({ userId: 1, branchId: 1, isArchived: 1 })
-
-// ── BarInventoryItem ───────────────────────────────────────────────────────────
-// A specific size/variant of a brand held in stock (e.g. Jameson 1L, Jameson 750ml)
-export const barInventoryItemSchema = new mongoose.Schema(
-  {
-    userId:             { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    branchId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
-    brandId:            { type: mongoose.Schema.Types.ObjectId, ref: 'BarBrand', required: true },
-    // Human-readable name stored on import (e.g. 'Jameson').
-    // Older records without this field fall back to the brand name at read time.
-    name:               { type: String, default: '' },
-    size:               { type: String, required: true },   // e.g. '1L', '750ml', '500ml'
-    buyingPrice:        { type: Number, required: true },
-    bottleSellingPrice: { type: Number, required: true },
-    stock:              { type: Number, required: true, default: 0 },  // sealed bottles
-    lowStockThreshold:  { type: Number, default: 3 },
-    isActive:           { type: Boolean, default: true },
-    createdAt:          { type: Date, default: Date.now },
-    updatedAt:          { type: Date, default: Date.now },
-  },
-  { collection: 'bar_inventory_items' }
-)
-barInventoryItemSchema.index({ userId: 1, branchId: 1, brandId: 1 })
-barInventoryItemSchema.index({ userId: 1, branchId: 1, stock: 1 })
-
-// ── BarServing ─────────────────────────────────────────────────────────────────
-// A configured serving portion for an inventory item (e.g. Tot, Double, Quarter)
-// FRACTIONAL MODEL: servingsPerContainer defines how many servings a full container yields
-// DEPRECATED: unitsProduced (kept for migration compatibility, will be removed in future)
-export const barServingSchema = new mongoose.Schema(
-  {
-    userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    branchId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
-    inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
-    name:            { type: String, required: true, trim: true },  // 'Tot', 'Double', 'Quarter'
-    sellingPrice:    { type: Number, required: true },
-    
-    // NEW: Fractional model - how many servings does a full bottle yield?
-    servingsPerContainer: { type: Number, required: true, min: 1 },  // e.g., 20 Tots per bottle
-    
-    // DEPRECATED: Old unit-based model (kept for migration reference)
-    unitsProduced:   { type: Number, min: 1 },
-    
-    isActive:        { type: Boolean, default: true },
-    createdAt:       { type: Date, default: Date.now },
-    updatedAt:       { type: Date, default: Date.now },
-  },
-  { collection: 'bar_servings' }
-)
-barServingSchema.index({ userId: 1, inventoryItemId: 1 })
-barServingSchema.index({ userId: 1, branchId: 1 })
-
-// ── BarBottle ──────────────────────────────────────────────────────────────────
-// Tracks the lifecycle of an individual physical bottle: full → open → closed
-// FRACTIONAL MODEL: remainingFraction tracks bottle state as 0.0 (empty) to 1.0 (full)
-// MULTI-BOTTLE SUPPORT: Multiple bottles can be open simultaneously
-export const barBottleSchema = new mongoose.Schema(
-  {
-    userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    branchId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
-    inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
-    bottleNumber:    { type: Number, required: true },  // sequential per inventory item
-    state:           { type: String, enum: ['full', 'open', 'closed'], required: true },
-    
-    // NEW: Fractional state tracking (0.0 = empty, 1.0 = full)
-    remainingFraction: { type: Number, default: 1.0, min: 0, max: 1 },
-    reservedFraction:  { type: Number, default: 0, min: 0, max: 1 },    // NEW: total reserved by tabs
-    availableFraction: { type: Number, default: 1.0, min: 0, max: 1 },  // NEW: remaining - reserved
-    expectedFraction:  { type: Number, default: 1.0 },  // Always 1.0 for new bottles
-    actualFraction:    { type: Number },  // remainingFraction at close time
-    varianceFraction:  { type: Number },  // Waste/loss tracking
-    
-    // Reservation tracking metadata
-    lastReservationCheck: { type: Date },  // Performance optimization for capacity queries
-    
-    // DEPRECATED: Old unit-based tracking (kept for migration reference)
-    expectedUnits:   { type: Number },
-    remainingUnits:  { type: Number },
-    actualUnitsSold: { type: Number },
-    difference:      { type: Number },
-    
-    // Lifecycle tracking
-    openedBy:        { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
-    openedAt:        { type: Date },
-    closedBy:        { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
-    closedAt:        { type: Date },
-    
-    createdAt:       { type: Date, default: Date.now },
-    updatedAt:       { type: Date, default: Date.now },
-  },
-  { collection: 'bar_bottles' }
-)
-// Regular compound index (no uniqueness - allows multiple open bottles)
-barBottleSchema.index({ userId: 1, branchId: 1, inventoryItemId: 1, state: 1 })
-barBottleSchema.index({ userId: 1, branchId: 1, inventoryItemId: 1, createdAt: -1 })
-barBottleSchema.index({ userId: 1, branchId: 1, state: 1 })
-
-// ── BarTab ─────────────────────────────────────────────────────────────────────
-// Central tab document. Payments are embedded to support partial payments.
-
-const barTabPaymentSchema = new mongoose.Schema(
-  {
-    amount:      { type: Number, required: true },
-    method:      { type: String, enum: ['cash', 'card', 'mobile_money'], required: true },
-    amountGiven: { type: Number },   // cash overpay tracking
-    change:      { type: Number },
-    mpesaCode:   { type: String },
-    mpesaPhone:  { type: String },
-    recordedBy:  { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
-    recordedAt:  { type: Date, default: Date.now },
-  },
-  { _id: true }
-)
-
-export const barTabSchema = new mongoose.Schema(
-  {
-    userId:         { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    branchId:       { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
-    staffId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
-    tabNumber:      { type: String, required: true },
-    customerId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
-    customerName:   { type: String, default: '' },
-    tableNumber:    { type: String, default: '' },
-    notes:          { type: String, default: '' },
-    status:         { type: String, enum: ['open', 'hold', 'billing', 'paid'], default: 'open' },
-    isSyntheticDirectSale: { type: Boolean, default: false },  // DEPRECATED: will be removed in v3
-    
-    // NEW: Reservation tracking
-    reservationIds:    { type: [mongoose.Schema.Types.ObjectId], default: [], ref: 'BarReservation' },
-    reservationsValid: { type: Boolean, default: true },  // Quick check if all reservations still valid
-    
-    subtotal:       { type: Number, default: 0 },
-    discountPct:    { type: Number, default: 0, min: 0, max: 100 },
-    discountAmount: { type: Number, default: 0 },
-    total:          { type: Number, default: 0 },
-    amountPaid:     { type: Number, default: 0 },  // sum of payments
-    payments:       { type: [barTabPaymentSchema], default: [] },
-    saleId:         { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' },  // set on close
-    openedAt:       { type: Date, default: Date.now },
-    closedAt:       { type: Date },
-    synced:         { type: Boolean, default: true },
-    createdAt:      { type: Date, default: Date.now },
-    updatedAt:      { type: Date, default: Date.now },
-  },
-  { collection: 'bar_tabs' }
-)
-barTabSchema.index({ userId: 1, branchId: 1, status: 1 })
-barTabSchema.index({ userId: 1, branchId: 1, openedAt: -1 })
-barTabSchema.index({ userId: 1, tabNumber: 1 }, { unique: true })
-
-// ── BarTabLine ─────────────────────────────────────────────────────────────────
-// Individual line items added to a tab.
-// servingId is null for sealed bottle sales; populated for portion/serving sales.
-// bottleId tracks which specific bottle supplied the serving (multi-bottle support)
-export const barTabLineSchema = new mongoose.Schema(
-  {
-    userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    branchId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
-    tabId:           { type: mongoose.Schema.Types.ObjectId, ref: 'BarTab', required: true },
-    inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
-    servingId:       { type: mongoose.Schema.Types.ObjectId, ref: 'BarServing' },  // null = bottle sale
-    bottleId:        { type: mongoose.Schema.Types.ObjectId, ref: 'BarBottle' },   // which bottle was used
-    reservationId:   { type: mongoose.Schema.Types.ObjectId, ref: 'BarReservation' },  // NEW: link to reservation
-    itemName:        { type: String, required: true },   // denormalized for receipt display
-    servingName:     { type: String, default: '' },      // denormalized for receipt display
-    quantity:        { type: Number, required: true, min: 1 },
-    unitPrice:       { type: Number, required: true },
-    lineTotal:       { type: Number, required: true },
-    discount:        { type: Number, default: 0 },       // NEW: per-line discount
-    addedBy:         { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
-    addedAt:         { type: Date, default: Date.now },
-    voided:          { type: Boolean, default: false },
-    voidedBy:        { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
-    voidedAt:        { type: Date },
-  },
-  { collection: 'bar_tab_lines' }
-)
-barTabLineSchema.index({ userId: 1, tabId: 1, addedAt: -1 })
-barTabLineSchema.index({ userId: 1, inventoryItemId: 1, addedAt: -1 })
-barTabLineSchema.index({ userId: 1, bottleId: 1 })  // NEW: bottle history lookups
-
-// ── BarReservation ─────────────────────────────────────────────────────────────
-// Temporary hold on bottle fractions to prevent overselling across concurrent tabs
-// Reservations bridge the gap between tab creation and payment completion
-export const barReservationSchema = new mongoose.Schema(
-  {
-    userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    branchId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
-    tabId:           { type: mongoose.Schema.Types.ObjectId, ref: 'BarTab', required: true },
-    inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
-    servingId:       { type: mongoose.Schema.Types.ObjectId, ref: 'BarServing' },  // null = bottle sale
-    bottleId:        { type: mongoose.Schema.Types.ObjectId, ref: 'BarBottle', required: true },
-    
-    // Quantity tracking
-    fractionReserved: { type: Number, required: true, min: 0, max: 1 },  // amount held
-    quantity:         { type: Number, required: true, min: 1 },           // servings/bottles count
-    unitPrice:        { type: Number, required: true },                   // price per unit
-    
-    // Lifecycle status
-    status: {
-      type: String,
-      enum: ['reserved', 'committed', 'released', 'expired'],
-      default: 'reserved',
-      required: true,
-    },
-    
-    // Timestamps
-    createdAt:    { type: Date, default: Date.now, required: true },
-    expiresAt:    { type: Date, required: true },                       // TTL for auto-cleanup
-    committedAt:  { type: Date },                                       // when payment succeeded
-    releasedAt:   { type: Date },                                       // when cancelled/failed
-    
-    // Metadata
-    createdBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'Staff', required: true },
-    releaseReason: { type: String },  // 'payment_failed', 'tab_cancelled', 'TTL_EXPIRED', etc.
-  },
-  { collection: 'bar_reservations' }
-)
-
-// Indexes for reservation management
-barReservationSchema.index({ userId: 1, tabId: 1 })                           // Find all reservations for a tab
-barReservationSchema.index({ userId: 1, bottleId: 1, status: 1 })            // Calculate available capacity
-barReservationSchema.index({ status: 1, expiresAt: 1 })                      // TTL cleanup queries
-barReservationSchema.index({ userId: 1, inventoryItemId: 1, status: 1 })     // Product-level reporting
-barReservationSchema.index({ userId: 1, branchId: 1, createdAt: -1 })        // General queries
-
-// ── BarAuditLog ────────────────────────────────────────────────────────────────
-// Immutable ledger of all significant bar operations.
-// Records are never updated or deleted — only inserted.
-export const barAuditLogSchema = new mongoose.Schema(
-  {
-    userId:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    branchId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
-    staffId:       { type: mongoose.Schema.Types.ObjectId, ref: 'Staff', required: true },
-    operation: {
-      type: String,
-      enum: [
-        'TAB_CREATED',
-        'TAB_LINE_ADDED',
-        'TAB_STATUS_CHANGED',
-        'TAB_DISCOUNT_APPLIED',
-        'TAB_CLOSED',
-        'SERVING_SOLD',
-        'BOTTLE_SOLD',
-        'BOTTLE_OPENED',
-        'BOTTLE_CLOSED',
-        'INVENTORY_ADJUSTED',
-      ],
-      required: true,
-    },
-    referenceId:   { type: String },   // tabId, bottleId, etc.
-    referenceType: { type: String },   // 'BarTab', 'BarBottle', etc.
-    details:       { type: mongoose.Schema.Types.Mixed, default: {} },
-    timestamp:     { type: Date, default: Date.now },
-  },
-  { collection: 'bar_audit_logs' }
-)
-barAuditLogSchema.index({ userId: 1, branchId: 1, timestamp: -1 })
-barAuditLogSchema.index({ userId: 1, staffId: 1, timestamp: -1 })
-barAuditLogSchema.index({ userId: 1, operation: 1, timestamp: -1 })
-// No pre-save hooks — intentionally immutable
-
-// ── BarBottleAudit ─────────────────────────────────────────────────────────────
-// Variance tracking: expected vs actual servings when bottles are closed
-// Used for theft detection, spillage analysis, and accountability
-const barBottleAuditServingSchema = new mongoose.Schema(
-  {
-    servingId:   { type: mongoose.Schema.Types.ObjectId, ref: 'BarServing', required: true },
-    servingName: { type: String, required: true },
-    quantity:    { type: Number, required: true },
-  },
-  { _id: false }
-)
-
-export const barBottleAuditSchema = new mongoose.Schema(
-  {
-    userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    branchId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
-    bottleId:        { type: mongoose.Schema.Types.ObjectId, ref: 'BarBottle', required: true },
-    inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
-    
-    // Product context (denormalized for reporting)
-    productName:     { type: String, required: true },
-    productSize:     { type: String, default: '' },
-    brandCategory:   { type: String, default: '' },
-    
-    // Bottle state at closure
-    bottleNumber:       { type: Number, required: true },
-    remainingFraction:  { type: Number, required: true, min: 0, max: 1 },  // at close time
-    
-    // Expected servings (calculated from remainingFraction)
-    expectedServings:   { type: [barBottleAuditServingSchema], default: [] },
-    totalExpected:      { type: Number, required: true },
-    
-    // Actual servings sold (from BarTabLine)
-    actualServings:     { type: [barBottleAuditServingSchema], default: [] },
-    totalActual:        { type: Number, required: true },
-    
-    // Variance analysis
-    varianceQuantity:   { type: Number, required: true },  // expected - actual
-    variancePercentage: { type: Number, required: true },  // (variance / expected) * 100
-    varianceFlag:       { type: String, enum: ['normal', 'warning', 'critical'], required: true },
-    
-    // Audit context
-    closedBy:        { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
-    closedAt:        { type: Date, required: true },
-    notes:           { type: String, default: '' },
-    
-    createdAt:       { type: Date, default: Date.now },
-  },
-  { collection: 'bar_bottle_audits' }
-)
-barBottleAuditSchema.index({ userId: 1, branchId: 1, closedAt: -1 })
-barBottleAuditSchema.index({ userId: 1, bottleId: 1 })
-barBottleAuditSchema.index({ userId: 1, inventoryItemId: 1, closedAt: -1 })
-barBottleAuditSchema.index({ userId: 1, varianceFlag: 1, closedAt: -1 })  // high-variance queries
-barBottleAuditSchema.index({ userId: 1, closedBy: 1, closedAt: -1 })      // per-staff analysis
-// Immutable - no updates allowed after creation
-
-// ── BarStockMovement ───────────────────────────────────────────────────────────
-// Audit trail for all bar inventory stock changes.
-// Tracks automatic movements (sales, bottle openings) and manual adjustments
-// (breakage, spillage, stock-in, damage, theft, wastage).
-export const barStockMovementSchema = new mongoose.Schema(
-  {
-    userId:   { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    branchId: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
-    
-    // Movement type
-    type: {
-      type: String,
-      enum: [
-        'STOCK_IN',         // Supplier delivery
-        'BOTTLE_SALE',      // Full bottle sold
-        'SERVING_SALE',     // Serving poured (auto)
-        'BOTTLE_OPEN',      // Sealed → Open (for servings)
-        'BREAKAGE',         // Bottle broken
-        'SPILLAGE',         // Liquid wasted during pour
-        'DAMAGE',           // Damaged/unusable
-        'THEFT',            // Stock missing
-        'WASTAGE',          // Quality issues, expired
-        'TRANSFER_OUT',     // Sent to another branch/kitchen
-        'TRANSFER_IN',      // Received from another branch
-        'ADJUSTMENT',       // Manual stock correction
-        'RETURN',           // Return to supplier
-      ],
-      required: true,
-    },
-    
-    timestamp: { type: Date, default: Date.now },
-    
-    // What changed
-    inventoryItemId: { type: mongoose.Schema.Types.ObjectId, ref: 'BarInventoryItem', required: true },
-    itemName:        { type: String, required: true },  // denormalized for fast display
-    brandName:       { type: String, default: '' },     // denormalized brand/category
-    
-    // Quantity tracking
-    quantity:      { type: Number, required: true },  // Bottles affected (can be negative)
-    previousStock: { type: Number, required: true },  // Before
-    newStock:      { type: Number, required: true },  // After
-    
-    // Cost tracking (for loss valuation)
-    unitCost:  { type: Number },  // Buying price per bottle
-    totalCost: { type: Number },  // Total value of movement
-    
-    // Context
-    staffId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
-    staffName: { type: String, default: '' },  // denormalized
-    tabId:     { type: mongoose.Schema.Types.ObjectId, ref: 'BarTab' },  // If related to a sale
-    bottleId:  { type: mongoose.Schema.Types.ObjectId, ref: 'BarBottle' },  // If related to a bottle
-    reference: { type: String, default: '' },  // Delivery note, invoice #, order number
-    reason:    { type: String, default: '' },  // Why (for manual adjustments)
-    notes:     { type: String, default: '' },
-  },
-  { collection: 'bar_stock_movements' }
-)
-barStockMovementSchema.index({ userId: 1, branchId: 1, timestamp: -1 })
-barStockMovementSchema.index({ userId: 1, inventoryItemId: 1, timestamp: -1 })
-barStockMovementSchema.index({ userId: 1, type: 1, timestamp: -1 })
-barStockMovementSchema.index({ userId: 1, staffId: 1, timestamp: -1 })
-// Immutable - movements are never updated or deleted
-
 // ── PurchaseOrder ──────────────────────────────────────────────────────────────
 // Purchase orders generated from restocking analysis
 // Does NOT automatically increase inventory - PO creation is separate from receiving
@@ -1134,3 +735,234 @@ export const restockPlanSchema = new mongoose.Schema(
 )
 restockPlanSchema.index({ userId: 1, createdAt: -1 })
 restockPlanSchema.index({ userId: 1, planType: 1, createdAt: -1 })
+
+// ══════════════════════════════════════════════════════════════════════════════
+// HOSPITALITY MODULE SCHEMAS
+// ══════════════════════════════════════════════════════════════════════════════
+// Specialized inventory and sales system for food and beverage businesses
+// Supports fractional inventory tracking, multiple serving types, and production logs
+
+// ── HospitalityMenuItem ────────────────────────────────────────────────────────
+// Primary inventory items (products and ingredients)
+export const hospitalityMenuItemSchema = new mongoose.Schema(
+  {
+    tenantId:     { type: String, required: true, index: true },
+    name:         { type: String, required: true },
+    description:  { type: String, default: '' },
+    category:     { type: String, required: true },
+    sku:          { type: String, default: '' },
+    barcode:      { type: String, default: '' },
+    images:       { type: [String], default: [] },
+    
+    // Item classification
+    itemType:     { type: String, enum: ['for-sale', 'ingredient'], required: true, default: 'for-sale' },
+    isServable:   { type: Boolean, default: false },  // true = supports servings, false = whole-only
+    servingMode:  { type: String, enum: ['fraction', 'volume'], default: null },  // calculation mode
+    
+    // Unit configuration
+    baseUnit:     { type: String, default: 'unit' },  // 'bottle', 'fruit', 'liter', 'bar', etc.
+    
+    // Pricing (for non-servable items or ingredients)
+    wholePriceIfNotServable: { type: Number, default: 0 },  // price when sold as whole
+    costPrice:    { type: Number, default: 0 },
+    
+    // Inventory configuration
+    reorderPoint:      { type: Number, default: 10 },
+    inventoryMode:     { type: String, enum: ['tracked', 'untracked'], default: 'tracked' },
+    canConsolidate:    { type: Boolean, default: false },  // whether partial units can be physically consolidated
+    
+    status:       { type: String, enum: ['active', 'inactive'], default: 'active' },
+    createdAt:    { type: Date, default: Date.now },
+    updatedAt:    { type: Date, default: Date.now },
+  },
+  { collection: 'hospitality_menu_items' }
+)
+hospitalityMenuItemSchema.index({ tenantId: 1, name: 1 })
+hospitalityMenuItemSchema.index({ tenantId: 1, category: 1 })
+hospitalityMenuItemSchema.index({ tenantId: 1, itemType: 1, status: 1 })
+hospitalityMenuItemSchema.index({ tenantId: 1, barcode: 1 })
+hospitalityMenuItemSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
+
+// ── HospitalityServingType ─────────────────────────────────────────────────────
+// Serving definitions per menu item
+export const hospitalityServingTypeSchema = new mongoose.Schema(
+  {
+    tenantId:          { type: String, required: true, index: true },
+    menuItemId:        { type: mongoose.Schema.Types.ObjectId, ref: 'HospitalityMenuItem', required: true },
+    name:              { type: String, required: true },  // 'Tot', 'Prime', 'Quick', '250ml', 'Slice'
+    servingsPerUnit:   { type: Number, required: true, min: 1 },  // 20 tots per bottle, 8 slices per fruit
+    pricePerServing:   { type: Number, required: true, min: 0 },
+    volume:            { type: Number, default: null },  // for volume-based: 250 (ml)
+    isDefault:         { type: Boolean, default: false },  // default serving type in POS
+    displayOrder:      { type: Number, default: 0 },
+    createdAt:         { type: Date, default: Date.now },
+    updatedAt:         { type: Date, default: Date.now },
+  },
+  { collection: 'hospitality_serving_types' }
+)
+hospitalityServingTypeSchema.index({ tenantId: 1, menuItemId: 1 })
+hospitalityServingTypeSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
+
+// ── HospitalityServingInventory ────────────────────────────────────────────────
+// Current stock levels with partial tracking
+const partialUnitSchema = new mongoose.Schema(
+  {
+    id:                { type: String, required: true },  // unique identifier
+    servingsRemaining: { type: mongoose.Schema.Types.Mixed, default: {} },  // { servingTypeId: remaining }
+    openedAt:          { type: Date, default: Date.now },
+    batchId:           { type: String, default: null },  // for traceability
+  },
+  { _id: false }
+)
+
+export const hospitalityServingInventorySchema = new mongoose.Schema(
+  {
+    tenantId:              { type: String, required: true, index: true },
+    menuItemId:            { type: mongoose.Schema.Types.ObjectId, ref: 'HospitalityMenuItem', required: true },
+    wholeUnits:            { type: Number, default: 0, min: 0 },  // complete unopened units
+    partialUnits:          { type: [partialUnitSchema], default: [] },
+    totalAvailableServings: { type: mongoose.Schema.Types.Mixed, default: {} },  // { servingTypeId: total }
+    lastUpdated:           { type: Date, default: Date.now },
+    lastCountedAt:         { type: Date, default: Date.now },  // physical stock count
+    variance:              { type: Number, default: 0 },  // difference from expected
+  },
+  { collection: 'hospitality_serving_inventory' }
+)
+hospitalityServingInventorySchema.index({ tenantId: 1, menuItemId: 1 }, { unique: true })
+hospitalityServingInventorySchema.pre('save', function (next) { (this as any).lastUpdated = new Date(); next() })
+
+// ── HospitalityServingMovement ─────────────────────────────────────────────────
+// Audit trail for all inventory changes
+export const hospitalityServingMovementSchema = new mongoose.Schema(
+  {
+    tenantId:       { type: String, required: true, index: true },
+    menuItemId:     { type: mongoose.Schema.Types.ObjectId, ref: 'HospitalityMenuItem', required: true },
+    movementType:   { 
+      type: String, 
+      enum: ['sale', 'receive', 'production', 'adjustment', 'waste', 'consolidation'], 
+      required: true 
+    },
+    servingTypeId:  { type: mongoose.Schema.Types.ObjectId, ref: 'HospitalityServingType', default: null },
+    quantity:       { type: Number, required: true },  // servings moved
+    wholeUnitsChanged: { type: Number, default: 0 },
+    
+    // Snapshot of state before and after
+    beforeState: {
+      wholeUnits:    { type: Number, default: 0 },
+      partialUnits:  { type: Number, default: 0 },
+      totalServings: { type: mongoose.Schema.Types.Mixed, default: {} }
+    },
+    afterState: {
+      wholeUnits:    { type: Number, default: 0 },
+      partialUnits:  { type: Number, default: 0 },
+      totalServings: { type: mongoose.Schema.Types.Mixed, default: {} }
+    },
+    
+    reason:         { type: String, default: '' },  // for manual movements
+    referenceType:  { type: String, enum: ['sale', 'production', 'adjustment', 'other'], default: 'other' },
+    referenceId:    { type: mongoose.Schema.Types.ObjectId, default: null },  // link to source transaction
+    performedBy:    { type: mongoose.Schema.Types.ObjectId, default: null },  // staff/user who performed action
+    approvedBy:     { type: mongoose.Schema.Types.ObjectId, default: null },  // for adjustments requiring approval
+    timestamp:      { type: Date, default: Date.now },
+    metadata:       { type: mongoose.Schema.Types.Mixed, default: {} },  // additional context
+  },
+  { collection: 'hospitality_serving_movements' }
+)
+hospitalityServingMovementSchema.index({ tenantId: 1, menuItemId: 1, timestamp: -1 })
+hospitalityServingMovementSchema.index({ tenantId: 1, movementType: 1, timestamp: -1 })
+hospitalityServingMovementSchema.index({ tenantId: 1, timestamp: -1 })
+
+// ── HospitalityProductionLog ───────────────────────────────────────────────────
+// Kitchen/bar production tracking
+const productionIngredientSchema = new mongoose.Schema(
+  {
+    itemId:       { type: mongoose.Schema.Types.ObjectId, ref: 'HospitalityMenuItem', required: true },
+    itemName:     { type: String, required: true },
+    quantityUsed: { type: Number, required: true },
+    unit:         { type: String, required: true },
+  },
+  { _id: false }
+)
+
+export const hospitalityProductionLogSchema = new mongoose.Schema(
+  {
+    tenantId:           { type: String, required: true, index: true },
+    productionDate:     { type: Date, default: Date.now },
+    producedItemId:     { type: mongoose.Schema.Types.ObjectId, ref: 'HospitalityMenuItem', required: true },
+    servingTypeId:      { type: mongoose.Schema.Types.ObjectId, ref: 'HospitalityServingType', default: null },
+    expectedYield:      { type: Number, required: true },  // servings expected
+    actualYield:        { type: Number, required: true },  // servings actually produced
+    variance:           { type: Number, default: 0 },  // actualYield - expectedYield
+    variancePercentage: { type: Number, default: 0 },
+    ingredientsUsed:    { type: [productionIngredientSchema], default: [] },
+    notes:              { type: String, default: '' },
+    producedBy:         { type: mongoose.Schema.Types.ObjectId, default: null },
+    approvedBy:         { type: mongoose.Schema.Types.ObjectId, default: null },
+    status:             { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    createdAt:          { type: Date, default: Date.now },
+  },
+  { collection: 'hospitality_production_logs' }
+)
+hospitalityProductionLogSchema.index({ tenantId: 1, productionDate: -1 })
+hospitalityProductionLogSchema.index({ tenantId: 1, producedItemId: 1, productionDate: -1 })
+hospitalityProductionLogSchema.index({ tenantId: 1, status: 1 })
+
+// ── HospitalityOrder ───────────────────────────────────────────────────────────
+// Sales orders (links to main sales system)
+const hospitalityOrderItemSchema = new mongoose.Schema(
+  {
+    menuItemId:       { type: mongoose.Schema.Types.ObjectId, ref: 'HospitalityMenuItem', required: true },
+    name:             { type: String, required: true },
+    quantity:         { type: Number, required: true, min: 1 },  // whole units ordered
+    servingTypeId:    { type: mongoose.Schema.Types.ObjectId, ref: 'HospitalityServingType', default: null },
+    servingTypeName:  { type: String, default: '' },
+    servingsOrdered:  { type: Number, default: null },  // null for whole-only items
+    pricePerUnit:     { type: Number, required: true },
+    totalPrice:       { type: Number, required: true },
+  },
+  { _id: false }
+)
+
+export const hospitalityOrderSchema = new mongoose.Schema(
+  {
+    tenantId:          { type: String, required: true, index: true },
+    orderNumber:       { type: String, required: true },
+    items:             { type: [hospitalityOrderItemSchema], required: true },
+    subtotal:          { type: Number, required: true },
+    tax:               { type: Number, default: 0 },
+    total:             { type: Number, required: true },
+    paymentMethod:     { type: String, enum: ['cash', 'card', 'mobile_money', 'credit'], required: true },
+    paymentStatus:     { type: String, enum: ['pending', 'paid', 'refunded'], default: 'paid' },
+    customerId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', default: null },
+    servedBy:          { type: mongoose.Schema.Types.ObjectId, default: null },
+    tableNumber:       { type: String, default: '' },
+    orderType:         { type: String, enum: ['dine-in', 'takeaway', 'delivery'], default: 'dine-in' },
+    status:            { type: String, enum: ['pending', 'completed', 'cancelled'], default: 'completed' },
+    createdAt:         { type: Date, default: Date.now },
+    completedAt:       { type: Date, default: Date.now },
+  },
+  { collection: 'hospitality_orders' }
+)
+hospitalityOrderSchema.index({ tenantId: 1, createdAt: -1 })
+hospitalityOrderSchema.index({ tenantId: 1, status: 1 })
+hospitalityOrderSchema.index({ tenantId: 1, orderNumber: 1 })
+
+// ── HospitalityCategory ────────────────────────────────────────────────────────
+// Menu categories (Drinks, Food, Snacks, Desserts, etc.)
+export const hospitalityCategorySchema = new mongoose.Schema(
+  {
+    tenantId:    { type: String, required: true, index: true },
+    name:        { type: String, required: true },
+    description: { type: String, default: '' },
+    color:       { type: String, default: '#3b82f6' },
+    icon:        { type: String, default: 'utensils' },
+    displayOrder: { type: Number, default: 0 },
+    isVisible:   { type: Boolean, default: true },
+    createdAt:   { type: Date, default: Date.now },
+    updatedAt:   { type: Date, default: Date.now },
+  },
+  { collection: 'hospitality_categories' }
+)
+hospitalityCategorySchema.index({ tenantId: 1, name: 1 }, { unique: true })
+hospitalityCategorySchema.index({ tenantId: 1, displayOrder: 1 })
+hospitalityCategorySchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })

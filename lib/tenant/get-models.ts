@@ -7,10 +7,11 @@ import {
   reportSchema, stockLedgerSchema, supplierSchema,
   customerSchema, drugBatchSchema, drugSchema,
   branchSchema, inventorySchema, inventoryTransactionSchema,
-  barBrandSchema, barInventoryItemSchema, barServingSchema, barBottleSchema,
-  barTabSchema, barTabLineSchema, barAuditLogSchema, barBottleAuditSchema,
-  barStockMovementSchema, barReservationSchema,
+
   purchaseOrderSchema, restockPlanSchema,
+  hospitalityMenuItemSchema, hospitalityServingTypeSchema, hospitalityServingInventorySchema,
+  hospitalityServingMovementSchema, hospitalityProductionLogSchema, hospitalityOrderSchema,
+  hospitalityCategorySchema,
 } from '@/lib/models/schemas'
 
 export function getModels(conn: mongoose.Connection) {
@@ -36,17 +37,15 @@ export function getModels(conn: mongoose.Connection) {
     Branch:          conn.models.Branch          || conn.model('Branch',          branchSchema),
     Inventory:       conn.models.Inventory       || conn.model('Inventory',       inventorySchema),
     InventoryTransaction: conn.models.InventoryTransaction || conn.model('InventoryTransaction', inventoryTransactionSchema),
-    BarBrand:         conn.models.BarBrand         || conn.model('BarBrand',         barBrandSchema),
-    BarInventoryItem: conn.models.BarInventoryItem || conn.model('BarInventoryItem', barInventoryItemSchema),
-    BarServing:       conn.models.BarServing       || conn.model('BarServing',       barServingSchema),
-    BarBottle:        conn.models.BarBottle        || conn.model('BarBottle',        barBottleSchema),
-    BarTab:           conn.models.BarTab           || conn.model('BarTab',           barTabSchema),
-    BarTabLine:       conn.models.BarTabLine       || conn.model('BarTabLine',       barTabLineSchema),
-    BarReservation:   conn.models.BarReservation   || conn.model('BarReservation',   barReservationSchema),
-    BarAuditLog:      conn.models.BarAuditLog      || conn.model('BarAuditLog',      barAuditLogSchema),
-    BarBottleAudit:   conn.models.BarBottleAudit   || conn.model('BarBottleAudit',   barBottleAuditSchema),
-    BarStockMovement: conn.models.BarStockMovement || conn.model('BarStockMovement', barStockMovementSchema),
+
     PurchaseOrder:    conn.models.PurchaseOrder    || conn.model('PurchaseOrder',    purchaseOrderSchema),
     RestockPlan:      conn.models.RestockPlan      || conn.model('RestockPlan',      restockPlanSchema),
+    HospitalityMenuItem:        conn.models.HospitalityMenuItem        || conn.model('HospitalityMenuItem',        hospitalityMenuItemSchema),
+    HospitalityServingType:     conn.models.HospitalityServingType     || conn.model('HospitalityServingType',     hospitalityServingTypeSchema),
+    HospitalityServingInventory: conn.models.HospitalityServingInventory || conn.model('HospitalityServingInventory', hospitalityServingInventorySchema),
+    HospitalityServingMovement: conn.models.HospitalityServingMovement || conn.model('HospitalityServingMovement', hospitalityServingMovementSchema),
+    HospitalityProductionLog:   conn.models.HospitalityProductionLog   || conn.model('HospitalityProductionLog',   hospitalityProductionLogSchema),
+    HospitalityOrder:           conn.models.HospitalityOrder           || conn.model('HospitalityOrder',           hospitalityOrderSchema),
+    HospitalityCategory:        conn.models.HospitalityCategory        || conn.model('HospitalityCategory',        hospitalityCategorySchema),
   }
 }

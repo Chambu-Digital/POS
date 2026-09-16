@@ -24,6 +24,7 @@ import {
   Truck,
   UserCog,
   Settings,
+  UtensilsCrossed,
 } from 'lucide-react'
 import type { LucideProps } from 'lucide-react'
 
@@ -251,6 +252,74 @@ export const PHARMACY_MODULE: ModuleDefinition = {
   ],
 }
 
+// ── 5. Hospitality ─────────────────────────────────────────────────────────────
+// Food and beverage management with serving-based inventory
+export const HOSPITALITY_MODULE: ModuleDefinition = {
+  key: 'hospitality',
+  label: 'Hospitality',
+  description: 'Restaurant, bar, and food service management',
+  defaultOn: false,
+  icon: UtensilsCrossed,
+  features: [
+    {
+      key: 'hospitality.pos',
+      label: 'POS',
+      description: 'Point of sale with serving selection',
+      href: '/dashboard/hospitality/pos',
+      adminOnly: false,
+      defaultOn: true,
+    },
+    {
+      key: 'hospitality.orders',
+      label: 'Orders',
+      description: 'Order history and management',
+      href: '/dashboard/hospitality/orders',
+      adminOnly: false,
+      defaultOn: true,
+    },
+    {
+      key: 'hospitality.menu',
+      label: 'Menu',
+      description: 'Menu configuration and pricing',
+      href: '/dashboard/hospitality/menu',
+      adminOnly: false,
+      defaultOn: true,
+    },
+    {
+      key: 'hospitality.inventory',
+      label: 'Inventory',
+      description: 'Stock management with serving tracking',
+      href: '/dashboard/hospitality/inventory',
+      adminOnly: false,
+      defaultOn: true,
+    },
+    {
+      key: 'hospitality.stock',
+      label: 'Stock Movements',
+      description: 'Movement history and audit trail',
+      href: '/dashboard/hospitality/stock',
+      adminOnly: false,
+      defaultOn: true,
+    },
+    {
+      key: 'hospitality.production',
+      label: 'Production',
+      description: 'Kitchen/bar production logs',
+      href: '/dashboard/hospitality/production',
+      adminOnly: false,
+      defaultOn: true,
+    },
+    {
+      key: 'hospitality.reports',
+      label: 'Reports',
+      description: 'Sales, wastage, and variance analytics',
+      href: '/dashboard/hospitality/reports',
+      adminOnly: false,
+      defaultOn: true,
+    },
+  ],
+}
+
 // ── Master module list ─────────────────────────────────────────────────────────
 // Order determines sidebar rendering order.
 export const MODULES: ModuleDefinition[] = [
@@ -258,6 +327,7 @@ export const MODULES: ModuleDefinition[] = [
   RETAIL_MODULE,
   RENTALS_MODULE,
   PHARMACY_MODULE,
+  HOSPITALITY_MODULE,
 ]
 
 // ── Derived helpers ────────────────────────────────────────────────────────────
@@ -354,6 +424,13 @@ export const DEFAULT_STAFF_PERMISSIONS: Record<string, boolean> = {
   'pharmacy.patients':     false,
   'pharmacy.appointments': false,
   'pharmacy.billing':      false,
+  'hospitality.pos':        false,
+  'hospitality.orders':     false,
+  'hospitality.menu':       false,
+  'hospitality.inventory':  false,
+  'hospitality.stock':      false,
+  'hospitality.production': false,
+  'hospitality.reports':    false,
 }
 
 /** Default permissions for a manager */
@@ -374,6 +451,13 @@ export const DEFAULT_MANAGER_PERMISSIONS: Record<string, boolean> = {
   'pharmacy.patients':     false,
   'pharmacy.appointments': false,
   'pharmacy.billing':      false,
+  'hospitality.pos':        false,
+  'hospitality.orders':     false,
+  'hospitality.menu':       false,
+  'hospitality.inventory':  false,
+  'hospitality.stock':      false,
+  'hospitality.production': false,
+  'hospitality.reports':    false,
 }
 
 /** Normalises a permissions object — only keys explicitly set to true are granted */

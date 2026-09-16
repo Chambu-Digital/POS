@@ -66,6 +66,7 @@ export default function DashboardPage() {
   }
 
   const showBar     = can('bar.tabs')
+  const showHospitality = can('hospitality.pos') || can('hospitality.orders')
   // kds.display was a legacy key — the canonical key is now kds.orders (any kds feature suffices)
   const showKds     = can('kds.orders') || can('kds.chef') || can('kds.waiter')
   const showRentals = can('rentals.bookings') || can('rentals.manage')
@@ -110,7 +111,10 @@ export default function DashboardPage() {
               {(stats.recentOrders || []).slice(0, 10).map((order: any) => (
                 <div key={order._id} className="flex justify-between items-start text-sm">
                   <div>
-                    <p className="font-medium">#{order._id.slice(-6).toUpperCase()}</p>
+                    <p className="font-medium">
+                      #{order.source === 'hospitality' ? order.orderNum : order._id.slice(-6).toUpperCase()}
+                      {order.source === 'hospitality' && <span className="ml-2 text-[10px] text-green-600 font-semibold">HSP</span>}
+                    </p>
                     <p className="text-xs text-muted-foreground">{new Date(order.createdAt).toLocaleDateString()}</p>
                   </div>
                   <p className="font-semibold">KES {order.total.toLocaleString()}</p>
@@ -164,10 +168,11 @@ export default function DashboardPage() {
           <div className="flex flex-wrap gap-6 text-sm">
             <span className="text-gray-700">Orders: <strong>{stats.todayStats.totalOrders}</strong></span>
             <span className="text-gray-700">Revenue: <strong>KES {stats.todayStats.totalRevenue.toLocaleString()}</strong></span>
-            {stats.todayStats.bySource.pos > 0    && <span className="text-gray-600">POS: <strong>KES {stats.todayStats.bySource.pos.toLocaleString()}</strong></span>}
-            {showBar     && stats.todayStats.bySource.bar > 0    && <span className="text-green-700">Bar: <strong>KES {stats.todayStats.bySource.bar.toLocaleString()}</strong></span>}
-            {showKds     && stats.todayStats.bySource.kds > 0    && <span className="text-blue-700">Kitchen: <strong>KES {stats.todayStats.bySource.kds.toLocaleString()}</strong></span>}
-            {showRentals && stats.todayStats.bySource.rental > 0 && <span className="text-purple-700">Rentals: <strong>KES {stats.todayStats.bySource.rental.toLocaleString()}</strong></span>}
+            {stats.todayStats.bySource.pos > 0         && <span className="text-gray-600">POS: <strong>KES {stats.todayStats.bySource.pos.toLocaleString()}</strong></span>}
+            {showBar          && stats.todayStats.bySource.bar > 0         && <span className="text-green-700">Bar: <strong>KES {stats.todayStats.bySource.bar.toLocaleString()}</strong></span>}
+            {showHospitality  && stats.todayStats.bySource.hospitality > 0 && <span className="text-emerald-700">Hospitality: <strong>KES {stats.todayStats.bySource.hospitality.toLocaleString()}</strong></span>}
+            {showKds          && stats.todayStats.bySource.kds > 0         && <span className="text-blue-700">Kitchen: <strong>KES {stats.todayStats.bySource.kds.toLocaleString()}</strong></span>}
+            {showRentals      && stats.todayStats.bySource.rental > 0      && <span className="text-purple-700">Rentals: <strong>KES {stats.todayStats.bySource.rental.toLocaleString()}</strong></span>}
             {Object.entries(stats.todayStats.byPayment as Record<string, number>).map(([method, amt]) => (
               <span key={method} className="text-gray-500">
                 {method === 'mobile_money' ? 'M-Pesa' : method.charAt(0).toUpperCase() + method.slice(1)}: <strong>KES {amt.toLocaleString()}</strong>
@@ -178,7 +183,7 @@ export default function DashboardPage() {
       )}
 
       {/* Key Metrics */}
-      <div className={`grid gap-4 ${[true, showBar, showKds, showRentals].filter(Boolean).length === 1 ? 'grid-cols-2 md:grid-cols-2' : 'grid-cols-2 md:grid-cols-5'}`}>
+      <div className={`grid gap-4 ${[true, showBar, showHospitality, showKds, showRentals].filter(Boolean).length === 1 ? 'grid-cols-2 md:grid-cols-2' : 'grid-cols-2 md:grid-cols-5'}`}>
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Revenue ({period}d)</p>
@@ -196,6 +201,14 @@ export default function DashboardPage() {
             <CardContent className="pt-6">
               <p className="text-sm text-muted-foreground">Bar ({period}d)</p>
               <p className="text-2xl font-bold text-green-700">KES {(stats.revenueBySource?.bar ?? 0).toLocaleString()}</p>
+            </CardContent>
+          </Card>
+        )}
+        {showHospitality && (
+          <Card>
+            <CardContent className="pt-6">
+              <p className="text-sm text-muted-foreground">Hospitality ({period}d)</p>
+              <p className="text-2xl font-bold text-emerald-700">KES {(stats.revenueBySource?.hospitality ?? 0).toLocaleString()}</p>
             </CardContent>
           </Card>
         )}
@@ -294,7 +307,10 @@ export default function DashboardPage() {
                 {stats.recentOrders.slice(0, 5).map((order: any) => (
                   <div key={order._id} className="flex justify-between items-start text-sm">
                     <div>
-                      <p className="font-medium">#{order._id.slice(-6).toUpperCase()}</p>
+                      <p className="font-medium">
+                        #{order.source === 'hospitality' ? order.orderNum : order._id.slice(-6).toUpperCase()}
+                        {order.source === 'hospitality' && <span className="ml-2 text-[10px] text-emerald-600 font-semibold">HSP</span>}
+                      </p>
                       <p className="text-xs text-muted-foreground">{new Date(order.createdAt).toLocaleDateString()}</p>
                     </div>
                     <p className="font-semibold">KES {order.total.toLocaleString()}</p>

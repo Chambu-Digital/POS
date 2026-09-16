@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
-import { Check, ArrowRight, ShoppingCart, Globe, Smartphone, Zap, BarChart3, Users, Shield } from 'lucide-react'
+import { Check, ArrowRight, ShoppingCart, Globe, Smartphone, Zap, BarChart3, Users, Shield, Download, Monitor, Apple } from 'lucide-react'
 
 const WA_LINK = 'https://wa.me/254756528950?text=Hi%2C%20I%27m%20interested%20in%20Business%20Kit%20for%20my%20business.'
 
@@ -301,6 +301,75 @@ export default function LandingPage() {
               <a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="block text-center border border-green-600 text-green-600 hover:bg-green-50 font-semibold py-3 rounded-xl transition-colors">
                 Get Started
               </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── DOWNLOADS ──────────────────────────────────────────────────────── */}
+      <section className="py-16 px-6 bg-gray-50">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-10">
+            <p className="text-green-600 font-semibold text-sm uppercase tracking-wide mb-2">Access Anywhere</p>
+            <h2 className="text-3xl font-bold text-gray-900 mb-3">Download Our Apps</h2>
+            <p className="text-gray-500">Get the desktop and mobile experience</p>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-6">
+            {/* Windows */}
+            <div className="bg-white rounded-xl p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+                  <Monitor size={24} className="text-blue-600" />
+                </div>
+                <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-1 rounded">Available</span>
+              </div>
+              <h3 className="font-bold text-gray-900 mb-1">Windows</h3>
+              <p className="text-sm text-gray-500 mb-4">Desktop app for Windows 10/11</p>
+              <a 
+                href="/ChambuPOS-Setup-v1.0.0.exe" 
+                download
+                className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm px-4 py-2.5 rounded-lg transition-colors w-full"
+              >
+                <Download size={16} />
+                Download
+              </a>
+            </div>
+
+            {/* Android */}
+            <div className="bg-white rounded-xl p-6 border border-gray-200 opacity-60">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
+                  <Smartphone size={24} className="text-green-600" />
+                </div>
+                <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-1 rounded">Coming Soon</span>
+              </div>
+              <h3 className="font-bold text-gray-900 mb-1">Android</h3>
+              <p className="text-sm text-gray-500 mb-4">Mobile app for Android devices</p>
+              <button 
+                disabled
+                className="flex items-center justify-center gap-2 bg-gray-200 text-gray-500 font-semibold text-sm px-4 py-2.5 rounded-lg w-full cursor-not-allowed"
+              >
+                Coming Soon
+              </button>
+            </div>
+
+            {/* iOS */}
+            <div className="bg-white rounded-xl p-6 border border-gray-200 opacity-60">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center">
+                  <Apple size={24} className="text-gray-600" />
+                </div>
+                <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-1 rounded">Coming Soon</span>
+              </div>
+              <h3 className="font-bold text-gray-900 mb-1">iOS</h3>
+              <p className="text-sm text-gray-500 mb-4">Mobile app for iPhone & iPad</p>
+              <button 
+                disabled
+                className="flex items-center justify-center gap-2 bg-gray-200 text-gray-500 font-semibold text-sm px-4 py-2.5 rounded-lg w-full cursor-not-allowed"
+              >
+                Coming Soon
+              </button>
             </div>
           </div>
         </div>
