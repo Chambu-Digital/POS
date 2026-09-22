@@ -34,6 +34,8 @@ import { initAutoSync } from '@/lib/sync'
 import { useBarcodeScanner } from '@/hooks/use-barcode-scanner'
 import { ScannerFeedback } from '@/components/barcode/scanner-feedback'
 import { ManualBarcodeEntry } from '@/components/barcode/manual-barcode-entry'
+import { CameraScanner } from '@/components/barcode/camera-scanner'
+import { IntegratedCameraScanner } from '@/components/barcode/integrated-camera-scanner'
 import { HeldOrders } from '@/components/sales/held-orders'
 import { ProductImage } from '@/components/ui/product-image'
 import type { ScanResult } from '@/lib/barcode-scanner/types'
@@ -737,11 +739,30 @@ function SalesPageContent() {
           </div>
 
           {/* Manual barcode entry */}
-          <ManualBarcodeEntry
-            onSubmit={submitManual}
-            onFocus={enterEditing}
-            onBlur={exitEditing}
-          />
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <ManualBarcodeEntry
+                onSubmit={submitManual}
+                onFocus={enterEditing}
+                onBlur={exitEditing}
+              />
+            </div>
+            {/* Integrated Camera Scanner - Mobile/Tablet Only */}
+            <div className="md:hidden">
+              <IntegratedCameraScanner
+                onScan={submitManual}
+                cart={cart}
+                cartDiscount={cartDiscount}
+                onUpdateQuantity={updateQuantity}
+                onUpdateDiscount={updateDiscount}
+                onRemoveFromCart={removeFromCart}
+                onUpdateCartDiscount={setCartDiscount}
+                onCompleteSale={completeSale}
+                onEnterEditing={enterEditing}
+                onExitEditing={exitEditing}
+              />
+            </div>
+          </div>
 
           {/* Products Grid */}
           <div className="flex-1 overflow-y-auto">
@@ -948,7 +969,7 @@ function SalesPageContent() {
       {/* Floating Cart Button - Mobile Only */}
       <FloatingCartButton itemCount={cart.length} onClick={scrollToCart} />
 
-      {/* Cart Modal - Mobile Only */}
+      {/* Cart Modal - Mobile Only (Fallback) */}
       <CartModal
         isOpen={isCartModalOpen}
         onClose={() => setIsCartModalOpen(false)}

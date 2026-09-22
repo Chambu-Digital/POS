@@ -4,7 +4,6 @@ import { useState, useRef } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { ScanLine } from 'lucide-react'
-import { CameraScanner } from './camera-scanner'
 
 interface Props {
   onSubmit: (code: string) => void
@@ -23,11 +22,6 @@ export function ManualBarcodeEntry({ onSubmit, onFocus, onBlur, disabled }: Prop
     if (!trimmed) return
     onSubmit(trimmed)
     setValue('')
-    inputRef.current?.focus()
-  }
-
-  function handleCameraScan(code: string) {
-    onSubmit(code)
     inputRef.current?.focus()
   }
 
@@ -50,7 +44,6 @@ export function ManualBarcodeEntry({ onSubmit, onFocus, onBlur, disabled }: Prop
       <Button type="submit" variant="outline" size="sm" disabled={!value.trim() || disabled}>
         Add
       </Button>
-      <CameraScanner onScan={handleCameraScan} disabled={disabled} />
     </form>
   )
 }

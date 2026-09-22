@@ -15,6 +15,7 @@ import { OrderCompletionDialog } from '@/components/sales/order-completion-dialo
 import { useBarcodeScanner } from '@/hooks/use-barcode-scanner'
 import { ScannerFeedback } from '@/components/barcode/scanner-feedback'
 import { ManualBarcodeEntry } from '@/components/barcode/manual-barcode-entry'
+import { CameraScanner } from '@/components/barcode/camera-scanner'
 import { isOnline, addPendingSale, addCachedSale } from '@/lib/indexeddb'
 import type { ScanResult } from '@/lib/barcode-scanner/types'
 import { PermissionGuard } from '@/components/auth/permission-guard'
@@ -144,8 +145,8 @@ function PharmacyPOSContent() {
     if (search) {
       const q = search.toLowerCase()
       f = f.filter(d =>
-        d.productName.toLowerCase().includes(q) ||
-        d.brand?.toLowerCase().includes(q) ||
+        d.genericName.toLowerCase().includes(q) ||
+        d.brandName?.toLowerCase().includes(q) ||
         d.barcode?.includes(q) ||
         d.unit?.toLowerCase().includes(q)
       )
@@ -211,7 +212,7 @@ function PharmacyPOSContent() {
 
   // ── Cart operations ───────────────────────────────────────────────────────
   function addToCart(drug: Drug) {
-    if (drug.stock <= 0) { toast.error(`${drug.productName} is out of stock`); return }
+    if (drug.stock <= 0) { toast.error(`${drug.genericName} is out of stock`); return }
     setCart(prev => {
       const existing = prev.find(i => i.productId === drug._id)
       if (existing) {
@@ -230,7 +231,7 @@ function PharmacyPOSContent() {
         isPrescription: drug.requiresPrescription,
       }]
     })
-    toast.success(`${drug.productName} added`, { duration: 800 })
+    toast.success(`${drug.genericName} added`, { duration: 800 })
   }
 
   function updateQty(productId: string, qty: number) {
@@ -362,7 +363,7 @@ function PharmacyPOSContent() {
 
         setLastSale({
           items: cart.map(i => ({
-            productName: i.productName, brand: i.brand, variant: i.variant,
+            productName: i.productName, brand: i.brand,
             quantity: i.quantity, price: i.sellingPrice, discount: i.discount,
             total: i.sellingPrice * i.quantity - i.discount,
           })),
