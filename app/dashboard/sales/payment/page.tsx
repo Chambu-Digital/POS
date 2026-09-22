@@ -45,6 +45,10 @@ export default function PaymentPage() {
 function PaymentPageContent() {
   const router = useRouter()
   const receiptRef = useRef<ReceiptRef>(null)
+  const amountInputRef = useRef<HTMLInputElement>(null)
+  const mpesaPhoneRef = useRef<HTMLInputElement>(null)
+  const mpesaCodeRef = useRef<HTMLInputElement>(null)
+  
   const [cart, setCart] = useState<CartItem[]>([])
   const [cartDiscount, setCartDiscount] = useState(0)
   // Source context — set by whichever POS page wrote pendingSale
@@ -54,9 +58,15 @@ function PaymentPageContent() {
   const [paymentAmount, setPaymentAmount] = useState<string>('')
   const [mpesaCode, setMpesaCode] = useState<string>('')
   const [mpesaPhone, setMpesaPhone] = useState<string>('')
-  const [showMpesaFields, setShowMpesaFields] = useState(false)
-  const [mpesaMethod, setMpesaMethod] = useState<'stk' | 'manual'>('stk')
-  const [stkPushInitiated, setStkPushInitiated] = useState(false)
+  
+  // M-Pesa state machine
+  type MpesaFlowState = 
+    | 'idle'              // No M-Pesa selected
+    | 'method-selection'  // Choose STK or Manual
+    | 'stk-input'         // Enter phone for STK
+    | 'stk-waiting'       // STK push sent, waiting
+    | 'manual-input'      // Manual entry form
+  const [mpesaFlowState, setMpesaFlowState] = useState<MpesaFlowState>('idle')
   const [showPaymentDialog, setShowPaymentDialog] = useState(false)
   const [showCompletionDialog, setShowCompletionDialog] = useState(false)
   const [processing, setProcessing] = useState(false)
@@ -288,8 +298,25 @@ function PaymentPageContent() {
 
   function handlePaymentMethodChange(value: string) {
     setSelectedPayment(value)
-    setShowMpesaFields(value === 'mobile_money')
-    if (value !== 'mobile_money') { setMpesaCode(''); setMpesaPhone(''); setMpesaMethod('stk'); setStkPushInitiated(false) }
+    
+    // State machine transitions
+    if (value === 'mobile_money') {
+      setMpesaFlowState('method-selection')
+      setShowPaymentDialog(false) // Close main dialog when entering M-Pesa flow
+    } else {
+      // Reset M-Pesa state when switching away
+      setMpesaFlowState('idle')
+      setMpesaCode('')
+      setMpesaPhone('')
+    }
+  }
+
+  // Enter key on amount field submits payment
+  function handleAmountKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      processPayment()
+    }
   }
 
   async function initiateSTKPush() {
@@ -304,12 +331,15 @@ function PaymentPageContent() {
       const data = await res.json()
       if (data.ResponseCode === '0') {
         toast.success('STK Push sent! Enter your M-Pesa PIN')
-        setStkPushInitiated(true)
+        setMpesaFlowState('stk-waiting')
       } else {
         toast.error(data.ResponseDescription || 'Failed to initiate STK Push')
-        setMpesaMethod('manual')
+        setMpesaFlowState('manual-input')
       }
-    } catch { toast.error('Failed to initiate STK Push'); setMpesaMethod('manual') }
+    } catch { 
+      toast.error('Failed to initiate STK Push')
+      setMpesaFlowState('manual-input')
+    }
     finally { setProcessing(false) }
   }
 
@@ -521,35 +551,23 @@ function PaymentPageContent() {
         </DialogContent>
       </Dialog>
 
-      {/* Payment Method Dialog */}
-      <Dialog open={showPaymentDialog} onOpenChange={setShowPaymentDialog}>
+      {/* Dialog 1: Main Payment Method Selection */}
+      <Dialog open={showPaymentDialog && mpesaFlowState === 'idle'} onOpenChange={(open) => {
+        setShowPaymentDialog(open)
+        if (!open) {
+          setSelectedPayment('')
+          setMpesaFlowState('idle')
+        }
+      }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Balance - KES {Math.max(0, total).toFixed(2)}</DialogTitle>
-            <DialogDescription className="sr-only">Select a payment method to complete the sale.</DialogDescription>
+            <DialogTitle>Complete Sale - KES {Math.max(0, total).toFixed(2)}</DialogTitle>
+            <DialogDescription className="sr-only">Select payment method and complete the sale</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <div>
-              <Label className="text-sm font-medium mb-2 block">Payment Method</Label>
-              <Select value={selectedPayment} onValueChange={handlePaymentMethodChange}>
-                <SelectTrigger><SelectValue placeholder="--Select Payment--" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="mobile_money">M-Pesa</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
-                  <SelectItem value="credit">Credit (Pay Later)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Credit warning */}
-            {selectedPayment === 'credit' && !selectedCustomer && (
-              <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                Please select a customer first to use credit payment.
-              </div>
-            )}
-            {selectedPayment === 'credit' && selectedCustomer && (
+            {/* Customer Display (optional) */}
+            {selectedCustomer && (
               <div className="text-sm bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
                 <p className="font-medium text-blue-800">{selectedCustomer.name}</p>
                 {selectedCustomer.creditBalance > 0 && (
@@ -558,57 +576,274 @@ function PaymentPageContent() {
               </div>
             )}
 
-            {/* M-Pesa Fields */}
-            {showMpesaFields && (
-              <>
-                <div>
-                  <Label className="text-sm font-medium mb-2 block">M-Pesa Phone Number <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                  <Input type="tel" value={mpesaPhone} onChange={e => setMpesaPhone(e.target.value)} placeholder="e.g., 0712345678" disabled={stkPushInitiated} />
-                </div>
-                <div className="flex gap-2">
-                  <Button type="button" variant={mpesaMethod === 'stk' ? 'default' : 'outline'} className="flex-1" onClick={() => setMpesaMethod('stk')} disabled={stkPushInitiated}>STK Push</Button>
-                  <Button type="button" variant={mpesaMethod === 'manual' ? 'default' : 'outline'} className="flex-1" onClick={() => { setMpesaMethod('manual'); setStkPushInitiated(false) }}>Manual Entry</Button>
-                </div>
-                {mpesaMethod === 'stk' && !stkPushInitiated && (
-                  <Button type="button" onClick={initiateSTKPush} disabled={!mpesaPhone || processing} className="w-full bg-green-600 hover:bg-green-700">Send STK Push</Button>
-                )}
-                {stkPushInitiated && (
-                  <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
-                    STK Push sent to {mpesaPhone}. Enter your PIN.
-                    <button className="block text-xs text-green-600 mt-1 underline" onClick={() => { setMpesaMethod('manual'); setStkPushInitiated(false) }}>Enter code manually</button>
-                  </div>
-                )}
-                {mpesaMethod === 'manual' && (
-                  <div>
-                    <Label className="text-sm font-medium mb-2 block">M-Pesa Transaction Code <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                    <Input type="text" value={mpesaCode} onChange={e => setMpesaCode(e.target.value.toUpperCase())} placeholder="e.g., QGH7XYZ123" className="uppercase" />
-                    <p className="text-xs text-muted-foreground mt-1">Enter code only if you want to record it</p>
-                  </div>
-                )}
-              </>
+            <div>
+              <Label className="text-sm font-medium mb-2 block">Payment Method *</Label>
+              <Select value={selectedPayment} onValueChange={handlePaymentMethodChange}>
+                <SelectTrigger tabIndex={0}><SelectValue placeholder="--Select Payment--" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="mobile_money">M-Pesa</SelectItem>
+                  <SelectItem value="card">Card</SelectItem>
+                  <SelectItem value="credit">Credit (Pay Later)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1.5">
+                Use <span className="font-semibold">↓↑</span> arrows to select, <span className="font-semibold">Enter</span> to confirm
+              </p>
+            </div>
+
+            {/* Credit warning */}
+            {selectedPayment === 'credit' && !selectedCustomer && (
+              <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Please select a customer first to use credit payment.
+              </div>
             )}
+
+            {/* Amount field for non-mpesa payments */}
+            {selectedPayment && selectedPayment !== 'mobile_money' && (
+              <div>
+                <Label className="text-sm font-medium mb-2 block">
+                  {selectedPayment === 'cash' ? 'Cash Received' : selectedPayment === 'credit' ? 'Amount Paid Now (0 if full credit)' : 'Amount'} *
+                </Label>
+                <Input 
+                  ref={amountInputRef}
+                  type="number" 
+                  value={paymentAmount} 
+                  onChange={e => setPaymentAmount(e.target.value)} 
+                  onKeyDown={handleAmountKeyDown}
+                  placeholder="Enter amount" 
+                  step="0.01" 
+                  onFocus={(e) => e.target.select()} 
+                  autoFocus
+                />
+                {selectedPayment === 'cash' && parseFloat(paymentAmount) > 0 && (
+                  <div className={`mt-2 flex justify-between px-3 py-2 rounded-lg text-sm font-semibold ${change >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                    <span>Change</span>
+                    <span>KES {Math.max(0, change).toFixed(2)}</span>
+                  </div>
+                )}
+                {selectedPayment === 'credit' && selectedCustomer && parseFloat(paymentAmount) < total && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    KES {(total - parseFloat(paymentAmount || '0')).toFixed(2)} will be added to {selectedCustomer.name}'s credit balance
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Process button for non-mpesa */}
+            {selectedPayment && selectedPayment !== 'mobile_money' && (
+              <Button 
+                onClick={processPayment} 
+                disabled={!selectedPayment || processing || (selectedPayment === 'credit' && !selectedCustomer)} 
+                className="w-full bg-green-600 hover:bg-green-700 text-white h-12"
+                tabIndex={0}
+              >
+                {processing ? 'Processing...' : 'Process Payment'}
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog 2: M-Pesa Method Selection */}
+      <Dialog open={mpesaFlowState === 'method-selection'} onOpenChange={(open) => {
+        if (!open) {
+          setMpesaFlowState('idle')
+          setShowPaymentDialog(true)
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>M-Pesa Payment - KES {Math.max(0, total).toFixed(2)}</DialogTitle>
+            <DialogDescription>Choose your M-Pesa payment method</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-4">
+            <Button 
+              type="button" 
+              variant="outline"
+              className="w-full h-16 text-base" 
+              onClick={() => setMpesaFlowState('stk-input')}
+            >
+              Send STK Push
+            </Button>
+            <Button 
+              type="button" 
+              variant="outline"
+              className="w-full h-16 text-base" 
+              onClick={() => setMpesaFlowState('manual-input')}
+            >
+              Manual Entry
+            </Button>
+            <Button 
+              type="button" 
+              variant="ghost"
+              className="w-full"
+              onClick={() => {
+                setMpesaFlowState('idle')
+                setShowPaymentDialog(true)
+              }}
+            >
+              Back
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog 3a: STK Push */}
+      <Dialog open={mpesaFlowState === 'stk-input'} onOpenChange={(open) => {
+        if (!open) setMpesaFlowState('method-selection')
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>STK Push - KES {Math.max(0, total).toFixed(2)}</DialogTitle>
+            <DialogDescription>Enter customer's M-Pesa phone number</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-sm font-medium mb-2 block">M-Pesa Phone Number *</Label>
+              <Input 
+                ref={mpesaPhoneRef}
+                type="tel" 
+                value={mpesaPhone} 
+                onChange={e => setMpesaPhone(e.target.value)} 
+                placeholder="e.g., 0712345678"
+                autoFocus
+              />
+            </div>
+            
+            <Button 
+              type="button" 
+              onClick={initiateSTKPush} 
+              disabled={!mpesaPhone || processing} 
+              className="w-full bg-green-600 hover:bg-green-700 h-12"
+            >
+              {processing ? 'Sending...' : 'Send STK Push'}
+            </Button>
+            <Button 
+              type="button" 
+              variant="ghost"
+              onClick={() => setMpesaFlowState('method-selection')}
+              className="w-full"
+            >
+              Back
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog 3b: STK Waiting & Complete */}
+      <Dialog open={mpesaFlowState === 'stk-waiting'} onOpenChange={(open) => {
+        if (!open) setMpesaFlowState('method-selection')
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Complete Sale - KES {Math.max(0, total).toFixed(2)}</DialogTitle>
+            <DialogDescription className="sr-only">Complete the M-Pesa payment</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+              <p className="text-sm font-medium text-green-800">STK Push sent to {mpesaPhone}</p>
+              <p className="text-xs text-green-600 mt-1">Customer should enter M-Pesa PIN on their phone</p>
+            </div>
+
+            <div>
+              <Label className="text-sm font-medium mb-2 block">Amount *</Label>
+              <Input 
+                ref={amountInputRef}
+                type="number" 
+                value={paymentAmount} 
+                onChange={e => setPaymentAmount(e.target.value)} 
+                onKeyDown={handleAmountKeyDown}
+                placeholder="Enter amount" 
+                step="0.01" 
+                onFocus={(e) => e.target.select()} 
+              />
+            </div>
+
+            <Button 
+              onClick={processPayment} 
+              disabled={processing} 
+              className="w-full bg-green-600 hover:bg-green-700 text-white h-12"
+            >
+              {processing ? 'Processing...' : 'Complete Sale'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog 3c: Manual Entry & Complete */}
+      <Dialog open={mpesaFlowState === 'manual-input'} onOpenChange={(open) => {
+        if (!open) setMpesaFlowState('method-selection')
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Complete Sale - KES {Math.max(0, total).toFixed(2)}</DialogTitle>
+            <DialogDescription>Enter M-Pesa transaction details (optional)</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-sm font-medium mb-2 block">
+                M-Pesa Phone Number <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <Input 
+                ref={mpesaPhoneRef}
+                type="tel" 
+                value={mpesaPhone} 
+                onChange={e => setMpesaPhone(e.target.value)} 
+                placeholder="e.g., 0712345678" 
+              />
+            </div>
 
             <div>
               <Label className="text-sm font-medium mb-2 block">
-                {selectedPayment === 'cash' ? 'Cash Received' : selectedPayment === 'credit' ? 'Amount Paid Now (0 if full credit)' : 'Amount'}
+                M-Pesa Transaction Code <span className="text-muted-foreground font-normal">(optional)</span>
               </Label>
-              <Input type="number" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} placeholder="Enter amount" step="0.01" onFocus={(e) => e.target.select()} />
-              {selectedPayment === 'cash' && parseFloat(paymentAmount) > 0 && (
-                <div className={`mt-2 flex justify-between px-3 py-2 rounded-lg text-sm font-semibold ${change >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-                  <span>Change</span>
-                  <span>KES {Math.max(0, change).toFixed(2)}</span>
-                </div>
-              )}
-              {selectedPayment === 'credit' && selectedCustomer && parseFloat(paymentAmount) < total && (
-                <p className="text-xs text-amber-600 mt-1">
-                  KES {(total - parseFloat(paymentAmount || '0')).toFixed(2)} will be added to {selectedCustomer.name}'s credit balance
-                </p>
-              )}
+              <Input 
+                ref={mpesaCodeRef}
+                type="text" 
+                value={mpesaCode} 
+                onChange={e => setMpesaCode(e.target.value.toUpperCase())} 
+                placeholder="e.g., QGH7XYZ123" 
+                className="uppercase" 
+              />
+              <p className="text-xs text-muted-foreground mt-1">Enter code only if you want to record it</p>
             </div>
 
-            <Button onClick={processPayment} disabled={!selectedPayment || processing || (selectedPayment === 'credit' && !selectedCustomer)} className="w-full bg-green-600 hover:bg-green-700 text-white">
-              {processing ? 'Processing...' : 'Process Payment'}
-            </Button>
+            <div>
+              <Label className="text-sm font-medium mb-2 block">Amount *</Label>
+              <Input 
+                ref={amountInputRef}
+                type="number" 
+                value={paymentAmount} 
+                onChange={e => setPaymentAmount(e.target.value)} 
+                onKeyDown={handleAmountKeyDown}
+                placeholder="Enter amount" 
+                step="0.01" 
+                onFocus={(e) => e.target.select()} 
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <Button 
+                type="button" 
+                variant="ghost"
+                onClick={() => setMpesaFlowState('method-selection')}
+                className="flex-1"
+              >
+                Back
+              </Button>
+              <Button 
+                onClick={processPayment} 
+                disabled={processing} 
+                className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+              >
+                {processing ? 'Processing...' : 'Complete Sale'}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

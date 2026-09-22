@@ -1,7 +1,7 @@
 // ─── Model factory — binds all models to a specific tenant DB connection ───────
 import type mongoose from 'mongoose'
 import {
-  productSchema, saleSchema, categorySchema, staffSchema, userSchema,
+  productSchema, productInventorySchema, saleSchema, categorySchema, staffSchema, userSchema,
   rentalSchema, rentalServiceSchema, rentalBookingSchema,
   kitchenOrderSchema, menuItemSchema, expenseSchema, expenseCategorySchema,
   reportSchema, stockLedgerSchema, supplierSchema,
@@ -12,11 +12,13 @@ import {
   hospitalityMenuItemSchema, hospitalityServingTypeSchema, hospitalityServingInventorySchema,
   hospitalityServingMovementSchema, hospitalityProductionLogSchema, hospitalityOrderSchema,
   hospitalityCategorySchema,
+  stockTransferSchema, notificationSchema,
 } from '@/lib/models/schemas'
 
 export function getModels(conn: mongoose.Connection) {
   return {
     Product:         conn.models.Product         || conn.model('Product',         productSchema),
+    ProductInventory: conn.models.ProductInventory || conn.model('ProductInventory', productInventorySchema),
     Sale:            conn.models.Sale            || conn.model('Sale',            saleSchema),
     Category:        conn.models.Category        || conn.model('Category',        categorySchema),
     Staff:           conn.models.Staff           || conn.model('Staff',           staffSchema),
@@ -47,5 +49,7 @@ export function getModels(conn: mongoose.Connection) {
     HospitalityProductionLog:   conn.models.HospitalityProductionLog   || conn.model('HospitalityProductionLog',   hospitalityProductionLogSchema),
     HospitalityOrder:           conn.models.HospitalityOrder           || conn.model('HospitalityOrder',           hospitalityOrderSchema),
     HospitalityCategory:        conn.models.HospitalityCategory        || conn.model('HospitalityCategory',        hospitalityCategorySchema),
+    StockTransfer:              conn.models.StockTransfer              || conn.model('StockTransfer',              stockTransferSchema),
+    Notification:               conn.models.Notification               || conn.model('Notification',               notificationSchema),
   }
 }

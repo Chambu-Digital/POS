@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -51,9 +51,67 @@ export function OrderCompletionDialog({
   const router = useRouter()
   const [showSendOptions, setShowSendOptions] = useState(false)
   const [phoneNumber, setPhoneNumber] = useState('')
+  const [focusedButton, setFocusedButton] = useState<'new-sale' | 'print' | 'send'>('print')
+  
+  const newSaleRef = useRef<HTMLButtonElement>(null)
+  const printRef = useRef<HTMLButtonElement>(null)
+  const sendRef = useRef<HTMLButtonElement>(null)
+
+  // Auto-focus print button when dialog opens
+  useEffect(() => {
+    if (open) {
+      setFocusedButton('print')
+      setTimeout(() => printRef.current?.focus(), 100)
+    }
+  }, [open])
+
+  // Update focus when focused button changes
+  useEffect(() => {
+    if (focusedButton === 'new-sale') newSaleRef.current?.focus()
+    else if (focusedButton === 'print') printRef.current?.focus()
+    else if (focusedButton === 'send') sendRef.current?.focus()
+  }, [focusedButton])
+
+  // Handle keyboard navigation
+  useEffect(() => {
+    if (!open) return
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (showSendOptions) return // Don't intercept when send options are showing
+
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        setFocusedButton(prev => {
+          if (prev === 'print') return 'new-sale'
+          if (prev === 'send') return 'print'
+          return prev
+        })
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        setFocusedButton(prev => {
+          if (prev === 'new-sale') return 'print'
+          if (prev === 'print') return 'send'
+          return prev
+        })
+      } else if (e.key === 'Enter') {
+        e.preventDefault()
+        if (focusedButton === 'new-sale') handleMakeNewSale()
+        else if (focusedButton === 'print') handlePrintReceipt()
+        else if (focusedButton === 'send') setShowSendOptions(!showSendOptions)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [open, focusedButton, showSendOptions])
 
   function handlePrintReceipt() {
     onPrintReceipt()
+    // Auto-dismiss and navigate after triggering print
+    setTimeout(() => {
+      onOpenChange(false)
+      onMakeNewSale()
+    }, 100)
   }
 
   function handleMakeNewSale() {
@@ -69,6 +127,11 @@ export function OrderCompletionDialog({
     // Placeholder for SMS functionality
     alert(`Receipt will be sent via SMS to ${phoneNumber}`)
     setShowSendOptions(false)
+    // Auto-dismiss and navigate
+    setTimeout(() => {
+      onOpenChange(false)
+      onMakeNewSale()
+    }, 100)
   }
 
   function formatPhone(raw: string) {
@@ -118,6 +181,11 @@ export function OrderCompletionDialog({
     const whatsappUrl = `https://wa.me/${formatPhone(phoneNumber)}?text=${encodeURIComponent(message)}`
     window.open(whatsappUrl, '_blank')
     setShowSendOptions(false)
+    // Auto-dismiss and navigate
+    setTimeout(() => {
+      onOpenChange(false)
+      onMakeNewSale()
+    }, 100)
   }
 
   return (
@@ -142,27 +210,50 @@ export function OrderCompletionDialog({
           {/* Action Buttons */}
           <div className="grid grid-cols-3 gap-2 w-full">
             <Button
-              className="bg-green-600 hover:bg-green-700 text-white text-xs px-2"
+              ref={newSaleRef}
+              className={`text-white text-xs px-2 ${
+                focusedButton === 'new-sale'
+                  ? 'bg-green-700 ring-2 ring-green-400'
+                  : 'bg-green-600 hover:bg-green-700'
+              }`}
               onClick={handleMakeNewSale}
+              onFocus={() => setFocusedButton('new-sale')}
             >
               <ShoppingCart className="w-3 h-3 mr-1 shrink-0" />
               <span className="truncate">New Sale</span>
             </Button>
             <Button
-              className="bg-orange-600 hover:bg-orange-700 text-white text-xs px-2"
+              ref={printRef}
+              className={`text-white text-xs px-2 ${
+                focusedButton === 'print'
+                  ? 'bg-orange-700 ring-2 ring-orange-400'
+                  : 'bg-orange-600 hover:bg-orange-700'
+              }`}
               onClick={handlePrintReceipt}
+              onFocus={() => setFocusedButton('print')}
             >
               <Printer className="w-3 h-3 mr-1 shrink-0" />
               <span className="truncate">Print</span>
             </Button>
             <Button
-              className="bg-green-600 hover:bg-green-700 text-white text-xs px-2"
+              ref={sendRef}
+              className={`text-white text-xs px-2 ${
+                focusedButton === 'send'
+                  ? 'bg-green-700 ring-2 ring-green-400'
+                  : 'bg-green-600 hover:bg-green-700'
+              }`}
               onClick={() => setShowSendOptions(!showSendOptions)}
+              onFocus={() => setFocusedButton('send')}
             >
               <Send className="w-3 h-3 mr-1 shrink-0" />
               <span className="truncate">Send</span>
             </Button>
           </div>
+
+          {/* Keyboard hints */}
+          <p className="text-xs text-muted-foreground text-center">
+            Use ← → arrow keys to navigate • Press Enter to select
+          </p>
 
           {/* Send Receipt Options */}
           {showSendOptions && (

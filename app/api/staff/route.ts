@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
       name, email, password, role, permissions, phone, jobDescription,
       firstName, middleName, lastName, nationalId, kraPin, nhifNo, nssfNo,
       leaveDays, salary, commissionStructure, employmentType,
+      branchId, isBranchManager,
     } = await request.json()
 
     if (!email || !password || !role) return NextResponse.json({ error: 'Email, password and role are required' }, { status: 400 })
@@ -38,6 +39,28 @@ export async function POST(request: NextRequest) {
 
     if (!['cashier', 'manager', 'supervisor', 'employee'].includes(role)) {
       return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
+    }
+
+    // Validate branchId if provided
+    if (branchId) {
+      const branch = await models.Branch.findOne({ _id: branchId, userId: payload.userId })
+      if (!branch) {
+        return NextResponse.json({ error: 'Invalid branch' }, { status: 400 })
+      }
+      
+      // If setting as branch manager, check if branch already has a manager
+      if (isBranchManager) {
+        const existingManager = await models.Staff.findOne({
+          userId: payload.userId,
+          branchId,
+          isBranchManager: true,
+        })
+        if (existingManager) {
+          return NextResponse.json({ 
+            error: 'This branch already has a manager. Please remove the existing manager first.' 
+          }, { status: 409 })
+        }
+      }
     }
 
     // Check if email already exists in this tenant
@@ -64,6 +87,8 @@ export async function POST(request: NextRequest) {
       leaveDays: leaveDays ?? 14, salary: salary ?? 0,
       commissionStructure: commissionStructure || '', employmentType: employmentType || '',
       permissions: permissions ? normalisePermissions(permissions) : defaultPermissions,
+      branchId: branchId || null,
+      isBranchManager: isBranchManager || false,
     })
     await staff.save()
 

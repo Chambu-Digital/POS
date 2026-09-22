@@ -21,6 +21,9 @@ import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { FloatingCartButton } from '@/components/sales/floating-cart-button'
 import { CartModal } from '@/components/sales/cart-modal'
+import { PaymentModal } from '@/components/sales/payment-modal'
+import { Receipt, ReceiptRef } from '@/components/sales/receipt'
+import { OrderCompletionDialog } from '@/components/sales/order-completion-dialog'
 import { useOffline } from '@/hooks/use-offline'
 import {
   cacheProducts,
@@ -69,6 +72,7 @@ export default function SalesPage() {
 
 function SalesPageContent() {
   const router = useRouter()
+  const receiptRef = useRef<ReceiptRef>(null)
   const [products, setProducts] = useState<Product[]>([])
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [cart, setCart] = useState<CartItem[]>(() => {
@@ -90,13 +94,36 @@ function SalesPageContent() {
   })
   const [loading, setLoading] = useState(true)
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
+  const [shopSettings, setShopSettings] = useState<any>(null)
   const [isCartModalOpen, setIsCartModalOpen] = useState(false)
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
+  const [showCompletionDialog, setShowCompletionDialog] = useState(false)
+  const [lastSale, setLastSale] = useState<any>(null)
   const isOffline = useOffline()
   const cartRef = useRef<HTMLDivElement>(null)
   const productsRef = useRef<HTMLDivElement>(null)
   const productsRef2 = useRef<Product[]>([])
+  const completeSaleButtonRef = useRef<HTMLButtonElement>(null)
+  const quantityInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({})
+  const discountInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({})
+  const validationTimerRef = useRef<{ [key: string]: ReturnType<typeof setTimeout> | null }>({})
+  
+  // Track selected cart item index for keyboard navigation
+  const [selectedCartIndex, setSelectedCartIndex] = useState<number>(-1)
 
   useEffect(() => { productsRef2.current = products }, [products])
+
+  // Adjust selected index if it goes out of bounds
+  useEffect(() => {
+    // If selected index is out of bounds, adjust it
+    if (selectedCartIndex >= cart.length && cart.length > 0) {
+      setSelectedCartIndex(cart.length - 1)
+    }
+    // If cart becomes empty, reset selection
+    if (cart.length === 0 && selectedCartIndex !== -1) {
+      setSelectedCartIndex(-1)
+    }
+  }, [cart.length, selectedCartIndex])
 
   // ── Barcode Scanner ──────────────────────────────────────────────────────────
   function handleScanResult(result: ScanResult) {
@@ -262,6 +289,17 @@ function SalesPageContent() {
     } catch {
       setUserInfo({ shopName: 'Shop', name: 'Cashier' })
     }
+    
+    // Fetch shop settings
+    try {
+      const res = await fetch('/api/settings')
+      if (res.ok) {
+        const data = await res.json()
+        setShopSettings(data.settings)
+      }
+    } catch {
+      // Ignore errors
+    }
   }
 
   function filterProducts() {
@@ -286,23 +324,34 @@ function SalesPageContent() {
   }
 
   function addToCart(product: Product) {
+    // Blur any focused input to prevent scanner keystrokes from leaking into fields
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur()
+    }
+    
     if (product.stock <= 0) {
       toast.error('Product out of stock')
       return
     }
+    
     setCart((prevCart) => {
-      const existingItem = prevCart.find((item) => item.productId === product._id)
-      if (existingItem) {
+      const existingItemIndex = prevCart.findIndex((item) => item.productId === product._id)
+      if (existingItemIndex !== -1) {
+        const existingItem = prevCart[existingItemIndex]
         if (existingItem.quantity >= product.stock) {
           toast.error('Not enough stock')
           return prevCart
         }
+        // Item already exists, increment quantity and select it
+        setSelectedCartIndex(existingItemIndex)
         return prevCart.map((item) =>
           item.productId === product._id
             ? { ...item, quantity: item.quantity + 1 }
             : item
         )
       }
+      // New item - add to cart and select it (will be at the end)
+      setSelectedCartIndex(prevCart.length)
       return [
         ...prevCart,
         {
@@ -319,22 +368,225 @@ function SalesPageContent() {
     })
   }
 
+  // Keyboard shortcuts for quantity management and cart navigation
+  useEffect(() => {
+    function handleGlobalKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement
+      
+      // ── DIALOG CHECK: Don't intercept keys when dialog is open ──────────────
+      // Check if target is inside a dialog OR if any dialog is currently open
+      if (
+        target.closest('[role="dialog"]') || 
+        document.querySelector('[role="dialog"][data-state="open"]')
+      ) {
+        return // Let dialog handle its own keyboard navigation
+      }
+      
+      // Check if any input, textarea, or select is focused
+      const isTypingInField = 
+        target.tagName === 'INPUT' || 
+        target.tagName === 'TEXTAREA' || 
+        target.tagName === 'SELECT'
+
+      const selectedItem = selectedCartIndex >= 0 && selectedCartIndex < cart.length 
+        ? cart[selectedCartIndex] 
+        : null
+
+      // Tab - move between cart section and Complete Sale button
+      if (e.key === 'Tab') {
+        // If Complete Sale button is focused, execute the sale (Tab = Enter on this button)
+        if (target === completeSaleButtonRef.current) {
+          e.preventDefault()
+          completeSale()
+          return
+        }
+        
+        // If in cart section (or anywhere else), focus Complete Sale button
+        if (cart.length > 0) {
+          e.preventDefault()
+          if (isTypingInField) {
+            (target as HTMLInputElement).blur()
+          }
+          completeSaleButtonRef.current?.focus()
+          return
+        }
+      }
+
+      // Arrow Up - navigate to previous cart item (works everywhere, even in inputs)
+      if (e.key === 'ArrowUp') {
+        e.preventDefault() // Prevent default increment in number inputs
+        if (isTypingInField) {
+          // Blur the input first
+          (target as HTMLInputElement).blur()
+        }
+        if (cart.length > 0) {
+          setSelectedCartIndex(prev => {
+            const newIndex = prev <= 0 ? cart.length - 1 : prev - 1
+            return newIndex
+          })
+        }
+        return
+      }
+
+      // Arrow Down - navigate to next cart item (works everywhere, even in inputs)
+      if (e.key === 'ArrowDown') {
+        e.preventDefault() // Prevent default decrement in number inputs
+        if (isTypingInField) {
+          // Blur the input first
+          (target as HTMLInputElement).blur()
+        }
+        if (cart.length > 0) {
+          setSelectedCartIndex(prev => {
+            const newIndex = prev >= cart.length - 1 ? 0 : prev + 1
+            return newIndex
+          })
+        }
+        return
+      }
+
+      // Q key - focus selected item's quantity (works everywhere)
+      if (e.key === 'q' || e.key === 'Q') {
+        e.preventDefault()
+        if (isTypingInField) {
+          // Blur current input first
+          (target as HTMLInputElement).blur()
+        }
+        if (selectedItem) {
+          const input = quantityInputRefs.current[selectedItem.productId]
+          if (input) {
+            input.focus()
+            input.select()
+          }
+        }
+        return
+      }
+
+      // D key - focus selected item's discount (works everywhere)
+      if (e.key === 'd' || e.key === 'D') {
+        e.preventDefault()
+        if (isTypingInField) {
+          // Blur current input first
+          (target as HTMLInputElement).blur()
+        }
+        if (selectedItem) {
+          const input = discountInputRefs.current[selectedItem.productId]
+          if (input) {
+            input.focus()
+            input.select()
+          }
+        }
+        return
+      }
+
+      // Enter - context-dependent behavior
+      if (e.key === 'Enter') {
+        // If in an input field, blur it and return to cart navigation
+        if (isTypingInField) {
+          e.preventDefault()
+          ;(target as HTMLInputElement).blur()
+          return
+        }
+        
+        // If not in input and cart has items, focus Complete Sale button
+        if (!isTypingInField && cart.length > 0) {
+          e.preventDefault()
+          completeSaleButtonRef.current?.focus()
+          return
+        }
+      }
+
+      // Escape - blur input without committing changes
+      if (e.key === 'Escape' && isTypingInField) {
+        e.preventDefault()
+        ;(target as HTMLInputElement).blur()
+        return
+      }
+
+      // Block remaining shortcuts when typing in a field
+      if (isTypingInField) {
+        return
+      }
+
+      // + or = key - increment quantity
+      if (e.key === '+' || e.key === '=') {
+        e.preventDefault()
+        if (selectedItem) {
+          const product = products.find(p => p._id === selectedItem.productId)
+          if (product && selectedItem.quantity < product.stock) {
+            updateQuantity(selectedItem.productId, selectedItem.quantity + 1)
+          } else {
+            toast.error('Not enough stock')
+          }
+        }
+        return
+      }
+
+      // - key - decrement quantity
+      if (e.key === '-') {
+        e.preventDefault()
+        if (selectedItem) {
+          updateQuantity(selectedItem.productId, selectedItem.quantity - 1)
+        }
+        return
+      }
+
+      // Delete - remove selected item
+      if (e.key === 'Delete') {
+        e.preventDefault()
+        if (selectedItem) {
+          removeFromCart(selectedItem.productId)
+          toast.info('Item removed from cart')
+        }
+        return
+      }
+    }
+
+    window.addEventListener('keydown', handleGlobalKeyDown)
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown)
+  }, [cart, products, selectedCartIndex])
+
   function updateQuantity(productId: string, quantity: number) {
     if (quantity < 1) {
       removeFromCart(productId)
       return
     }
-    const product = products.find((p) => p._id === productId)
-    if (product && quantity > product.stock) {
-      toast.error('Not enough stock')
-      return
+    
+    // Clear existing validation timer for this product
+    if (validationTimerRef.current[productId]) {
+      clearTimeout(validationTimerRef.current[productId]!)
     }
+    
+    // Update cart immediately (optimistic update)
     setCart((prevCart) =>
       prevCart.map((item) =>
         item.productId === productId ? { ...item, quantity } : item
       )
     )
+    
+    // Debounced validation - only validate after 1 second of no typing
+    validationTimerRef.current[productId] = setTimeout(() => {
+      const product = products.find((p) => p._id === productId)
+      if (product && quantity > product.stock) {
+        toast.error('Not enough stock')
+        // Revert to max available stock
+        setCart((prevCart) =>
+          prevCart.map((item) =>
+            item.productId === productId ? { ...item, quantity: product.stock } : item
+          )
+        )
+      }
+      validationTimerRef.current[productId] = null
+    }, 1000)
   }
+  
+  // Cleanup validation timers on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(validationTimerRef.current).forEach(timer => {
+        if (timer) clearTimeout(timer)
+      })
+    }
+  }, [])
 
   function updateDiscount(productId: string, discount: number) {
     setCart((prevCart) =>
@@ -361,15 +613,39 @@ function SalesPageContent() {
     productsRef.current?.scrollIntoView({ behavior: 'auto' })
   }
 
-  async function completeSale() {
+  function completeSale() {
     if (cart.length === 0) {
       toast.error('Cart is empty')
       return
     }
-    sessionStorage.setItem('pendingSale', JSON.stringify({ cart, cartDiscount }))
+    setIsPaymentModalOpen(true)
+  }
+
+  function handlePaymentComplete(saleData: any) {
+    setLastSale(saleData)
+    setIsPaymentModalOpen(false)
+    setShowCompletionDialog(true)
+    // Clear cart
+    setCart([])
+    setCartDiscount(0)
     sessionStorage.removeItem('activeCart')
     sessionStorage.removeItem('activeCartDiscount')
-    router.push('/dashboard/sales/payment')
+  }
+
+  function handleMakeNewSale() {
+    setShowCompletionDialog(false)
+    setLastSale(null)
+    // Refresh products to get updated stock
+    sessionStorage.removeItem('sessionProducts')
+    fetchProducts()
+  }
+
+  // Handle Enter key on Complete Sale button
+  function handleCompleteSaleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      completeSale()
+    }
   }
 
   const subtotal = cart.reduce(
@@ -423,10 +699,15 @@ function SalesPageContent() {
               <h1 className="text-3xl font-bold">Make Sale</h1>
               <p className="text-muted-foreground">Search and add products to cart</p>
             </div>
-            <HeldOrders onRecall={(order) => {
-              setCart(order.cart)
-              setCartDiscount(order.cartDiscount)
-            }} />
+            <div className="flex items-center gap-2">
+              <div className="hidden lg:block text-xs text-muted-foreground bg-gray-50 px-3 py-1.5 rounded-lg border">
+                <span className="font-semibold">Cart Nav:</span> <kbd className="px-1.5 py-0.5 bg-white border rounded">↑↓</kbd> select • <kbd className="px-1.5 py-0.5 bg-white border rounded">Enter/Tab</kbd> checkout • <kbd className="px-1.5 py-0.5 bg-white border rounded">Q</kbd> qty • <kbd className="px-1.5 py-0.5 bg-white border rounded">D</kbd> disc • <kbd className="px-1.5 py-0.5 bg-white border rounded">+/-</kbd> adjust • <kbd className="px-1.5 py-0.5 bg-white border rounded">Del</kbd> remove
+              </div>
+              <HeldOrders onRecall={(order) => {
+                setCart(order.cart)
+                setCartDiscount(order.cartDiscount)
+              }} />
+            </div>
           </div>
 
           {/* Search and Filter */}
@@ -536,8 +817,16 @@ function SalesPageContent() {
               {cart.length === 0 ? (
                 <p className="text-center text-muted-foreground py-8">Cart is empty</p>
               ) : (
-                cart.map((item) => (
-                  <div key={item.productId} className="border rounded-lg p-2.5 flex gap-2.5">
+                cart.map((item, index) => (
+                  <div 
+                    key={item.productId} 
+                    className={`border rounded-lg p-2.5 flex gap-2.5 transition-all ${
+                      selectedCartIndex === index 
+                        ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-300' 
+                        : 'hover:bg-gray-50'
+                    }`}
+                    onClick={() => setSelectedCartIndex(index)}
+                  >
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start">
                         <p className="font-medium text-sm truncate leading-tight pr-1">
@@ -547,7 +836,10 @@ function SalesPageContent() {
                           size="sm"
                           variant="ghost"
                           className="h-6 w-6 p-0 shrink-0"
-                          onClick={() => removeFromCart(item.productId)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            removeFromCart(item.productId)
+                          }}
                         >
                           <X size={14} />
                         </Button>
@@ -560,33 +852,46 @@ function SalesPageContent() {
                           size="sm"
                           variant="outline"
                           className="h-6 w-6 p-0"
-                          onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            updateQuantity(item.productId, item.quantity - 1)
+                          }}
                         >
                           <Minus size={12} />
                         </Button>
                         <Input
+                          ref={(el) => {
+                            quantityInputRefs.current[item.productId] = el
+                          }}
                           type="number"
                           value={item.quantity || ''}
                           onChange={(e) => updateQuantity(item.productId, parseInt(e.target.value) || 0)}
-                          onFocus={(e) => { e.target.select(); enterEditing(); }}
-                          onBlur={exitEditing}
-                          className="w-10 h-6 text-center text-xs p-0"
+                          onFocus={(e) => e.target.select()}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-10 h-6 text-center text-xs p-0 quantity-input"
                         />
                         <Button
                           size="sm"
                           variant="outline"
                           className="h-6 w-6 p-0"
-                          onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            updateQuantity(item.productId, item.quantity + 1)
+                          }}
                         >
                           <Plus size={12} />
                         </Button>
                         <Input
+                          ref={(el) => {
+                            discountInputRefs.current[item.productId] = el
+                          }}
                           type="number"
                           placeholder="Disc."
                           value={item.discount || ''}
                           onChange={(e) => updateDiscount(item.productId, parseFloat(e.target.value) || 0)}
                           onFocus={(e) => e.target.select()}
-                          className="w-16 h-6 text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-16 h-6 text-xs discount-input"
                         />
                         <p className="text-xs font-semibold ml-auto whitespace-nowrap">
                           KSh {(item.sellingPrice * item.quantity - item.discount).toLocaleString()}
@@ -626,7 +931,9 @@ function SalesPageContent() {
                 </div>
               </div>
               <Button
+                ref={completeSaleButtonRef}
                 onClick={completeSale}
+                onKeyDown={handleCompleteSaleKeyDown}
                 disabled={cart.length === 0}
                 className="w-full"
                 size="lg"
@@ -658,6 +965,61 @@ function SalesPageContent() {
 
       {/* Scanner feedback overlay */}
       <ScannerFeedback state={scannerState} lastResult={lastResult} />
+
+      {/* Payment Modal */}
+      <PaymentModal
+        open={isPaymentModalOpen}
+        onOpenChange={setIsPaymentModalOpen}
+        cart={cart}
+        cartDiscount={cartDiscount}
+        subtotal={subtotal}
+        total={total}
+        onPaymentComplete={handlePaymentComplete}
+        userInfo={userInfo}
+        saleEndpoint="/api/sales"
+      />
+
+      {/* Order Completion Dialog */}
+      {lastSale && (
+        <OrderCompletionDialog
+          open={showCompletionDialog}
+          onOpenChange={setShowCompletionDialog}
+          orderNumber={lastSale.receiptNumber}
+          totalAmount={lastSale.total}
+          itemCount={lastSale.items.length}
+          shopName={userInfo?.shopName}
+          cashierName={userInfo?.name}
+          items={lastSale.items}
+          subtotal={lastSale.subtotal}
+          discount={lastSale.discount}
+          onPrintReceipt={() => receiptRef.current?.print()}
+          onMakeNewSale={handleMakeNewSale}
+        />
+      )}
+
+      {/* Hidden Receipt */}
+      {lastSale && userInfo && (
+        <Receipt
+          ref={receiptRef}
+          shopName={userInfo.shopName}
+          shopLogo={shopSettings?.general?.logo}
+          cashierName={userInfo.name}
+          customerName={lastSale.customerName}
+          items={lastSale.items}
+          subtotal={lastSale.subtotal}
+          discount={lastSale.discount}
+          total={lastSale.total}
+          paymentMethod={lastSale.paymentMethod}
+          date={lastSale.date}
+          receiptNumber={lastSale.receiptNumber}
+          shopPhone={shopSettings?.general?.phone}
+          shopEmail={shopSettings?.general?.email}
+          shopAddress={shopSettings?.general?.address}
+          mpesaPaybill={shopSettings?.payment?.mpesaPaybill}
+          mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}
+          paperSize={shopSettings?.receipt?.paperSize || '58mm'}
+        />
+      )}
 
       {/* Powered by Footer - Mobile Only */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t md:hidden py-2 px-4 text-center text-xs text-muted-foreground">

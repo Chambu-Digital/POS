@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { resolveMediaUrl } from '@/lib/media-url'
 import { apiGet, apiPut, handleApiError } from '@/lib/api-client'
 import { LoadingOrOffline } from '@/components/offline-indicator'
+import { BranchesSettings } from '@/components/settings/branches-settings'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface GeneralSettings {
@@ -48,7 +49,7 @@ interface RestockingSettings {
   defaultLeadTime: number; safetyBuffer: number
 }
 
-type NavKey = 'general' | 'payment' | 'notifications' | 'receipt' | 'features' | 'security' | 'restocking'
+type NavKey = 'general' | 'payment' | 'notifications' | 'receipt' | 'features' | 'security' | 'restocking' | 'branches'
 
 const NAV: { key: NavKey; label: string; desc: string; icon: React.ElementType }[] = [
   { key: 'general',       label: 'General',       desc: 'Store info & branding',  icon: Settings2       },
@@ -56,6 +57,7 @@ const NAV: { key: NavKey; label: string; desc: string; icon: React.ElementType }
   { key: 'notifications', label: 'Notifications', desc: 'Alerts & reports',       icon: Bell            },
   { key: 'receipt',       label: 'Receipt',       desc: 'Print & layout',         icon: Receipt         },
   { key: 'restocking',    label: 'Restocking',    desc: 'Inventory thresholds',   icon: Package         },
+  { key: 'branches',      label: 'Branches',      desc: 'Multi-branch management', icon: Building2       },
   // { key: 'features',      label: 'Features',      desc: 'KDS, shifts & more',     icon: UtensilsCrossed },
   { key: 'security',      label: 'Security',      desc: 'Password & sessions',    icon: Shield          },
 ]
@@ -791,6 +793,11 @@ export default function SettingsPage() {
                 </button>
               </SettingRow>
             </Section>
+          )}
+
+          {/* ══ BRANCHES ═════════════════════════════════════════════════════ */}
+          {activeNav === 'branches' && (
+            <BranchesSettings />
           )}
 
         </main>

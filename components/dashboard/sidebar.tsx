@@ -56,6 +56,8 @@ export function Sidebar() {
   const [shopName, setShopName]         = useState<string>('My Shop')
   const [shopLogo, setShopLogo]         = useState<string>('')
   const [permissions, setPermissions]   = useState<Record<string, boolean>>({})
+  const [isCashierMode, setIsCashierMode] = useState(false)
+  const [allowedRoutes, setAllowedRoutes] = useState<string[]>([])
   const [features, setFeatures]         = useState<Record<string, boolean>>(DEFAULT_MODULE_FEATURES)
   const [branches, setBranches]         = useState<any[]>([])
   const [selectedBranch, setSelectedBranch] = useState<any>(null)
@@ -86,8 +88,10 @@ export function Sidebar() {
           if (data.user) {
             setUserType(data.user.type)
             setShopName(data.user.shopName || 'My Shop')
-            if (data.user.type === 'staff' && data.user.permissions) {
-              setPermissions(data.user.permissions)
+            if (data.user.type === 'staff') {
+              if (data.user.permissions) setPermissions(data.user.permissions)
+              if (data.user.isCashierMode) setIsCashierMode(data.user.isCashierMode)
+              if (data.user.allowedRoutes) setAllowedRoutes(data.user.allowedRoutes)
             }
             if (data.user.branches)       setBranches(data.user.branches)
             if (data.user.selectedBranch) setSelectedBranch(data.user.selectedBranch)
@@ -177,7 +181,16 @@ export function Sidebar() {
   function canSeeFeature(f: ModuleFeature): boolean {
     if (userType === 'user') return true
     if (userType === null)   return !f.adminOnly
-    // staff — check per-feature permission using the dotted key
+    
+    // staff — check cashier mode first
+    if (isCashierMode) {
+      // In cashier mode, only show routes in allowedRoutes list
+      return allowedRoutes.some(route => 
+        f.href === route || f.href.startsWith(route + '/')
+      )
+    }
+    
+    // Non-cashier staff — check per-feature permission using the dotted key
     if (f.adminOnly) return false
     return permissions[f.key] === true
   }
@@ -185,7 +198,16 @@ export function Sidebar() {
   function canSeeStatic(item: StaticItem): boolean {
     if (userType === 'user') return true
     if (userType === null)   return !item.adminOnly
+    
     if (userType === 'staff') {
+      // Cashier mode: only show if in allowed routes
+      if (isCashierMode) {
+        return allowedRoutes.some(route => 
+          item.href === route || item.href.startsWith(route + '/')
+        )
+      }
+      
+      // Non-cashier staff: check permissions
       if (item.adminOnly) return false
       if (!item.permission) return true
       return permissions[item.permission] === true

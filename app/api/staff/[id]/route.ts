@@ -17,8 +17,34 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       .select(data.password ? '+password' : '')
     if (!staff) return NextResponse.json({ error: 'Staff not found' }, { status: 404 })
 
+    // Validate branchId if being updated
+    if (data.branchId !== undefined) {
+      if (data.branchId) {
+        const branch = await models.Branch.findOne({ _id: data.branchId, userId: payload.userId })
+        if (!branch) {
+          return NextResponse.json({ error: 'Invalid branch' }, { status: 400 })
+        }
+      }
+      
+      // If setting as branch manager, check for existing manager
+      if (data.isBranchManager && data.branchId) {
+        const existingManager = await models.Staff.findOne({
+          userId: payload.userId,
+          branchId: data.branchId,
+          isBranchManager: true,
+          _id: { $ne: staff._id },  // Exclude current staff
+        })
+        if (existingManager) {
+          return NextResponse.json({ 
+            error: 'This branch already has a manager. Please remove the existing manager first.' 
+          }, { status: 409 })
+        }
+      }
+    }
+
     const fields = ['name','role','active','permissions','phone','jobDescription','firstName','middleName',
-      'lastName','nationalId','kraPin','nhifNo','nssfNo','leaveDays','salary','commissionStructure','employmentType']
+      'lastName','nationalId','kraPin','nhifNo','nssfNo','leaveDays','salary','commissionStructure',
+      'employmentType','branchId','isBranchManager']
     fields.forEach(f => { if (data[f] !== undefined) (staff as any)[f] = data[f] })
     if (data.password) staff.password = data.password
 

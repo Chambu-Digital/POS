@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Bell, User } from 'lucide-react'
+import { User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { NotificationBell } from '@/components/notifications/notification-bell'
 
 interface UserData {
   id: string
@@ -68,13 +69,7 @@ export function TopNav() {
 
         {/* Icons — always on the right */}
         <div className="flex items-center gap-4 ml-auto">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="rounded-full"
-          >
-            <Bell size={20} />
-          </Button>
+          <NotificationBell />
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

@@ -43,6 +43,17 @@ export class KeyboardScanDetector {
     const now = Date.now()
     const delta = now - this.lastKeyTime
 
+    // Check if this looks like scanner input (fast keystroke following previous chars OR continuing existing buffer)
+    const looksLikeScannerKeystroke = 
+      (this.buffer.length > 0 && delta < this.config.keystrokeThreshold) || // Continuing fast sequence
+      (this.buffer.length === 0 && delta < this.config.keystrokeThreshold && this.lastKeyTime > 0) // Fast first keystroke after recent activity
+
+    // BLOCK ALL SCANNER-DETECTED KEYSTROKES from reaching form fields
+    if (isFormField && looksLikeScannerKeystroke && e.key.length === 1) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+
     if (e.key === 'Enter') {
       if (this.buffer.length >= this.config.minLength) {
         const avgSpeed = this.averageKeystrokeSpeed()
@@ -61,7 +72,7 @@ export class KeyboardScanDetector {
       return
     }
 
-    // If in a form field and typing slowly, don't intercept
+    // If in a form field and typing slowly on first keystroke, don't intercept
     if (isFormField && delta > this.config.keystrokeThreshold && this.buffer.length === 0) {
       return
     }

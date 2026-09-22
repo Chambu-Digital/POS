@@ -60,6 +60,8 @@ export async function GET(request: NextRequest) {
           shopName: adminUser?.shopName || 'Shop',
           role: staff.role, type: 'staff',
           permissions: normalisePermissions(staff.permissions || {}),
+          isCashierMode: payload.isCashierMode || false,
+          allowedRoutes: payload.allowedRoutes || [],
           branches,
           selectedBranch,
         },

@@ -1,5 +1,6 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(request: NextRequest) {
@@ -9,18 +10,30 @@ export async function GET(request: NextRequest) {
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const branchContext = await getBranchContext(request)
     const { searchParams } = new URL(request.url)
     const search = searchParams.get('search') || ''
     const category = searchParams.get('category') || ''
 
     const query: any = { userId: ownerId, status: 'active' }
     
-    if (search) {
+    // Filter by branch context if available
+    if (branchContext) {
       query.$or = [
-        { genericName: { $regex: search, $options: 'i' } },
-        { brandName: { $regex: search, $options: 'i' } },
-        { barcode: { $regex: search, $options: 'i' } },
+        { branchId: branchContext },  // Branch-specific drugs
+        { branchId: null },            // Global drugs (no branch assignment)
       ]
+    }
+    
+    if (search) {
+      query.$and = query.$and || []
+      query.$and.push({
+        $or: [
+          { genericName: { $regex: search, $options: 'i' } },
+          { brandName: { $regex: search, $options: 'i' } },
+          { barcode: { $regex: search, $options: 'i' } },
+        ]
+      })
     }
     
     if (category) query.category = category
@@ -40,13 +53,19 @@ export async function POST(request: NextRequest) {
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const branchContext = await getBranchContext(request)
     const body = await request.json()
 
     if (!body.genericName || body.sellingPrice === undefined || body.buyingPrice === undefined) {
       return NextResponse.json({ error: 'genericName, sellingPrice, buyingPrice are required' }, { status: 400 })
     }
 
-    const drug = new models.Drug({ ...body, userId: ownerId })
+    // Associate drug with current branch context if available
+    const drug = new models.Drug({ 
+      ...body, 
+      userId: ownerId,
+      branchId: branchContext || null,
+    })
     await drug.save()
     return NextResponse.json({ drug }, { status: 201 })
   } catch (error) {

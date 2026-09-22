@@ -14,6 +14,8 @@ export interface TokenPayload {
   permissions?: Record<string, boolean>     // Staff permissions (staff only)
   isDemo?: boolean
   branchId?: string         // Selected branch for multi-branch operations
+  isCashierMode?: boolean   // Cashier mode: skip permission checks for offline-first
+  allowedRoutes?: string[]  // Routes allowed for cashier (static list for offline)
 }
 
 export async function createToken(payload: TokenPayload): Promise<string> {

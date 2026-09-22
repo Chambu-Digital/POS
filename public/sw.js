@@ -62,6 +62,51 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
+  // ── CASHIER MODE ROUTES: Cache-first for offline reliability ──────────────
+  // These routes must work offline for cashiers (no permission checks on client)
+  const CASHIER_ROUTES = [
+    '/dashboard/sales',
+    '/dashboard/retail/sales',
+    '/dashboard/customers',
+    '/dashboard/retail/customers',
+  ]
+  
+  const isCashierRoute = CASHIER_ROUTES.some(route => 
+    url.pathname === route || url.pathname.startsWith(route + '/')
+  )
+  
+  if (isCashierRoute && request.destination === 'document') {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        // Return cached version immediately for instant load
+        if (cached) {
+          // Update cache in background
+          fetch(request).then((response) => {
+            if (response && response.status === 200) {
+              caches.open(RUNTIME_CACHE).then((cache) => {
+                cache.put(request, response.clone())
+              })
+            }
+          }).catch(() => {})
+          return cached
+        }
+        // No cache, fetch and cache
+        return fetch(request).then((response) => {
+          if (response && response.status === 200) {
+            caches.open(RUNTIME_CACHE).then((cache) => {
+              cache.put(request, response.clone())
+            })
+          }
+          return response
+        }).catch(() => {
+          // Complete offline, try root dashboard
+          return caches.match('/dashboard')
+        })
+      })
+    )
+    return
+  }
+
   // Strategy 1: Network-first for HTML (app shell)
   // Don't cache HTML to ensure users always get latest version
   if (request.destination === 'document' || url.pathname === '/') {
@@ -151,8 +196,42 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Strategy 5: Network-first for API calls
+  // Strategy 5: Network-first for API calls (with special handling for cashier APIs)
   if (url.pathname.startsWith('/api/')) {
+    // Cashier-critical APIs: cache more aggressively
+    const isCashierAPI = url.pathname.match(/\/api\/(products|categories|customers|sales|settings)/)
+    
+    if (isCashierAPI) {
+      event.respondWith(
+        fetch(request)
+          .then((response) => {
+            if (response.status === 200) {
+              const responseToCache = response.clone()
+              caches.open(API_CACHE).then((cache) => {
+                cache.put(request, responseToCache)
+              })
+            }
+            return response
+          })
+          .catch(() => {
+            // Network failed, use cache (essential for cashier offline mode)
+            return caches.match(request).then((cached) => {
+              if (cached) {
+                console.log('[SW] Serving cached API response (offline):', url.pathname)
+                return cached
+              }
+              // No cache available
+              return new Response(JSON.stringify({ error: 'Offline, no cache available' }), {
+                status: 503,
+                headers: { 'Content-Type': 'application/json' }
+              })
+            })
+          })
+      )
+      return
+    }
+    
+    // Other APIs: standard network-first
     event.respondWith(
       fetch(request)
         .then((response) => {

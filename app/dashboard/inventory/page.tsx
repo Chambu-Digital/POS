@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Upload, Download, Trash2, Edit2, Search, FolderTree } from 'lucide-react'
+import { Plus, Upload, Download, Trash2, Edit2, Search, FolderTree, ArrowLeftRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { ProductForm } from '@/components/inventory/product-form'
@@ -23,6 +23,7 @@ import { ImportModal } from '@/components/inventory/import-modal'
 import { CategoryManager } from '@/components/inventory/category-manager'
 import { StockInModal } from '@/components/inventory/stock-in-modal'
 import { StockCountModal } from '@/components/inventory/stock-count-modal'
+import { CreateProductTransferModal } from '@/components/stock-transfers/create-product-transfer-modal'
 import { ProductImage } from '@/components/ui/product-image'
 
 interface Product {
@@ -56,6 +57,7 @@ function InventoryPageContent() {
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [isStockInOpen, setIsStockInOpen] = useState(false)
   const [isStockCountOpen, setIsStockCountOpen] = useState(false)
+  const [isTransferOpen, setIsTransferOpen] = useState(false)
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false)
 
   useEffect(() => {
@@ -203,6 +205,14 @@ function InventoryPageContent() {
           >
             <Plus size={16} className="mr-2" />
             Stock Count
+          </Button>
+          <Button
+            onClick={() => setIsTransferOpen(true)}
+            size="sm"
+            variant="outline"
+          >
+            <ArrowLeftRight size={16} className="mr-2" />
+            Transfer Stock
           </Button>
           <Button
             onClick={() => setIsCreateOpen(true)}
@@ -530,6 +540,16 @@ function InventoryPageContent() {
         onOpenChange={setIsStockCountOpen}
         onSuccess={() => {
           setIsStockCountOpen(false)
+          fetchProducts()
+        }}
+      />
+
+      {/* Transfer Stock Modal */}
+      <CreateProductTransferModal
+        isOpen={isTransferOpen}
+        onClose={() => setIsTransferOpen(false)}
+        onSuccess={() => {
+          setIsTransferOpen(false)
           fetchProducts()
         }}
       />

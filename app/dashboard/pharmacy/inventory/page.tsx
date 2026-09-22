@@ -5,10 +5,11 @@ import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Search, Plus, AlertTriangle, ChevronDown, ChevronUp, Upload, Download, FolderTree, Edit2, Trash2 } from 'lucide-react'
+import { Search, Plus, AlertTriangle, ChevronDown, ChevronUp, Upload, Download, FolderTree, Edit2, Trash2, ArrowLeftRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { DrugForm } from '@/components/pharmacy/drug-form'
+import { CreateDrugTransferModal } from '@/components/stock-transfers/create-drug-transfer-modal'
 
 interface Drug {
   _id: string
@@ -26,6 +27,7 @@ interface Drug {
   reorderLevel?: number
   requiresPrescription?: boolean
   isControlled?: boolean
+  description?: string
 }
 
 interface Batch {
@@ -71,6 +73,7 @@ function InventoryContent() {
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false)
   const [historyBatchId, setHistoryBatchId] = useState<string | null>(null)
   const [isRecallOpen, setIsRecallOpen] = useState(false)
+  const [isTransferOpen, setIsTransferOpen] = useState(false)
 
   // Receive stock modal
   const [showReceive, setShowReceive] = useState(false)
@@ -189,12 +192,20 @@ function InventoryContent() {
           <h1 className="text-3xl font-bold">Drug Inventory</h1>
           <p className="text-muted-foreground mt-2">Manage your pharmacy catalog and stock</p>
         </div>
-        <button
-          onClick={() => setShowReceive(true)}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg"
-        >
-          <Plus size={15} /> Receive Stock
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowReceive(true)}
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg"
+          >
+            <Plus size={15} /> Receive Stock
+          </button>
+          <button
+            onClick={() => setIsTransferOpen(true)}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg"
+          >
+            <ArrowLeftRight size={15} /> Transfer Stock
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -471,7 +482,7 @@ function InventoryContent() {
                   <div key={b._id} className={`flex items-center justify-between bg-white border rounded-xl px-4 py-3 ${days <= 30 ? 'border-red-200' : 'border-amber-200'}`}>
                     <div>
                       <p className="font-semibold text-gray-900 text-sm">{drug ? drug.genericName : 'Unknown'}</p>
-                      <p className="text-xs text-gray-400">Batch: <span className="font-mono">{b.batchNumber}</span>{b.supplier && ` · ${b.supplier}`}</p>
+                      <p className="text-xs text-gray-400">Batch: <span className="font-mono">{b.manufacturerLot || b.internalBatchId}</span>{b.supplier && ` · ${b.supplier}`}</p>
                     </div>
                     <div className="text-right">
                       <p className={`text-sm font-bold ${days <= 30 ? 'text-red-600' : 'text-amber-600'}`}>{days} days left</p>
@@ -643,7 +654,7 @@ function InventoryContent() {
               
               // Handoff to Receive Stock if a new drug was created
               if (savedDrug && !selectedDrug) {
-                setReceiveDrugId(savedDrug._id)
+                setReceiveDrugId(savedDrug._id || '')
                 setReceiveForm(f => ({
                   ...f,
                   buyingPrice: String(savedDrug.buyingPrice || ''),
@@ -816,6 +827,16 @@ function InventoryContent() {
       {historyBatchId && (
         <BatchHistoryDialog batchId={historyBatchId} open={!!historyBatchId} onOpenChange={(o) => !o && setHistoryBatchId(null)} />
       )}
+
+      {/* Transfer Stock Modal */}
+      <CreateDrugTransferModal
+        isOpen={isTransferOpen}
+        onClose={() => setIsTransferOpen(false)}
+        onSuccess={() => {
+          setIsTransferOpen(false)
+          load()
+        }}
+      />
     </div>
   )
 }

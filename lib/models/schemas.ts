@@ -7,6 +7,7 @@ import bcryptjs from 'bcryptjs'
 
 
 // ── Product ───────────────────────────────────────────────────────────────────
+// Product catalog - defines the product but stock is tracked per-branch
 export const productSchema = new mongoose.Schema(
   {
     userId:       { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -23,7 +24,7 @@ export const productSchema = new mongoose.Schema(
     description:  String,
     barcode:      { type: String, default: '' },
     images:       { type: [String], default: [] },
-    stock:        { type: Number, required: true, default: 0 },
+    stock:        { type: Number, required: true, default: 0 },  // DEPRECATED: Use ProductInventory instead
     lowStockThreshold: { type: Number, default: 10 },
     restocking: {
       customLeadTime:      { type: Number },  // Override default lead time (days)
@@ -38,6 +39,25 @@ export const productSchema = new mongoose.Schema(
 )
 productSchema.index({ userId: 1, productName: 1 })
 productSchema.index({ userId: 1, category: 1 })
+productSchema.index({ userId: 1, barcode: 1 })
+
+// ── ProductInventory ───────────────────────────────────────────────────────────
+// Branch-specific inventory for retail products (similar to pharmacy Inventory)
+export const productInventorySchema = new mongoose.Schema(
+  {
+    userId:       { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
+    productId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+    stock:        { type: Number, required: true, default: 0 },
+    reserved:     { type: Number, default: 0 },  // For held orders
+    lastUpdated:  { type: Date, default: Date.now },
+    createdAt:    { type: Date, default: Date.now },
+  },
+  { collection: 'product_inventory' }
+)
+productInventorySchema.index({ userId: 1, branchId: 1, productId: 1 }, { unique: true })
+productInventorySchema.index({ userId: 1, branchId: 1 })
+productInventorySchema.index({ userId: 1, productId: 1 })
 
 // ── Sale ──────────────────────────────────────────────────────────────────────
 export const saleSchema = new mongoose.Schema(
@@ -149,6 +169,8 @@ categorySchema.pre('save', function (next) { (this as any).updatedAt = new Date(
 export const staffSchema = new mongoose.Schema(
   {
     userId:              { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:            { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' }, // Branch assignment
+    isBranchManager:     { type: Boolean, default: false }, // Branch manager flag
     name:                { type: String, required: true },
     email:               { type: String, required: true, lowercase: true, trim: true },
     phone:               { type: String, default: '' },
@@ -184,6 +206,8 @@ export const staffSchema = new mongoose.Schema(
   { collection: 'staff' }
 )
 staffSchema.index({ userId: 1, email: 1 })
+staffSchema.index({ userId: 1, branchId: 1 })
+staffSchema.index({ userId: 1, isBranchManager: 1 })
 staffSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next()
   const salt = await bcryptjs.genSalt(10)
@@ -444,7 +468,7 @@ export const stockLedgerSchema = new mongoose.Schema(
     staffId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
     type: {
       type: String,
-      enum: ['STOCK_IN', 'SALE', 'RETURN', 'DAMAGE', 'WASTAGE', 'EXPIRED', 'LOSS', 'ADJUSTMENT', 'IMPORT', 'MANUAL'],
+      enum: ['STOCK_IN', 'SALE', 'RETURN', 'DAMAGE', 'WASTAGE', 'EXPIRED', 'LOSS', 'ADJUSTMENT', 'IMPORT', 'MANUAL', 'TRANSFER_OUT', 'TRANSFER_IN'],
       required: true,
     },
     quantity:        { type: Number, required: true },   // negative = stock out, positive = stock in
@@ -684,7 +708,6 @@ export const purchaseOrderSchema = new mongoose.Schema(
 purchaseOrderSchema.index({ userId: 1, createdAt: -1 })
 purchaseOrderSchema.index({ userId: 1, status: 1, createdAt: -1 })
 purchaseOrderSchema.index({ userId: 1, supplierId: 1, createdAt: -1 })
-purchaseOrderSchema.index({ poNumber: 1 }, { unique: true })
 purchaseOrderSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
 
 // ── RestockPlan ────────────────────────────────────────────────────────────────
@@ -966,3 +989,62 @@ export const hospitalityCategorySchema = new mongoose.Schema(
 hospitalityCategorySchema.index({ tenantId: 1, name: 1 }, { unique: true })
 hospitalityCategorySchema.index({ tenantId: 1, displayOrder: 1 })
 hospitalityCategorySchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
+
+// ── StockTransfer ──────────────────────────────────────────────────────────────
+// Inter-branch stock transfers
+const stockTransferItemSchema = new mongoose.Schema(
+  {
+    productId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+    drugId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Drug' },
+    itemName:         { type: String, required: true },
+    quantitySent:     { type: Number, required: true, min: 1 },
+    quantityReceived: { type: Number, default: null },  // Set when received
+    unitPrice:        { type: Number, default: 0 },
+  },
+  { _id: false }
+)
+
+export const stockTransferSchema = new mongoose.Schema(
+  {
+    userId:           { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    transferNumber:   { type: String, required: true, unique: true },
+    fromBranchId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
+    toBranchId:       { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
+    items:            { type: [stockTransferItemSchema], required: true },
+    status:           { type: String, enum: ['pending_receipt', 'received', 'rejected'], default: 'pending_receipt' },
+    createdBy:        { type: mongoose.Schema.Types.ObjectId, refPath: 'createdByModel' },
+    createdByModel:   { type: String, enum: ['User', 'Staff'], default: 'User' },
+    receivedBy:       { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    rejectedBy:       { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    notes:            { type: String, default: '' },
+    rejectionReason:  { type: String, default: '' },
+    createdAt:        { type: Date, default: Date.now },
+    receivedAt:       Date,
+    rejectedAt:       Date,
+  },
+  { collection: 'stock_transfers' }
+)
+stockTransferSchema.index({ userId: 1, createdAt: -1 })
+stockTransferSchema.index({ userId: 1, fromBranchId: 1, status: 1 })
+stockTransferSchema.index({ userId: 1, toBranchId: 1, status: 1 })
+
+// ── Notification ───────────────────────────────────────────────────────────────
+// Real-time notifications for staff and users
+export const notificationSchema = new mongoose.Schema(
+  {
+    userId:         { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    recipientId:    { type: mongoose.Schema.Types.ObjectId, required: true },  // Staff or User ID
+    recipientType:  { type: String, enum: ['user', 'staff'], required: true },
+    type:           { type: String, enum: ['transfer_received', 'transfer_rejected', 'info'], required: true },
+    title:          { type: String, required: true },
+    message:        { type: String, required: true },
+    referenceId:    { type: mongoose.Schema.Types.ObjectId },  // Transfer ID, Sale ID, etc.
+    referenceType:  { type: String, enum: ['stock_transfer', 'sale', 'other'], default: 'other' },
+    isRead:         { type: Boolean, default: false },
+    createdAt:      { type: Date, default: Date.now },
+    readAt:         Date,
+  },
+  { collection: 'notifications' }
+)
+notificationSchema.index({ userId: 1, recipientId: 1, isRead: 1, createdAt: -1 })
+notificationSchema.index({ userId: 1, recipientId: 1, createdAt: -1 })

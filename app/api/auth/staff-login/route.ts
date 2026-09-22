@@ -4,6 +4,7 @@ import { getModels } from '@/lib/tenant/get-models'
 import { createToken, setAuthCookie } from '@/lib/jwt'
 import { normaliseFeatures, DEFAULT_MODULE_FEATURES } from '@/lib/modules'
 import { getAdminModels } from '@/lib/admin-models'
+import { CASHIER_ALLOWED_ROUTES, getCashierPermissions } from '@/lib/cashier-routes'
 import { NextRequest, NextResponse } from 'next/server'
 import mongoose from 'mongoose'
 
@@ -160,15 +161,28 @@ export async function POST(request: NextRequest) {
     }
 
     const tokenStart = Date.now()
+    
+    // Enable cashier mode for offline-first operation
+    const isCashierMode = foundStaff.role === 'cashier'
+    const allowedRoutes = isCashierMode ? [...CASHIER_ALLOWED_ROUTES] : undefined
+    
+    // For cashiers, use static permission set instead of custom permissions
+    const staffPermissions = isCashierMode 
+      ? getCashierPermissions() 
+      : foundStaff.permissions
+    
     const token = await createToken({
       userId: foundStaff._id.toString(),
       email: foundStaff.email,
       role: foundStaff.role,
       type: 'staff',
       adminId: foundStaff.userId.toString(),
+      branchId: foundStaff.branchId?.toString(),  // Include branch assignment
       mongoUri: foundMongoUri || undefined,
       tenantFeatures: foundMongoUri ? foundFeatures : undefined,
-      permissions: foundStaff.permissions,
+      permissions: staffPermissions,
+      isCashierMode,
+      allowedRoutes,
     })
     timings.tokenCreation = Date.now() - tokenStart
 
@@ -178,6 +192,7 @@ export async function POST(request: NextRequest) {
     
     console.log('\n========================================')
     console.log('[staff-login] ✅ LOGIN SUCCESS')
+    console.log(`[staff-login] Role: ${foundStaff.role}${isCashierMode ? ' (CASHIER MODE - Offline First)' : ''}`)
     console.log('[staff-login] 📊 PERFORMANCE SUMMARY:')
     console.log(`[staff-login]   Tenant load:         ${timings.tenantLoad}ms`)
     console.log(`[staff-login]   Tenant search:       ${timings.tenantSearch}ms`)
