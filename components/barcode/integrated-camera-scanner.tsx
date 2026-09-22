@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { Camera, CameraOff, SwitchCamera, X, Plus, Minus, ShoppingBag } from 'lucide-react'
+import { Camera, CameraOff, SwitchCamera, X, Plus, Minus, ShoppingBag, Flashlight } from 'lucide-react'
 
 const DEVICE_KEY = 'barcode_camera_deviceId'
 
@@ -61,6 +61,7 @@ export function IntegratedCameraScanner({
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [activeDeviceId, setActiveDeviceId] = useState<string | undefined>()
   const [errorMsg, setErrorMsg] = useState('')
+  const [torchOn, setTorchOn] = useState(false)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const readerRef = useRef<BrowserMultiFormatReader | null>(null)
@@ -75,6 +76,7 @@ export function IntegratedCameraScanner({
   const stopScanner = useCallback(() => {
     controlsRef.current?.stop()
     controlsRef.current = null
+    setTorchOn(false)
   }, [])
 
   const startScanner = useCallback(async (deviceId?: string) => {
@@ -85,7 +87,6 @@ export function IntegratedCameraScanner({
 
     try {
       console.log('[IntegratedScanner] Requesting camera devices...')
-      // Enumerate devices — this also triggers the permission prompt if needed
       const allDevices = await BrowserMultiFormatReader.listVideoInputDevices()
       console.log('[IntegratedScanner] Devices found:', allDevices.length)
       setDevices(allDevices)
@@ -96,7 +97,6 @@ export function IntegratedCameraScanner({
         return
       }
 
-      // Pick device: explicit > saved > prefer back camera > first
       let chosenId = deviceId ?? activeDeviceId
       if (!chosenId) {
         const back = allDevices.find((d) =>
@@ -119,11 +119,9 @@ export function IntegratedCameraScanner({
         (result, err) => {
           if (result) {
             onScan(result.getText())
-            // Brief pause so the same code isn't fired twice in a row
             stopScanner()
             setTimeout(() => startScanner(chosenId), 1200)
           }
-          // NotFoundException is normal (no barcode in frame) — ignore it
           if (err && !(err instanceof NotFoundException)) {
             console.warn('[IntegratedCameraScanner]', err)
           }
@@ -133,6 +131,16 @@ export function IntegratedCameraScanner({
       controlsRef.current = controls
       setStatus('scanning')
     } catch (err: any) {
+      console.error('[IntegratedScanner] Error:', err)
+      
+      if (err?.name === 'OverconstrainedError' && activeDeviceId) {
+        console.log('[IntegratedScanner] Device ID invalid, clearing and retrying...')
+        localStorage.removeItem(DEVICE_KEY)
+        setActiveDeviceId(undefined)
+        setTimeout(() => startScanner(), 500)
+        return
+      }
+      
       if (err?.name === 'NotAllowedError') {
         setStatus('denied')
         setErrorMsg('Camera permission denied. Please allow camera access in your browser settings.')
@@ -162,6 +170,24 @@ export function IntegratedCameraScanner({
     const currentIndex = devices.findIndex((d) => d.deviceId === activeDeviceId)
     const next = devices[(currentIndex + 1) % devices.length]
     startScanner(next.deviceId)
+  }
+
+  async function toggleTorch() {
+    try {
+      const stream = videoRef.current?.srcObject as MediaStream
+      if (!stream) return
+      
+      const track = stream.getVideoTracks()[0]
+      if (!track) return
+      
+      const newTorchState = !torchOn
+      await track.applyConstraints({
+        advanced: [{ torch: newTorchState } as any]
+      })
+      setTorchOn(newTorchState)
+    } catch (err) {
+      console.log('[IntegratedScanner] Torch toggle failed (not supported):', err)
+    }
   }
 
   function handleClose() {
@@ -242,7 +268,6 @@ export function IntegratedCameraScanner({
                 autoPlay
                 muted
                 playsInline
-                style={{ display: (status === 'requesting' || status === 'scanning') ? 'block' : 'none' }}
               />
               {/* Compact Aim Reticle */}
               {status === 'scanning' && (
@@ -256,6 +281,22 @@ export function IntegratedCameraScanner({
                   </div>
                 </div>
               )}
+              
+              {/* Flashlight Toggle - Bottom Right Corner */}
+              {status === 'scanning' && (
+                <div className="absolute bottom-3 right-3 pointer-events-auto">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={`h-10 w-10 rounded-full ${torchOn ? 'bg-yellow-400/90 text-black hover:bg-yellow-400' : 'bg-black/50 text-white hover:bg-black/70'}`}
+                    onClick={toggleTorch}
+                    aria-label={torchOn ? "Turn off flashlight" : "Turn on flashlight"}
+                  >
+                    <Flashlight className="h-5 w-5" />
+                  </Button>
+                </div>
+              )}
+              
               {status === 'requesting' && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/50">
                   <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
