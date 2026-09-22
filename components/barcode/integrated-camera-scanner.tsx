@@ -78,13 +78,16 @@ export function IntegratedCameraScanner({
   }, [])
 
   const startScanner = useCallback(async (deviceId?: string) => {
+    console.log('[IntegratedScanner] startScanner called, videoRef:', videoRef.current)
     if (!videoRef.current) return
     setStatus('requesting')
     setErrorMsg('')
 
     try {
+      console.log('[IntegratedScanner] Requesting camera devices...')
       // Enumerate devices — this also triggers the permission prompt if needed
       const allDevices = await BrowserMultiFormatReader.listVideoInputDevices()
+      console.log('[IntegratedScanner] Devices found:', allDevices.length)
       setDevices(allDevices)
 
       if (allDevices.length === 0) {
@@ -142,8 +145,11 @@ export function IntegratedCameraScanner({
 
   // Start/stop when overlay opens/closes
   useEffect(() => {
+    console.log('[IntegratedScanner] open changed:', open)
     if (open) {
-      startScanner()
+      console.log('[IntegratedScanner] Starting scanner...')
+      // Small delay to let React render the video element
+      setTimeout(() => startScanner(), 100)
     } else {
       stopScanner()
       setStatus('idle')
@@ -179,7 +185,10 @@ export function IntegratedCameraScanner({
         type="button"
         variant="outline"
         size="sm"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          console.log('[IntegratedScanner] Button clicked')
+          setOpen(true)
+        }}
         disabled={disabled}
         aria-label="Scan with camera and view cart"
         className="gap-2"
@@ -226,16 +235,17 @@ export function IntegratedCameraScanner({
             </div>
 
             {/* Video Feed */}
-            {(status === 'requesting' || status === 'scanning') && (
-              <div className="relative w-full h-full">
-                <video
-                  ref={videoRef}
-                  className="w-full h-full object-cover"
-                  autoPlay
-                  muted
-                  playsInline
-                />
-                {/* Compact Aim Reticle */}
+            <div className="relative w-full h-full">
+              <video
+                ref={videoRef}
+                className="w-full h-full object-cover"
+                autoPlay
+                muted
+                playsInline
+                style={{ display: (status === 'requesting' || status === 'scanning') ? 'block' : 'none' }}
+              />
+              {/* Compact Aim Reticle */}
+              {status === 'scanning' && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="w-40 h-20 border-2 border-white/70 rounded-lg relative">
                     <span className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-green-400 rounded-tl" />
@@ -245,13 +255,13 @@ export function IntegratedCameraScanner({
                     <div className="absolute inset-x-0 top-1/2 h-0.5 bg-green-400/70 animate-scan-line" />
                   </div>
                 </div>
-                {status === 'requesting' && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                    <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  </div>
-                )}
-              </div>
-            )}
+              )}
+              {status === 'requesting' && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                  <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                </div>
+              )}
+            </div>
 
             {/* Error / Denied State */}
             {(status === 'denied' || status === 'error') && (
