@@ -29,8 +29,10 @@ export async function POST(request: NextRequest) {
     await setBranchCookie(branchId)
 
     // Optionally update JWT token with new branchId
+    // Remove JWT-specific fields before creating new token
+    const { exp, iat, ...cleanPayload } = payload as any
     const newToken = await createToken({
-      ...payload,
+      ...cleanPayload,
       branchId: branchId,
     })
     await setAuthCookie(newToken)

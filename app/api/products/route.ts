@@ -62,7 +62,6 @@ export async function POST(request: NextRequest) {
     const { models } = await getTenantDB(request)
     const data = await request.json()
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
-    const branchContext = await getBranchContext(request)
 
     // Create product catalog entry (stock field is deprecated but kept for backward compatibility)
     const product = new models.Product({ 
@@ -72,17 +71,9 @@ export async function POST(request: NextRequest) {
     })
     await product.save()
 
-    // Create branch-specific inventory if branch context exists
-    if (branchContext) {
-      const inventory = new models.ProductInventory({
-        userId: ownerId,
-        branchId: branchContext,
-        productId: product._id,
-        stock: data.stock || 0,
-        reserved: 0,
-      })
-      await inventory.save()
-    }
+    // NOTE: ProductInventory records are NOT created automatically
+    // Branch managers must explicitly import products using the import endpoint
+    // This prevents automatic stock inheritance and allows optional per-branch setup
 
     return NextResponse.json(product, { status: 201 })
   } catch (error) {

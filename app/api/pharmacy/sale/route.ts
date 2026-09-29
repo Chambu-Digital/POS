@@ -81,60 +81,127 @@ export async function POST(request: NextRequest) {
     // ── Generate order number ─────────────────────────────────────────────────
     const orderNumber = await generateOrderNumber(models, ownerId)
 
-    // ── Handle credit payment ─────────────────────────────────────────────────
+    // ── PAYMENT VALIDATION ────────────────────────────────────────────────────
+    const saleTotal = data.total || 0
+    let payments = data.payments || []
+    
+    // Handle legacy single payment format for backward compatibility
+    if (!payments.length && data.paymentMethod) {
+      payments = [{
+        method: data.paymentMethod,
+        amount: data.amountPaid || saleTotal,
+        mpesaCode: data.mpesaCode || '',
+        mpesaPhone: data.mpesaPhone || '',
+        timestamp: new Date(),
+      }]
+    }
+
+    // Validate payments
+    if (!payments.length) {
+      return NextResponse.json({ error: 'At least one payment method is required' }, { status: 400 })
+    }
+
+    const totalPaid = payments.reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0)
+    
+    // Allow overpayment for cash (change scenario), but prevent for other methods
+    const hasCashPayment = payments.some((p: any) => p.method === 'cash')
+    if (totalPaid > saleTotal && !hasCashPayment) {
+      return NextResponse.json({ 
+        error: `Payment amount (${totalPaid.toFixed(2)}) exceeds sale total (${saleTotal.toFixed(2)}). Overpayment only allowed for cash payments.` 
+      }, { status: 400 })
+    }
+
+    // Calculate debt (for non-cash overpayment is already blocked above)
+    const debt = Math.max(0, saleTotal - totalPaid)
+    let paymentStatus: 'paid' | 'partial' | 'unpaid' = 'paid'
+    if (debt > 0) {
+      paymentStatus = totalPaid > 0 ? 'partial' : 'unpaid'
+      
+      // If there's debt but no customer, reject the sale
+      if (!data.customerId) {
+        return NextResponse.json({ 
+          error: 'Customer must be selected for unpaid or partial payments. Please select a customer or pay the full amount.' 
+        }, { status: 400 })
+      }
+    }
+
+    // ── CUSTOMER DEBT HANDLING ────────────────────────────────────────────────
     let customerId = data.customerId || null
     let customerName = data.customerName || ''
-    let creditApplied = 0
 
-    if (data.paymentMethod === 'credit' && customerId) {
+    if (customerId && debt > 0) {
+      // Auto-record debt for customer
       const customer = await models.Customer.findById(customerId)
-      if (!customer) return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
-
-      const amountPaid = data.amountPaid || 0
-      const newDebt = data.total - amountPaid
-      let debtChange = newDebt
-
-      if (amountPaid > data.total) {
-        const excess = amountPaid - data.total
-        debtChange = -Math.min(excess, customer.creditBalance)
+      if (!customer) {
+        return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
       }
 
-      customer.creditBalance = Math.max(0, customer.creditBalance + debtChange)
+      // Add debt to customer balance
+      customer.creditBalance = (customer.creditBalance || 0) + debt
       customer.ledger.push({
-        date: new Date(), type: 'purchase',
-        amount: debtChange, balance: customer.creditBalance,
-        note: `Pharmacy sale ${orderNumber}`,
+        date: new Date(),
+        type: 'purchase',
+        amount: debt,
+        balance: customer.creditBalance,
+        saleId: null, // Will be updated after sale creation
+        note: `Pharmacy sale ${orderNumber} - Unpaid balance`,
       })
       await customer.save()
-      creditApplied = amountPaid
       customerName = customer.name
     } else if (customerId) {
+      // No debt, but customer is selected (fully paid)
       const customer = await models.Customer.findById(customerId)
       if (customer) {
-        const amountPaid = data.amountPaid || data.total
-        if (amountPaid > data.total && customer.creditBalance > 0) {
-          const excess = amountPaid - data.total
-          const reduction = Math.min(excess, customer.creditBalance)
-          customer.creditBalance -= reduction
-          customer.ledger.push({ date: new Date(), type: 'payment', amount: -reduction, balance: customer.creditBalance, note: `Overpayment on ${orderNumber}` })
-          await customer.save()
-        }
         customerName = customer.name
       }
     }
 
     const sale = new models.Sale({
-      ...data,
       userId: ownerId,
       branchId: new Types.ObjectId(branchId),
       staffId: payload.type === 'staff' ? payload.userId : null,
       orderNumber,
       customerId: customerId ? new Types.ObjectId(customerId) : null,
       customerName: customerName || data.customerName || '',
-      creditApplied,
+      items: data.items,
+      subtotal: data.subtotal,
+      discount: data.discount || 0,
+      total: saleTotal,
+      
+      // New payment structure
+      payments: payments.map((p: any) => ({
+        method: p.method,
+        amount: parseFloat(p.amount),
+        bankProviderId: p.bankProviderId || null,
+        bankProviderName: p.bankProviderName || '',
+        mpesaCode: p.mpesaCode || '',
+        mpesaPhone: p.mpesaPhone || '',
+        timestamp: p.timestamp || new Date(),
+      })),
+      debt,
+      paymentStatus,
+      
+      // Legacy fields for backward compatibility
+      amountPaid: totalPaid,
+      paymentMethod: payments[0]?.method || 'cash',
+      mpesaCode: payments.find((p: any) => p.method === 'mobile_money')?.mpesaCode || '',
+      mpesaPhone: payments.find((p: any) => p.method === 'mobile_money')?.mpesaPhone || '',
+      creditApplied: 0,
+      
+      notes: data.notes || '',
       source: 'pos',
+      status: 'completed',
     })
     await sale.save()
+
+    // Update customer ledger with saleId
+    if (customerId && debt > 0) {
+      await models.Customer.findByIdAndUpdate(
+        customerId,
+        { $set: { 'ledger.$[elem].saleId': sale._id } },
+        { arrayFilters: [{ 'elem.saleId': null, 'elem.note': `Pharmacy sale ${orderNumber} - Unpaid balance` }] }
+      )
+    }
 
     // Update inventory transactions with the sale reference
     await models.InventoryTransaction.updateMany(

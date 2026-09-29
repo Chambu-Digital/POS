@@ -9,7 +9,7 @@ import { Separator } from '@/components/ui/separator'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Store, Bell, CreditCard, Receipt, Shield, Save, RefreshCw,
-  UtensilsCrossed, Settings2, Upload, Globe, Building2, Package,
+  UtensilsCrossed, Settings2, Upload, Globe, Building2, Package, FileText,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -44,18 +44,24 @@ interface ReceiptSettings {
   showLogo: boolean; showTaxId: boolean; showAddress: boolean; showPhone: boolean
   customMessage: string; paperSize: '58mm' | '80mm'
 }
+interface DocumentSettings {
+  paperSize: 'A4' | 'Letter' | '58mm' | '80mm'
+  fontSize: number
+  fontFamily: 'Arial' | 'Courier' | 'Times'
+}
 interface RestockingSettings {
   lowStockThreshold: number; criticalStockThreshold: number
   defaultLeadTime: number; safetyBuffer: number
 }
 
-type NavKey = 'general' | 'payment' | 'notifications' | 'receipt' | 'features' | 'security' | 'restocking' | 'branches'
+type NavKey = 'general' | 'payment' | 'notifications' | 'receipt' | 'documents' | 'features' | 'security' | 'restocking' | 'branches'
 
 const NAV: { key: NavKey; label: string; desc: string; icon: React.ElementType }[] = [
   { key: 'general',       label: 'General',       desc: 'Store info & branding',  icon: Settings2       },
   { key: 'payment',       label: 'Payments',      desc: 'Methods & tax',          icon: CreditCard      },
   { key: 'notifications', label: 'Notifications', desc: 'Alerts & reports',       icon: Bell            },
-  { key: 'receipt',       label: 'Receipt',       desc: 'Print & layout',         icon: Receipt         },
+  { key: 'receipt',       label: 'Receipt',       desc: 'Thermal printer',        icon: Receipt         },
+  { key: 'documents',     label: 'Documents',     desc: 'Print quotations & POs', icon: FileText        },
   { key: 'restocking',    label: 'Restocking',    desc: 'Inventory thresholds',   icon: Package         },
   { key: 'branches',      label: 'Branches',      desc: 'Multi-branch management', icon: Building2       },
   // { key: 'features',      label: 'Features',      desc: 'KDS, shifts & more',     icon: UtensilsCrossed },
@@ -140,6 +146,11 @@ export default function SettingsPage() {
     showLogo: true, showTaxId: true, showAddress: true, showPhone: true,
     customMessage: 'Thank You For Shopping With Us!', paperSize: '58mm',
   })
+  const [documents, setDocuments] = useState<DocumentSettings>({
+    paperSize: 'A4',
+    fontSize: 12,
+    fontFamily: 'Arial',
+  })
   const [restocking, setRestocking] = useState<RestockingSettings>({
     lowStockThreshold: 7,
     criticalStockThreshold: 3,
@@ -167,6 +178,7 @@ export default function SettingsPage() {
   const upNotifications = (v: Partial<NotificationSettings>)  => { setNotifications(p => ({ ...p, ...v })); setDirty(true) }
   const upPayment       = (v: Partial<PaymentSettings>)       => { setPayment(p => ({ ...p, ...v }));       setDirty(true) }
   const upReceipt       = (v: Partial<ReceiptSettings>)       => { setReceipt(p => ({ ...p, ...v }));       setDirty(true) }
+  const upDocuments     = (v: Partial<DocumentSettings>)      => { setDocuments(p => ({ ...p, ...v }));     setDirty(true) }
   const upRestocking    = (v: Partial<RestockingSettings>)    => { setRestocking(p => ({ ...p, ...v }));    setDirty(true) }
 
   // Auto-save: immediately persist a toggle change without requiring Save button
@@ -221,6 +233,7 @@ export default function SettingsPage() {
       if (settings?.notifications) setNotifications(s => ({ ...s, ...settings.notifications }))
       if (settings?.payment)       setPayment(s => ({ ...s, ...settings.payment }))
       if (settings?.receipt)       setReceipt(s => ({ ...s, ...settings.receipt }))
+      if (settings?.documents)     setDocuments(s => ({ ...s, ...settings.documents }))
       if (settings?.restocking)    setRestocking(s => ({ ...s, ...settings.restocking }))
       setDirty(false)
     } else if (result.error) {
@@ -237,7 +250,7 @@ export default function SettingsPage() {
       const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ general, features, notifications, payment, receipt, restocking }),
+        body: JSON.stringify({ general, features, notifications, payment, receipt, documents, restocking }),
       })
       if (!res.ok) throw new Error()
       toast.success('Settings saved')
@@ -674,6 +687,46 @@ export default function SettingsPage() {
                   onChange={e => upReceipt({ customMessage: e.target.value })}
                   placeholder="Thank You For Shopping With Us!" rows={3}
                   className="focus-visible:ring-green-500 max-w-md" />
+              </SettingRow>
+            </Section>
+          )}
+
+          {/* ══ DOCUMENTS ════════════════════════════════════════════════════ */}
+          {activeNav === 'documents' && (
+            <Section title="Document Print Settings" desc="Configure print settings for quotations, purchase orders, and reports">
+              <SettingRow label="Paper Size" desc="Default paper size for printed documents (quotations, POs, reports)">
+                <Select value={documents.paperSize} onValueChange={(v: 'A4' | 'Letter' | '58mm' | '80mm') => { upDocuments({ paperSize: v }); autoSave({ documents: { paperSize: v } }) }}>
+                  <SelectTrigger className="max-w-xs focus:ring-green-500"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="A4">A4 (210 × 297mm) — Standard international</SelectItem>
+                    <SelectItem value="Letter">Letter (8.5 × 11in) — US standard</SelectItem>
+                    <SelectItem value="58mm">58mm — Thermal receipt (narrow)</SelectItem>
+                    <SelectItem value="80mm">80mm — Thermal receipt (wide)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+              <SettingRow label="Font Size" desc="Base font size for printed documents (10-14px recommended)">
+                <div className="max-w-xs space-y-2">
+                  <Input 
+                    type="number" 
+                    min="10" 
+                    max="14" 
+                    value={documents.fontSize}
+                    onChange={e => { upDocuments({ fontSize: parseInt(e.target.value) || 12 }); autoSave({ documents: { fontSize: parseInt(e.target.value) || 12 } }) }}
+                    className="focus-visible:ring-green-500"
+                  />
+                  <p className="text-xs text-gray-500">Current: {documents.fontSize}px</p>
+                </div>
+              </SettingRow>
+              <SettingRow label="Font Family" desc="Font style for printed documents">
+                <Select value={documents.fontFamily} onValueChange={(v: 'Arial' | 'Courier' | 'Times') => { upDocuments({ fontFamily: v }); autoSave({ documents: { fontFamily: v } }) }}>
+                  <SelectTrigger className="max-w-xs focus:ring-green-500"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Arial">Arial — Clean and modern (recommended)</SelectItem>
+                    <SelectItem value="Courier">Courier — Monospace (typewriter style)</SelectItem>
+                    <SelectItem value="Times">Times New Roman — Traditional serif</SelectItem>
+                  </SelectContent>
+                </Select>
               </SettingRow>
             </Section>
           )}

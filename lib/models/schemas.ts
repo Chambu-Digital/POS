@@ -63,6 +63,7 @@ productInventorySchema.index({ userId: 1, productId: 1 })
 export const saleSchema = new mongoose.Schema(
   {
     userId:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' }, // Branch where sale was made
     staffId:       { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
     orderNumber:   { type: String, index: true },
     customerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
@@ -77,11 +78,29 @@ export const saleSchema = new mongoose.Schema(
     subtotal:      Number,
     discount:      { type: Number, default: 0 },
     total:         { type: Number, required: true },
+    
+    // Multiple payments support
+    payments: [{
+      method:          { type: String, enum: ['cash', 'card', 'mobile_money', 'bank', 'credit'], required: true },
+      amount:          { type: Number, required: true },
+      bankProviderId:  { type: mongoose.Schema.Types.ObjectId, ref: 'BankProvider' },
+      bankProviderName: { type: String, default: '' },
+      mpesaCode:       { type: String, default: '' },
+      mpesaPhone:      { type: String, default: '' },
+      timestamp:       { type: Date, default: Date.now },
+    }],
+    
+    // Legacy fields (kept for backward compatibility)
     amountPaid:    { type: Number, default: 0 },
-    paymentMethod: { type: String, enum: ['cash', 'card', 'mobile_money', 'credit'], required: true },
+    paymentMethod: { type: String, enum: ['cash', 'card', 'mobile_money', 'bank', 'credit'], required: false },
     mpesaCode:     String,
     mpesaPhone:    String,
     creditApplied: { type: Number, default: 0 },
+    
+    // Debt tracking
+    debt:          { type: Number, default: 0 },  // total - sum(payments.amount)
+    paymentStatus: { type: String, enum: ['paid', 'partial', 'unpaid'], default: 'paid' },
+    
     notes:         String,
     source:        { type: String, enum: ['pos', 'rental'], default: 'pos' },
     rentalMeta: {
@@ -119,6 +138,7 @@ export const saleSchema = new mongoose.Schema(
   { collection: 'sales' }
 )
 saleSchema.index({ userId: 1, createdAt: -1 })
+saleSchema.index({ userId: 1, branchId: 1, createdAt: -1 })
 saleSchema.index({ userId: 1, orderNumber: 1 })
 
 // ── Customer ──────────────────────────────────────────────────────────────────
@@ -169,8 +189,9 @@ categorySchema.pre('save', function (next) { (this as any).updatedAt = new Date(
 export const staffSchema = new mongoose.Schema(
   {
     userId:              { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    branchId:            { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' }, // Branch assignment
-    isBranchManager:     { type: Boolean, default: false }, // Branch manager flag
+    branchId:            { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' }, // Primary branch assignment
+    isBranchManager:     { type: Boolean, default: false }, // Is a branch manager flag
+    managerOfBranches:   { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Branch' }], default: [] }, // Array of branches they manage
     name:                { type: String, required: true },
     email:               { type: String, required: true, lowercase: true, trim: true },
     phone:               { type: String, default: '' },
@@ -208,6 +229,7 @@ export const staffSchema = new mongoose.Schema(
 staffSchema.index({ userId: 1, email: 1 })
 staffSchema.index({ userId: 1, branchId: 1 })
 staffSchema.index({ userId: 1, isBranchManager: 1 })
+staffSchema.index({ userId: 1, managerOfBranches: 1 })
 staffSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next()
   const salt = await bcryptjs.genSalt(10)
@@ -710,6 +732,49 @@ purchaseOrderSchema.index({ userId: 1, status: 1, createdAt: -1 })
 purchaseOrderSchema.index({ userId: 1, supplierId: 1, createdAt: -1 })
 purchaseOrderSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
 
+// ── Quotation ──────────────────────────────────────────────────────────────────
+// Customer quotations - similar to purchase orders but for selling
+const quotationItemSchema = new mongoose.Schema(
+  {
+    productId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+    productName: { type: String, required: true },
+    quantity:    { type: Number, required: true, min: 1 },
+    unitPrice:   { type: Number, required: true, min: 0 },
+    lineTotal:   { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+)
+
+export const quotationSchema = new mongoose.Schema(
+  {
+    userId:       { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    quotationNumber: { type: String, required: true, unique: true },  // e.g., 'QT-2026-001'
+    customerId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
+    customerName: { type: String, required: true },
+    customerPhone: { type: String, default: '' },
+    customerEmail: { type: String, default: '' },
+    status:       { type: String, enum: ['draft', 'sent', 'accepted', 'expired', 'converted'], default: 'draft' },
+    items:        { type: [quotationItemSchema], required: true },
+    subtotal:     { type: Number, required: true, default: 0 },
+    discount:     { type: Number, default: 0 },
+    total:        { type: Number, required: true, default: 0 },
+    validUntil:   { type: Date, required: true },
+    notes:        { type: String, default: '' },
+    convertedToSaleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' },
+    createdBy:    { type: mongoose.Schema.Types.ObjectId, refPath: 'createdByModel' },
+    createdByModel: { type: String, enum: ['User', 'Staff'], default: 'User' },
+    createdAt:    { type: Date, default: Date.now },
+    updatedAt:    { type: Date, default: Date.now },
+  },
+  { collection: 'quotations' }
+)
+quotationSchema.index({ userId: 1, createdAt: -1 })
+quotationSchema.index({ userId: 1, status: 1, createdAt: -1 })
+quotationSchema.index({ userId: 1, customerId: 1, createdAt: -1 })
+quotationSchema.index({ quotationNumber: 1 }, { unique: true })
+quotationSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
+
 // ── RestockPlan ────────────────────────────────────────────────────────────────
 // History of restocking analysis and recommendations
 const restockRecommendationSchema = new mongoose.Schema(
@@ -1048,3 +1113,17 @@ export const notificationSchema = new mongoose.Schema(
 )
 notificationSchema.index({ userId: 1, recipientId: 1, isRead: 1, createdAt: -1 })
 notificationSchema.index({ userId: 1, recipientId: 1, createdAt: -1 })
+
+// ── BankProvider ───────────────────────────────────────────────────────────────
+// Dynamic bank payment providers for flexible payment tracking
+export const bankProviderSchema = new mongoose.Schema(
+  {
+    userId:     { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    name:       { type: String, required: true, trim: true },
+    isActive:   { type: Boolean, default: true },
+    createdAt:  { type: Date, default: Date.now },
+  },
+  { collection: 'bank_providers' }
+)
+bankProviderSchema.index({ userId: 1, name: 1 }, { unique: true })
+bankProviderSchema.index({ userId: 1, isActive: 1 })

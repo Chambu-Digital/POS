@@ -8,11 +8,11 @@ import {
   customerSchema, drugBatchSchema, drugSchema,
   branchSchema, inventorySchema, inventoryTransactionSchema,
 
-  purchaseOrderSchema, restockPlanSchema,
+  purchaseOrderSchema, restockPlanSchema, quotationSchema,
   hospitalityMenuItemSchema, hospitalityServingTypeSchema, hospitalityServingInventorySchema,
   hospitalityServingMovementSchema, hospitalityProductionLogSchema, hospitalityOrderSchema,
   hospitalityCategorySchema,
-  stockTransferSchema, notificationSchema,
+  stockTransferSchema, notificationSchema, bankProviderSchema,
 } from '@/lib/models/schemas'
 
 export function getModels(conn: mongoose.Connection) {
@@ -41,6 +41,7 @@ export function getModels(conn: mongoose.Connection) {
     InventoryTransaction: conn.models.InventoryTransaction || conn.model('InventoryTransaction', inventoryTransactionSchema),
 
     PurchaseOrder:    conn.models.PurchaseOrder    || conn.model('PurchaseOrder',    purchaseOrderSchema),
+    Quotation:        conn.models.Quotation        || conn.model('Quotation',        quotationSchema),
     RestockPlan:      conn.models.RestockPlan      || conn.model('RestockPlan',      restockPlanSchema),
     HospitalityMenuItem:        conn.models.HospitalityMenuItem        || conn.model('HospitalityMenuItem',        hospitalityMenuItemSchema),
     HospitalityServingType:     conn.models.HospitalityServingType     || conn.model('HospitalityServingType',     hospitalityServingTypeSchema),
@@ -51,5 +52,6 @@ export function getModels(conn: mongoose.Connection) {
     HospitalityCategory:        conn.models.HospitalityCategory        || conn.model('HospitalityCategory',        hospitalityCategorySchema),
     StockTransfer:              conn.models.StockTransfer              || conn.model('StockTransfer',              stockTransferSchema),
     Notification:               conn.models.Notification               || conn.model('Notification',               notificationSchema),
+    BankProvider:               conn.models.BankProvider               || conn.model('BankProvider',               bankProviderSchema),
   }
 }

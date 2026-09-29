@@ -372,9 +372,26 @@ export function Sidebar() {
             </div>
           </div>
 
-          {/* Branch selector */}
-          {branches.length > 0 && (
+          {/* Branch selector - only for owners */}
+          {branches.length > 0 && userType === 'user' && (
             <BranchSelector branches={branches} selectedBranch={selectedBranch} />
+          )}
+          
+          {/* Branch indicator for staff - read-only */}
+          {branches.length > 0 && userType === 'staff' && selectedBranch && (
+            <div className="mb-4 px-3 py-2 rounded-lg bg-[hsl(var(--sidebar-accent))] border border-[hsl(var(--sidebar-accent-foreground))]/20">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                <div className="flex-1">
+                  <div className="text-xs font-semibold text-[hsl(var(--sidebar-accent-foreground))]">
+                    {selectedBranch.name}
+                  </div>
+                  <div className="text-[10px] text-[hsl(var(--sidebar-accent-foreground))]/60">
+                    Assigned Branch
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Nav */}

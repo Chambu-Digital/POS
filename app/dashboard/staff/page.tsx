@@ -41,6 +41,15 @@ interface Staff {
   permissions?: Record<string, boolean>
   isOwner?: boolean   // synthetic flag for the admin user
   position?: string
+  branchId?: string
+  isBranchManager?: boolean
+}
+
+interface Branch {
+  _id: string
+  name: string
+  code: string
+  status: string
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -169,6 +178,7 @@ export default function StaffPage() {
   const router = useRouter()
   const [staff, setStaff]           = useState<Staff[]>([])
   const [owner, setOwner]           = useState<Staff | null>(null)
+  const [branches, setBranches]     = useState<Branch[]>([])
   const [loading, setLoading]       = useState(true)
   const [isOffline, setIsOffline]   = useState(false)
   const [search, setSearch]         = useState('')
@@ -198,9 +208,11 @@ export default function StaffPage() {
     leaveDays: 14, salary: 0, commissionStructure: '', employmentType: '',
     password: '', role: 'employee' as Staff['role'],
     permissions: { ...DEFAULT_PERMS },
+    branchId: 'none',
+    isBranchManager: false,
   })
 
-  useEffect(() => { checkAccess(); fetchStaff(); fetchOwner() }, [])
+  useEffect(() => { checkAccess(); fetchStaff(); fetchOwner(); fetchBranches() }, [])
 
   async function checkAccess() {
     const res = await fetch('/api/auth/me')
@@ -238,6 +250,18 @@ export default function StaffPage() {
     } catch { /* silent */ }
   }
 
+  async function fetchBranches() {
+    try {
+      const response = await fetch('/api/branches?status=active')
+      if (response.ok) {
+        const data = await response.json()
+        setBranches(data.branches || [])
+      }
+    } catch (error) {
+      console.error('Failed to fetch branches:', error)
+    }
+  }
+
   async function fetchStaff() {
     setLoading(true)
     setIsOffline(false)
@@ -267,6 +291,8 @@ export default function StaffPage() {
       nationalId: '', kraPin: '', nhifNo: '', nssfNo: '',
       leaveDays: 14, salary: 0, commissionStructure: '', employmentType: '',
       password: '', role: 'employee', permissions: { ...DEFAULT_PERMS },
+      branchId: 'none',
+      isBranchManager: false,
     })
     setShowPwd(false)
     setFormOpen(true)
@@ -283,7 +309,10 @@ export default function StaffPage() {
       leaveDays: s.leaveDays ?? 14, salary: s.salary ?? 0,
       commissionStructure: s.commissionStructure || '', employmentType: s.employmentType || '',
       password: '', role: s.role,
-      permissions: { ...DEFAULT_PERMS, ...(s.permissions || {}) },    })
+      permissions: { ...DEFAULT_PERMS, ...(s.permissions || {}) },
+      branchId: s.branchId || 'none',
+      isBranchManager: s.isBranchManager || false,
+    })
     setShowPwd(false)
     setViewOpen(false)
     setFormOpen(true)
@@ -341,13 +370,19 @@ export default function StaffPage() {
           leaveDays: form.leaveDays, salary: form.salary,
           commissionStructure: form.commissionStructure, employmentType: form.employmentType,
           permissions: form.permissions as Staff['permissions'],
+          branchId: form.branchId === 'none' ? null : form.branchId,
+          isBranchManager: form.isBranchManager,
         })
         toast.success('Employee updated')
         setFormOpen(false)
         setViewStaff(updated)
         setViewOpen(true)
       } else {
-        const result = await apiPost<Staff>('/api/staff', form)
+        const submitData = {
+          ...form,
+          branchId: form.branchId === 'none' ? undefined : form.branchId,
+        }
+        const result = await apiPost<Staff>('/api/staff', submitData)
         if (!result.success || !result.data) {
           throw new Error(result.error?.message || 'Failed to create employee')
         }
@@ -457,7 +492,7 @@ export default function StaffPage() {
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/60">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-12">Index</th>
-                {['Name', 'Job Title', 'Phone', 'Salary (KES)', 'Employment Type'].map(h => (
+                {['Name', 'Job Title', 'Branch', 'Phone', 'Salary (KES)', 'Employment Type'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500">
                     <span className="flex items-center gap-1">
                       <span className="flex flex-col leading-none"><ChevronUp size={9} /><ChevronDown size={9} /></span>
@@ -487,6 +522,24 @@ export default function StaffPage() {
                   </td>
                   <td className="px-4 py-3 text-green-600 font-medium">
                     {s.isOwner ? 'Owner / Admin' : (ROLE_LABELS[s.role] || s.role)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {s.isOwner ? (
+                      <span className="text-gray-400 text-xs">All Branches</span>
+                    ) : s.branchId ? (
+                      <div>
+                        <div className="text-sm text-gray-700">
+                          {branches.find(b => b._id === s.branchId)?.name || 'Unknown'}
+                        </div>
+                        {s.isBranchManager && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200 mt-0.5">
+                            MANAGER
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-gray-400 text-xs">No Branch</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-gray-600">{s.phone || '—'}</td>
                   <td className="px-4 py-3 text-gray-600">{s.salary ? `${s.salary.toLocaleString()}` : '—'}</td>
@@ -561,6 +614,13 @@ export default function StaffPage() {
                     { label: 'Phone',    field: 'phone', value: viewStaff.phone || '',      display: viewStaff.phone || '—',      editable: true  },
                     { label: 'Email',    field: 'email', value: viewStaff.email,            display: viewStaff.email,             editable: false },
                     { label: 'Position', field: '',       value: viewStaff.isOwner ? 'OWNER' : (viewStaff.role), display: viewStaff.isOwner ? 'OWNER' : `[ "${viewStaff.role}" ]`, editable: false },
+                    { 
+                      label: 'Branch', 
+                      field: '', 
+                      value: viewStaff.isOwner ? 'All Branches' : (viewStaff.branchId ? (branches.find(b => b._id === viewStaff.branchId)?.name || 'Unknown') : 'All Branches'),
+                      display: viewStaff.isOwner ? 'All Branches' : (viewStaff.branchId ? (branches.find(b => b._id === viewStaff.branchId)?.name || 'Unknown') : 'All Branches'),
+                      editable: false 
+                    },
                   ] as { label: string; field: string; value: string; display: string; editable: boolean }[]).map(row => (
                     <InlineField
                       key={row.label}
@@ -573,7 +633,16 @@ export default function StaffPage() {
                         toast.success(`${row.label} updated`)
                       }}
                     />
-                  ))}                </div>
+                  ))}
+                  
+                  {/* Branch Manager Badge */}
+                  {!viewStaff.isOwner && viewStaff.isBranchManager && viewStaff.branchId && (
+                    <div className="mt-2 pt-2 border-t border-gray-100">
+                      <span className="inline-flex items-center px-2 py-1 rounded text-xs font-bold bg-blue-100 text-blue-700 border border-blue-200">
+                        🏢 BRANCH MANAGER
+                      </span>
+                    </div>
+                  )}                </div>
 
                 {/* Right: stats + recent sales */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-4">
@@ -769,6 +838,47 @@ export default function StaffPage() {
                 </Select>
               </div>
             </div>
+
+            {/* Branch Assignment */}
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-gray-600">Assign to Branch</label>
+              <Select value={form.branchId || "none"} onValueChange={v => setForm(f => ({ ...f, branchId: v === "none" ? "" : v, isBranchManager: v === "none" ? false : f.isBranchManager }))}>
+                <SelectTrigger className="text-sm focus:ring-green-500">
+                  <SelectValue placeholder="No Branch (Access All)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No Branch (Access All)</SelectItem>
+                  {branches.map(branch => (
+                    <SelectItem key={branch._id} value={branch._id}>
+                      {branch.name} ({branch.code})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500 mt-1">
+                If assigned to a branch, this staff will only see data from that branch.
+              </p>
+            </div>
+
+            {/* Branch Manager Checkbox */}
+            {form.branchId && form.branchId !== 'none' && (
+              <div className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <Checkbox
+                  id="branch-manager"
+                  checked={form.isBranchManager}
+                  onCheckedChange={v => setForm(f => ({ ...f, isBranchManager: !!v }))}
+                  className="mt-0.5"
+                />
+                <div className="flex-1">
+                  <label htmlFor="branch-manager" className="text-sm font-semibold text-blue-900 cursor-pointer">
+                    Make Branch Manager
+                  </label>
+                  <p className="text-xs text-blue-700 mt-0.5">
+                    Branch managers have elevated permissions for their assigned branch and can manage staff within that branch.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* National ID + KRA PIN */}
             <div className="grid grid-cols-2 gap-3">

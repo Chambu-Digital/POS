@@ -25,7 +25,7 @@ interface Branch {
   status: 'active' | 'inactive' | 'closed'
   isDefault: boolean
   createdAt: string
-  manager?: { _id: string; name: string; email: string }
+  managers?: Array<{ _id: string; name: string; email: string }>
 }
 
 interface Staff {
@@ -49,8 +49,9 @@ export function BranchesSettings() {
     address: '',
     phone: '',
     status: 'active' as Branch['status'],
-    managerId: '',
   })
+  const [selectedManagers, setSelectedManagers] = useState<string[]>([])
+  const [addingManager, setAddingManager] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   useEffect(() => {
@@ -65,30 +66,41 @@ export function BranchesSettings() {
         fetch('/api/staff')
       ])
 
+      let branchList: Branch[] = []
+      let allStaff: Staff[] = []
+
       if (branchesRes.ok) {
         const branchData = await branchesRes.json()
-        const branchList = branchData.branches || []
-        
-        // Fetch manager info for each branch
-        const branchesWithManagers = await Promise.all(
-          branchList.map(async (branch: Branch) => {
-            const staffInBranch = await fetch(`/api/staff?branchId=${branch._id}`)
-            if (staffInBranch.ok) {
-              const staffData = await staffInBranch.json()
-              const manager = staffData.staff?.find((s: Staff) => s.isBranchManager)
-              return { ...branch, manager }
-            }
-            return branch
-          })
-        )
-        
-        setBranches(branchesWithManagers)
+        branchList = branchData.branches || []
       }
 
       if (staffRes.ok) {
         const staffData = await staffRes.json()
-        setStaff(staffData.staff || [])
+        allStaff = staffData.staff || []
+        console.log('[Branch Settings] All staff:', allStaff.map((s: any) => ({ 
+          id: s._id, 
+          name: s.name, 
+          managerOfBranches: s.managerOfBranches 
+        })))
+        setStaff(allStaff)
       }
+
+      // Map managers to branches using the managerOfBranches array
+      const branchesWithManagers = branchList.map(branch => {
+        console.log('[Branch Settings] Processing branch:', branch._id, branch.name)
+        const managers = allStaff.filter((s: any) => {
+          const hasMatch = s.managerOfBranches?.some((bid: string) => {
+            const match = bid === branch._id || bid.toString() === branch._id.toString()
+            if (match) console.log('[Branch Settings] Match found:', s.name, 'manages', branch.name)
+            return match
+          })
+          return hasMatch
+        })
+        console.log('[Branch Settings] Branch', branch.name, 'has', managers.length, 'managers')
+        return { ...branch, managers }
+      })
+      
+      setBranches(branchesWithManagers)
     } catch (error) {
       console.error('Failed to fetch data:', error)
       toast.error('Failed to load branches')
@@ -105,8 +117,9 @@ export function BranchesSettings() {
       address: '',
       phone: '',
       status: 'active',
-      managerId: '',
     })
+    setSelectedManagers([])
+    setAddingManager(false)
     setIsModalOpen(true)
   }
 
@@ -118,8 +131,9 @@ export function BranchesSettings() {
       address: branch.address || '',
       phone: branch.phone || '',
       status: branch.status,
-      managerId: branch.manager?._id || '',
     })
+    setSelectedManagers(branch.managers?.map(m => m._id) || [])
+    setAddingManager(false)
     setIsModalOpen(true)
   }
 
@@ -156,16 +170,75 @@ export function BranchesSettings() {
 
       const { branch } = await response.json()
 
-      // If managerId is set and not "none", update the staff member
-      if (formData.managerId && formData.managerId !== 'none') {
-        await fetch(`/api/staff/${formData.managerId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            branchId: branch._id,
-            isBranchManager: true,
-          }),
-        })
+      // Handle manager assignment changes
+      const oldManagerIds = editingBranch?.managers?.map(m => m._id) || []
+      const newManagerIds = selectedManagers
+
+      console.log('[Branch Update] Old managers:', oldManagerIds)
+      console.log('[Branch Update] New managers:', newManagerIds)
+
+      // Managers to remove (in old but not in new)
+      const managersToRemove = oldManagerIds.filter(id => !newManagerIds.includes(id))
+      // Managers to add (in new but not in old)
+      const managersToAdd = newManagerIds.filter(id => !oldManagerIds.includes(id))
+
+      console.log('[Branch Update] Managers to remove:', managersToRemove)
+      console.log('[Branch Update] Managers to add:', managersToAdd)
+
+      // Remove managers from THIS branch
+      for (const managerId of managersToRemove) {
+        // Fetch current staff to get their managerOfBranches array
+        const staffRes = await fetch(`/api/staff/${managerId}`)
+        if (staffRes.ok) {
+          const { staff: staffMember } = await staffRes.json()
+          const updatedBranches = (staffMember.managerOfBranches || []).filter(
+            (bid: string) => bid !== branch._id
+          )
+          
+          const updateRes = await fetch(`/api/staff/${managerId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              managerOfBranches: updatedBranches,
+              isBranchManager: updatedBranches.length > 0, // Clear flag if no longer managing any branch
+            }),
+          })
+          
+          if (!updateRes.ok) {
+            console.error('Failed to remove manager:', await updateRes.text())
+          }
+        }
+      }
+
+      // Add new managers to THIS branch
+      for (const managerId of managersToAdd) {
+        console.log('[Branch Update] Fetching staff:', managerId)
+        // Fetch current staff to get their managerOfBranches array
+        const staffRes = await fetch(`/api/staff/${managerId}`)
+        if (staffRes.ok) {
+          const { staff: staffMember } = await staffRes.json()
+          console.log('[Branch Update] Current managerOfBranches:', staffMember.managerOfBranches)
+          
+          const updatedBranches = [...(staffMember.managerOfBranches || []), branch._id]
+          console.log('[Branch Update] Updated managerOfBranches:', updatedBranches)
+          
+          const updateRes = await fetch(`/api/staff/${managerId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              managerOfBranches: updatedBranches,
+              isBranchManager: true,
+            }),
+          })
+          
+          if (!updateRes.ok) {
+            console.error('Failed to add manager:', await updateRes.text())
+          } else {
+            console.log('[Branch Update] Successfully added manager')
+          }
+        } else {
+          console.error('Failed to fetch staff:', await staffRes.text())
+        }
       }
 
       toast.success(editingBranch ? 'Branch updated' : 'Branch created')
@@ -198,8 +271,17 @@ export function BranchesSettings() {
   }
 
   const availableManagers = staff.filter(s => 
-    !s.isBranchManager || s._id === editingBranch?.manager?._id
+    !selectedManagers.includes(s._id)
   )
+
+  function addManager(managerId: string) {
+    setSelectedManagers([...selectedManagers, managerId])
+    setAddingManager(false)
+  }
+
+  function removeManager(managerId: string) {
+    setSelectedManagers(selectedManagers.filter(id => id !== managerId))
+  }
 
   return (
     <div className="space-y-6">
@@ -255,16 +337,25 @@ export function BranchesSettings() {
                   <div className="space-y-1 text-sm text-muted-foreground">
                     {branch.address && <p>📍 {branch.address}</p>}
                     {branch.phone && <p>📞 {branch.phone}</p>}
-                    {branch.manager && (
-                      <div className="flex items-center gap-2 mt-2">
-                        <UserCheck size={16} className="text-green-600" />
-                        <span className="font-medium text-foreground">Manager:</span>
-                        <span>{branch.manager.name}</span>
-                        <span className="text-xs">({branch.manager.email})</span>
+                    {branch.managers && branch.managers.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <UserCheck size={16} className="text-green-600" />
+                          <span className="font-medium text-foreground">
+                            {branch.managers.length === 1 ? 'Manager:' : 'Managers:'}
+                          </span>
+                        </div>
+                        <div className="ml-6 space-y-0.5">
+                          {branch.managers.map(manager => (
+                            <div key={manager._id} className="text-foreground">
+                              {manager.name} <span className="text-xs text-muted-foreground">({manager.email})</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
-                    {!branch.manager && (
-                      <p className="text-amber-600 mt-2">⚠️ No manager assigned</p>
+                    {(!branch.managers || branch.managers.length === 0) && (
+                      <p className="text-amber-600 mt-2">⚠️ No managers assigned</p>
                     )}
                   </div>
                 </div>
@@ -365,25 +456,76 @@ export function BranchesSettings() {
             </div>
 
             <div>
-              <Label>Branch Manager</Label>
-              <Select
-                value={formData.managerId}
-                onValueChange={(val) => setFormData({ ...formData, managerId: val })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select manager (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {availableManagers.map(s => (
-                    <SelectItem key={s._id} value={s._id}>
-                      {s.name} ({s.email}) - {s.role}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">
-                Staff member must not already be a manager of another branch
+              <Label>Branch Managers</Label>
+              {selectedManagers.length > 0 && (
+                <div className="mt-2 space-y-2 mb-3">
+                  {selectedManagers.map(managerId => {
+                    const manager = staff.find(s => s._id === managerId)
+                    if (!manager) return null
+                    return (
+                      <div key={managerId} className="flex items-center justify-between bg-muted rounded-md p-2">
+                        <div className="flex items-center gap-2">
+                          <UserCheck size={14} className="text-green-600" />
+                          <span className="text-sm font-medium">{manager.name}</span>
+                          <span className="text-xs text-muted-foreground">({manager.email})</span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeManager(managerId)}
+                          className="h-7 text-red-500 hover:text-red-700"
+                        >
+                          <Trash2 size={14} />
+                        </Button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              
+              {!addingManager ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAddingManager(true)}
+                  className="w-full"
+                  disabled={availableManagers.length === 0}
+                >
+                  <Plus size={14} className="mr-2" />
+                  Add Manager
+                </Button>
+              ) : (
+                <div className="space-y-2">
+                  <Select onValueChange={addManager}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select staff member" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableManagers.map(s => (
+                        <SelectItem key={s._id} value={s._id}>
+                          {s.name} ({s.email}) - {s.role}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setAddingManager(false)}
+                    className="w-full"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              )}
+              
+              <p className="text-xs text-muted-foreground mt-2">
+                {selectedManagers.length === 0
+                  ? 'No managers assigned - admin handles all duties'
+                  : `${selectedManagers.length} manager${selectedManagers.length > 1 ? 's' : ''} assigned`}
               </p>
             </div>
 

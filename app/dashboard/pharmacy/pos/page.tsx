@@ -30,6 +30,7 @@ interface Drug {
   strength?: string
   unit?: string
   sellingPrice: number
+  wholesalePrice: number
   buyingPrice: number
   stock: number
   reorderLevel?: number
@@ -98,6 +99,7 @@ function PharmacyPOSContent() {
   // Cart
   const [cart, setCart] = useState<CartItem[]>([])
   const [cartDiscount, setCartDiscount] = useState(0)
+  const [isWholesaleMode, setIsWholesaleMode] = useState(false)
 
   // Customer
   const [customer, setCustomer] = useState<Customer | null>(null)
@@ -219,13 +221,14 @@ function PharmacyPOSContent() {
         if (existing.quantity >= drug.stock) { toast.error('Not enough stock'); return prev }
         return prev.map(i => i.productId === drug._id ? { ...i, quantity: i.quantity + 1 } : i)
       }
+      const priceToUse = isWholesaleMode && drug.wholesalePrice > 0 ? drug.wholesalePrice : drug.sellingPrice
       return [...prev, {
         productId: drug._id,
         productName: drug.genericName,
         unit: drug.unit,
         brand: drug.brandName,
-        sellingPrice: drug.sellingPrice,
-        originalPrice: drug.sellingPrice,
+        sellingPrice: priceToUse,
+        originalPrice: priceToUse,
         quantity: 1,
         discount: 0,
         isPrescription: drug.requiresPrescription,
@@ -427,6 +430,26 @@ function PharmacyPOSContent() {
               />
             </div>
             <ManualBarcodeEntry onSubmit={scanner.submitManual} />
+            {/* Wholesale Toggle - Compact */}
+            <button
+              type="button"
+              onClick={() => setIsWholesaleMode(!isWholesaleMode)}
+              className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border transition-all ${
+                isWholesaleMode 
+                  ? 'bg-green-600 text-white border-green-600' 
+                  : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
+              }`}
+              title={isWholesaleMode ? 'Wholesale Mode' : 'Retail Mode'}
+            >
+              <span className="text-xs font-semibold">{isWholesaleMode ? 'W' : 'R'}</span>
+              <div className={`w-6 h-3.5 rounded-full transition-colors ${
+                isWholesaleMode ? 'bg-green-700' : 'bg-gray-300'
+              } relative`}>
+                <div className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform ${
+                  isWholesaleMode ? 'translate-x-2.5' : 'translate-x-0.5'
+                }`} />
+              </div>
+            </button>
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1">
             <button
@@ -482,7 +505,14 @@ function PharmacyPOSContent() {
                     {drug.brandName && <p className="text-[10px] text-gray-400 mt-0.5">{drug.brandName}</p>}
                     {drug.strength && <p className="text-[10px] text-blue-400">{drug.strength}</p>}
                     {drug.unit && <p className="text-[10px] text-blue-500">{drug.unit}</p>}
-                    <p className="text-sm font-bold text-green-700 mt-1">KES {drug.sellingPrice.toLocaleString()}</p>
+                    <p className="text-sm font-bold text-green-700 mt-1">
+                      KES {(isWholesaleMode && drug.wholesalePrice > 0 ? drug.wholesalePrice : drug.sellingPrice).toLocaleString()}
+                      {isWholesaleMode && drug.wholesalePrice > 0 && (
+                        <span className="ml-1 text-[10px] text-gray-400 line-through">
+                          {drug.sellingPrice.toLocaleString()}
+                        </span>
+                      )}
+                    </p>
                     <p className={`text-[10px] mt-0.5 ${isOut ? 'text-red-500' : isLow ? 'text-amber-500' : 'text-gray-400'}`}>
                       {isOut ? 'Out of stock' : `${drug.stock} in stock`}
                     </p>

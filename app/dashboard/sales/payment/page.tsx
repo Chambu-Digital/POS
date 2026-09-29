@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Search, UserPlus, X } from 'lucide-react'
+import { Search, UserPlus, X, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Receipt, ReceiptRef } from '@/components/sales/receipt'
 import { OrderCompletionDialog } from '@/components/sales/order-completion-dialog'
@@ -34,6 +34,21 @@ interface Customer {
   creditBalance: number
 }
 
+interface Payment {
+  id: string
+  method: string
+  amount: string
+  bankProviderId?: string
+  bankProviderName?: string
+  mpesaCode?: string
+  mpesaPhone?: string
+}
+
+interface BankProvider {
+  _id: string
+  name: string
+}
+
 export default function PaymentPage() {
   return (
     <Suspense fallback={<div>Loading...</div>}>
@@ -45,28 +60,16 @@ export default function PaymentPage() {
 function PaymentPageContent() {
   const router = useRouter()
   const receiptRef = useRef<ReceiptRef>(null)
-  const amountInputRef = useRef<HTMLInputElement>(null)
-  const mpesaPhoneRef = useRef<HTMLInputElement>(null)
-  const mpesaCodeRef = useRef<HTMLInputElement>(null)
   
   const [cart, setCart] = useState<CartItem[]>([])
   const [cartDiscount, setCartDiscount] = useState(0)
-  // Source context — set by whichever POS page wrote pendingSale
   const [saleEndpoint, setSaleEndpoint] = useState('/api/sales')
-  const [returnUrl,    setReturnUrl]    = useState('/dashboard/sales')
-  const [selectedPayment, setSelectedPayment] = useState<string>('')
-  const [paymentAmount, setPaymentAmount] = useState<string>('')
-  const [mpesaCode, setMpesaCode] = useState<string>('')
-  const [mpesaPhone, setMpesaPhone] = useState<string>('')
+  const [returnUrl, setReturnUrl] = useState('/dashboard/sales')
   
-  // M-Pesa state machine
-  type MpesaFlowState = 
-    | 'idle'              // No M-Pesa selected
-    | 'method-selection'  // Choose STK or Manual
-    | 'stk-input'         // Enter phone for STK
-    | 'stk-waiting'       // STK push sent, waiting
-    | 'manual-input'      // Manual entry form
-  const [mpesaFlowState, setMpesaFlowState] = useState<MpesaFlowState>('idle')
+  // Multiple payments state
+  const [payments, setPayments] = useState<Payment[]>([])
+  const [nextPaymentId, setNextPaymentId] = useState(1)
+  
   const [showPaymentDialog, setShowPaymentDialog] = useState(false)
   const [showCompletionDialog, setShowCompletionDialog] = useState(false)
   const [processing, setProcessing] = useState(false)
@@ -84,7 +87,11 @@ function PaymentPageContent() {
   const [showAddCustomer, setShowAddCustomer] = useState(false)
   const [newCustomerName, setNewCustomerName] = useState('')
   const [newCustomerPhone, setNewCustomerPhone] = useState('')
-  const [idRequiredError, setIdRequiredError] = useState<{ customerId: string; customerName: string } | null>(null)
+
+  // Bank providers state
+  const [bankProviders, setBankProviders] = useState<BankProvider[]>([])
+  const [showAddBank, setShowAddBank] = useState(false)
+  const [newBankName, setNewBankName] = useState('')
 
   useEffect(() => {
     const cartData = sessionStorage.getItem('pendingSale')
@@ -94,12 +101,19 @@ function PaymentPageContent() {
         setCart(data.cart || [])
         setCartDiscount(data.cartDiscount || 0)
         if (data.saleEndpoint) setSaleEndpoint(data.saleEndpoint)
-        if (data.returnUrl)    setReturnUrl(data.returnUrl)
+        if (data.returnUrl) setReturnUrl(data.returnUrl)
+        
+        // Initialize with one empty payment row
         const subtotal = (data.cart || []).reduce(
           (sum: number, item: CartItem) => sum + item.sellingPrice * item.quantity - item.discount, 0
         )
         const total = subtotal - (data.cartDiscount || 0)
-        setPaymentAmount(Math.max(0, total).toFixed(2))
+        setPayments([{
+          id: '1',
+          method: '',
+          amount: Math.max(0, total).toFixed(2),
+        }])
+        setNextPaymentId(2)
         setLoading(false)
       } catch {
         router.push('/dashboard/sales')
@@ -108,6 +122,7 @@ function PaymentPageContent() {
       router.push('/dashboard/sales')
     }
     fetchUserInfo()
+    fetchBankProviders()
   }, [router])
 
   async function fetchUserInfo() {
@@ -122,6 +137,46 @@ function PaymentPageContent() {
       const res = await fetch('/api/settings')
       if (res.ok) { const data = await res.json(); setShopSettings(data.settings) }
     } catch {}
+  }
+
+  async function fetchBankProviders() {
+    try {
+      const res = await fetch('/api/bank-providers')
+      if (res.ok) {
+        const data = await res.json()
+        setBankProviders(data.providers || [])
+      }
+    } catch (error) {
+      console.error('Failed to fetch bank providers:', error)
+    }
+  }
+
+  async function addBankProvider() {
+    if (!newBankName.trim()) {
+      toast.error('Please enter bank name')
+      return
+    }
+    
+    try {
+      const res = await fetch('/api/bank-providers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newBankName.trim() }),
+      })
+      
+      if (res.ok) {
+        const data = await res.json()
+        setBankProviders([...bankProviders, data.provider])
+        setNewBankName('')
+        setShowAddBank(false)
+        toast.success('Bank provider added')
+      } else {
+        const error = await res.json()
+        toast.error(error.error || 'Failed to add bank provider')
+      }
+    } catch {
+      toast.error('Failed to add bank provider')
+    }
   }
 
   async function searchCustomers(q: string) {
@@ -157,21 +212,69 @@ function PaymentPageContent() {
     } catch { toast.error('Failed to add customer') }
   }
 
+  function addPaymentRow() {
+    setPayments([...payments, {
+      id: String(nextPaymentId),
+      method: '',
+      amount: '0',
+    }])
+    setNextPaymentId(nextPaymentId + 1)
+  }
+
+  function removePaymentRow(id: string) {
+    if (payments.length === 1) {
+      toast.error('At least one payment method is required')
+      return
+    }
+    setPayments(payments.filter(p => p.id !== id))
+  }
+
+  function updatePayment(id: string, field: keyof Payment, value: any) {
+    setPayments(payments.map(p => p.id === id ? { ...p, [field]: value } : p))
+  }
+
+  const subtotal = cart.reduce((sum, item) => sum + item.sellingPrice * item.quantity - item.discount, 0)
+  const total = subtotal - cartDiscount
+  const totalPaid = payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
+  const remaining = total - totalPaid
+  const hasCashPayment = payments.some(p => p.method === 'cash')
+  const overpaid = totalPaid > total && !hasCashPayment  // Only warn for non-cash overpayment
+
   async function processPayment() {
-    if (!selectedPayment) { toast.error('Please select a payment method'); return }
-    if (!paymentAmount || parseFloat(paymentAmount) <= 0) { toast.error('Please enter a valid payment amount'); return }
-    if (selectedPayment === 'credit' && !selectedCustomer) { toast.error('Please select a customer for credit payment'); return }
+    // Validation
+    const validPayments = payments.filter(p => p.method && parseFloat(p.amount) > 0)
+    if (validPayments.length === 0) {
+      toast.error('Please add at least one payment method with an amount')
+      return
+    }
+
+    const totalPaid = validPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0)
     
-    // M-Pesa fields are now optional - seller confirms they received payment
-    // No validation required for phone number or transaction code
+    // Allow overpayment for cash (change), but prevent for other methods
+    const hasCashPayment = validPayments.some(p => p.method === 'cash')
+    if (totalPaid > total && !hasCashPayment) {
+      toast.error(`Total paid (${totalPaid.toFixed(2)}) exceeds sale total (${total.toFixed(2)}). Overpayment only allowed for cash.`)
+      return
+    }
+
+    const debt = total - totalPaid
+    if (debt > 0 && !selectedCustomer) {
+      toast.error('Please select a customer for partial or unpaid sales')
+      return
+    }
+
+    // Validate bank payments have provider selected
+    for (const payment of validPayments) {
+      if (payment.method === 'bank' && !payment.bankProviderId) {
+        toast.error('Please select a bank provider for bank payments')
+        return
+      }
+    }
 
     setProcessing(true)
     setShowPaymentDialog(false)
 
     try {
-      const subtotal = cart.reduce((sum, item) => sum + item.sellingPrice * item.quantity - item.discount, 0)
-      const total = subtotal - cartDiscount
-
       const saleData: any = {
         items: cart.map(item => ({
           productId: item.productId,
@@ -183,20 +286,20 @@ function PaymentPageContent() {
         subtotal,
         discount: cartDiscount,
         total: Math.max(0, total),
-        amountPaid: parseFloat(paymentAmount),
-        paymentMethod: selectedPayment,
         customerName: selectedCustomer?.name || '',
         customerId: selectedCustomer?._id || null,
-      }
-      
-      // Only include M-Pesa details if they're provided (optional)
-      if (selectedPayment === 'mobile_money') {
-        if (mpesaCode.trim()) saleData.mpesaCode = mpesaCode.trim()
-        if (mpesaPhone.trim()) saleData.mpesaPhone = mpesaPhone.trim()
+        payments: validPayments.map(p => ({
+          method: p.method,
+          amount: parseFloat(p.amount),
+          bankProviderId: p.bankProviderId || null,
+          bankProviderName: p.bankProviderName || '',
+          mpesaCode: p.mpesaCode || '',
+          mpesaPhone: p.mpesaPhone || '',
+          timestamp: new Date(),
+        })),
       }
 
       if (isOnline()) {
-        // ── Standard sale ───────────────────────────────────────
         const response = await fetch(saleEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -205,20 +308,11 @@ function PaymentPageContent() {
 
         if (!response.ok) {
           const err = await response.json()
-          // Handle ID requirement error for credit sales
-          if (err.requiresId) {
-            setIdRequiredError({
-              customerId: err.customerId,
-              customerName: err.customerName,
-            })
-            throw new Error('ID required for credit')
-          }
           throw new Error(err.error || 'Failed to complete sale')
         }
 
         const result = await response.json()
-
-        const orderNumber = result.sale?.orderNumber || result.tab?.tabNumber || `ORD-${String(result.sale?._id ?? '').slice(-5).toUpperCase()}`
+        const orderNumber = result.sale?.orderNumber || `ORD-${String(result.sale?._id ?? '').slice(-5).toUpperCase()}`
 
         setLastSale({
           items: cart.map(item => ({
@@ -234,8 +328,8 @@ function PaymentPageContent() {
           subtotal,
           discount: cartDiscount,
           total: Math.max(0, total),
-          amountPaid: parseFloat(paymentAmount),
-          paymentMethod: selectedPayment,
+          amountPaid: totalPaid,
+          paymentMethod: validPayments[0].method,
           customerName: selectedCustomer?.name || 'Cash Sale',
           date: new Date(),
           receiptNumber: orderNumber,
@@ -252,7 +346,7 @@ function PaymentPageContent() {
           subtotal: saleData.subtotal,
           discount: saleData.discount,
           total: saleData.total,
-          paymentMethod: saleData.paymentMethod,
+          paymentMethod: validPayments[0].method,
           createdAt: new Date().toISOString(),
           synced: true,
         })
@@ -265,7 +359,8 @@ function PaymentPageContent() {
             discount: item.discount, total: item.sellingPrice * item.quantity - item.discount,
           })),
           subtotal, discount: cartDiscount, total: Math.max(0, total),
-          paymentMethod: selectedPayment, customerName: selectedCustomer?.name || 'Cash Sale',
+          paymentMethod: validPayments[0].method,
+          customerName: selectedCustomer?.name || 'Cash Sale',
           date: new Date(), receiptNumber: `OFFLINE-${Date.now()}`,
         })
         toast.success('Sale saved offline - will sync when online')
@@ -280,14 +375,14 @@ function PaymentPageContent() {
     } catch (error: any) {
       toast.error(error.message || 'Error processing payment')
     } finally {
-      setProcessing(false) }
+      setProcessing(false)
+    }
   }
 
   function cancelOrder() { sessionStorage.removeItem('pendingSale'); router.push(returnUrl) }
 
   function holdOrder() {
     if (cart.length === 0) return
-    // Use a source-specific held-orders key so Bar and Retail held orders don't mix
     const heldKey = returnUrl.includes('bar') ? 'barHeldOrders' : 'heldOrders'
     const held = JSON.parse(localStorage.getItem(heldKey) || '[]')
     held.push({ id: `hold-${Date.now()}`, cart, cartDiscount, heldAt: new Date().toISOString() })
@@ -295,57 +390,6 @@ function PaymentPageContent() {
     sessionStorage.removeItem('pendingSale')
     router.push(returnUrl)
   }
-
-  function handlePaymentMethodChange(value: string) {
-    setSelectedPayment(value)
-    
-    // State machine transitions
-    if (value === 'mobile_money') {
-      setMpesaFlowState('method-selection')
-      setShowPaymentDialog(false) // Close main dialog when entering M-Pesa flow
-    } else {
-      // Reset M-Pesa state when switching away
-      setMpesaFlowState('idle')
-      setMpesaCode('')
-      setMpesaPhone('')
-    }
-  }
-
-  // Enter key on amount field submits payment
-  function handleAmountKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      processPayment()
-    }
-  }
-
-  async function initiateSTKPush() {
-    if (!mpesaPhone.trim()) { toast.error('Please enter M-Pesa phone number'); return }
-    setProcessing(true)
-    try {
-      const res = await fetch('/api/mpesa/stk-push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber: mpesaPhone, amount: parseFloat(paymentAmount), orderReference: `ORDER-${Date.now()}` }),
-      })
-      const data = await res.json()
-      if (data.ResponseCode === '0') {
-        toast.success('STK Push sent! Enter your M-Pesa PIN')
-        setMpesaFlowState('stk-waiting')
-      } else {
-        toast.error(data.ResponseDescription || 'Failed to initiate STK Push')
-        setMpesaFlowState('manual-input')
-      }
-    } catch { 
-      toast.error('Failed to initiate STK Push')
-      setMpesaFlowState('manual-input')
-    }
-    finally { setProcessing(false) }
-  }
-
-  const subtotal = cart.reduce((sum, item) => sum + item.sellingPrice * item.quantity - item.discount, 0)
-  const total = subtotal - cartDiscount
-  const change = parseFloat(paymentAmount) - Math.max(0, total)
 
   if (loading) return <div className="flex items-center justify-center h-screen"><div className="text-lg">Loading...</div></div>
 
@@ -389,7 +433,7 @@ function PaymentPageContent() {
               </button>
             )}
             {!selectedCustomer && (
-              <p className="text-xs text-gray-500 mt-1 text-center">Defaults to "Cash Sale" if not selected</p>
+              <p className="text-xs text-gray-500 mt-1 text-center">Required for partial payments</p>
             )}
           </div>
 
@@ -512,61 +556,16 @@ function PaymentPageContent() {
         </DialogContent>
       </Dialog>
 
-      {/* ID Required Dialog */}
-      <Dialog open={!!idRequiredError} onOpenChange={() => setIdRequiredError(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>ID Number Required</DialogTitle>
-            <DialogDescription>
-              This customer needs an ID number on file before they can use credit payment.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-              <p className="text-sm text-yellow-800">
-                <span className="font-semibold">{idRequiredError?.customerName}</span> does not have an ID number recorded.
-              </p>
-              <p className="text-xs text-yellow-700 mt-2">
-                ID number is required for all credit sales for security and tracking purposes.
-              </p>
-            </div>
-            <div className="mt-4 flex gap-2">
-              <Button
-                onClick={() => {
-                  window.open('/dashboard/retail/customers', '_blank')
-                  setIdRequiredError(null)
-                }}
-                className="flex-1 bg-blue-600 hover:bg-blue-700"
-              >
-                Add ID Number
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setIdRequiredError(null)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog 1: Main Payment Method Selection */}
-      <Dialog open={showPaymentDialog && mpesaFlowState === 'idle'} onOpenChange={(open) => {
-        setShowPaymentDialog(open)
-        if (!open) {
-          setSelectedPayment('')
-          setMpesaFlowState('idle')
-        }
-      }}>
-        <DialogContent className="max-w-md">
+      {/* Multiple Payments Dialog */}
+      <Dialog open={showPaymentDialog} onOpenChange={setShowPaymentDialog}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Complete Sale - KES {Math.max(0, total).toFixed(2)}</DialogTitle>
-            <DialogDescription className="sr-only">Select payment method and complete the sale</DialogDescription>
+            <DialogDescription>Add one or more payment methods</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {/* Customer Display (optional) */}
+            {/* Customer Display */}
             {selectedCustomer && (
               <div className="text-sm bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
                 <p className="font-medium text-blue-800">{selectedCustomer.name}</p>
@@ -576,274 +575,80 @@ function PaymentPageContent() {
               </div>
             )}
 
-            <div>
-              <Label className="text-sm font-medium mb-2 block">Payment Method *</Label>
-              <Select value={selectedPayment} onValueChange={handlePaymentMethodChange}>
-                <SelectTrigger tabIndex={0}><SelectValue placeholder="--Select Payment--" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="mobile_money">M-Pesa</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
-                  <SelectItem value="credit">Credit (Pay Later)</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1.5">
-                Use <span className="font-semibold">↓↑</span> arrows to select, <span className="font-semibold">Enter</span> to confirm
-              </p>
-            </div>
-
-            {/* Credit warning */}
-            {selectedPayment === 'credit' && !selectedCustomer && (
-              <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                Please select a customer first to use credit payment.
-              </div>
-            )}
-
-            {/* Amount field for non-mpesa payments */}
-            {selectedPayment && selectedPayment !== 'mobile_money' && (
-              <div>
-                <Label className="text-sm font-medium mb-2 block">
-                  {selectedPayment === 'cash' ? 'Cash Received' : selectedPayment === 'credit' ? 'Amount Paid Now (0 if full credit)' : 'Amount'} *
-                </Label>
-                <Input 
-                  ref={amountInputRef}
-                  type="number" 
-                  value={paymentAmount} 
-                  onChange={e => setPaymentAmount(e.target.value)} 
-                  onKeyDown={handleAmountKeyDown}
-                  placeholder="Enter amount" 
-                  step="0.01" 
-                  onFocus={(e) => e.target.select()} 
-                  autoFocus
+            {/* Payment Rows */}
+            <div className="space-y-3">
+              {payments.map((payment, index) => (
+                <PaymentRow
+                  key={payment.id}
+                  payment={payment}
+                  index={index}
+                  onUpdate={updatePayment}
+                  onRemove={removePaymentRow}
+                  canRemove={payments.length > 1}
+                  bankProviders={bankProviders}
+                  showAddBank={showAddBank}
+                  setShowAddBank={setShowAddBank}
+                  newBankName={newBankName}
+                  setNewBankName={setNewBankName}
+                  addBankProvider={addBankProvider}
                 />
-                {selectedPayment === 'cash' && parseFloat(paymentAmount) > 0 && (
-                  <div className={`mt-2 flex justify-between px-3 py-2 rounded-lg text-sm font-semibold ${change >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-                    <span>Change</span>
-                    <span>KES {Math.max(0, change).toFixed(2)}</span>
-                  </div>
-                )}
-                {selectedPayment === 'credit' && selectedCustomer && parseFloat(paymentAmount) < total && (
-                  <p className="text-xs text-amber-600 mt-1">
-                    KES {(total - parseFloat(paymentAmount || '0')).toFixed(2)} will be added to {selectedCustomer.name}'s credit balance
-                  </p>
-                )}
+              ))}
+            </div>
+
+            {/* Add Payment Button */}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={addPaymentRow}
+              className="w-full"
+            >
+              <Plus size={16} className="mr-2" />
+              Add Another Payment Method
+            </Button>
+
+            {/* Payment Summary */}
+            <div className="border-t pt-3 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Total:</span>
+                <span className="font-semibold">KES {total.toFixed(2)}</span>
               </div>
-            )}
-
-            {/* Process button for non-mpesa */}
-            {selectedPayment && selectedPayment !== 'mobile_money' && (
-              <Button 
-                onClick={processPayment} 
-                disabled={!selectedPayment || processing || (selectedPayment === 'credit' && !selectedCustomer)} 
-                className="w-full bg-green-600 hover:bg-green-700 text-white h-12"
-                tabIndex={0}
-              >
-                {processing ? 'Processing...' : 'Process Payment'}
-              </Button>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog 2: M-Pesa Method Selection */}
-      <Dialog open={mpesaFlowState === 'method-selection'} onOpenChange={(open) => {
-        if (!open) {
-          setMpesaFlowState('idle')
-          setShowPaymentDialog(true)
-        }
-      }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>M-Pesa Payment - KES {Math.max(0, total).toFixed(2)}</DialogTitle>
-            <DialogDescription>Choose your M-Pesa payment method</DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3 py-4">
-            <Button 
-              type="button" 
-              variant="outline"
-              className="w-full h-16 text-base" 
-              onClick={() => setMpesaFlowState('stk-input')}
-            >
-              Send STK Push
-            </Button>
-            <Button 
-              type="button" 
-              variant="outline"
-              className="w-full h-16 text-base" 
-              onClick={() => setMpesaFlowState('manual-input')}
-            >
-              Manual Entry
-            </Button>
-            <Button 
-              type="button" 
-              variant="ghost"
-              className="w-full"
-              onClick={() => {
-                setMpesaFlowState('idle')
-                setShowPaymentDialog(true)
-              }}
-            >
-              Back
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog 3a: STK Push */}
-      <Dialog open={mpesaFlowState === 'stk-input'} onOpenChange={(open) => {
-        if (!open) setMpesaFlowState('method-selection')
-      }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>STK Push - KES {Math.max(0, total).toFixed(2)}</DialogTitle>
-            <DialogDescription>Enter customer's M-Pesa phone number</DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            <div>
-              <Label className="text-sm font-medium mb-2 block">M-Pesa Phone Number *</Label>
-              <Input 
-                ref={mpesaPhoneRef}
-                type="tel" 
-                value={mpesaPhone} 
-                onChange={e => setMpesaPhone(e.target.value)} 
-                placeholder="e.g., 0712345678"
-                autoFocus
-              />
-            </div>
-            
-            <Button 
-              type="button" 
-              onClick={initiateSTKPush} 
-              disabled={!mpesaPhone || processing} 
-              className="w-full bg-green-600 hover:bg-green-700 h-12"
-            >
-              {processing ? 'Sending...' : 'Send STK Push'}
-            </Button>
-            <Button 
-              type="button" 
-              variant="ghost"
-              onClick={() => setMpesaFlowState('method-selection')}
-              className="w-full"
-            >
-              Back
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog 3b: STK Waiting & Complete */}
-      <Dialog open={mpesaFlowState === 'stk-waiting'} onOpenChange={(open) => {
-        if (!open) setMpesaFlowState('method-selection')
-      }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Complete Sale - KES {Math.max(0, total).toFixed(2)}</DialogTitle>
-            <DialogDescription className="sr-only">Complete the M-Pesa payment</DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-              <p className="text-sm font-medium text-green-800">STK Push sent to {mpesaPhone}</p>
-              <p className="text-xs text-green-600 mt-1">Customer should enter M-Pesa PIN on their phone</p>
+              <div className="flex justify-between text-sm">
+                <span>Paid:</span>
+                <span className={`font-semibold ${overpaid ? 'text-red-600' : 'text-green-600'}`}>
+                  KES {totalPaid.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm font-bold">
+                <span>{remaining > 0 ? 'Remaining:' : remaining < 0 && hasCashPayment ? 'Change:' : remaining < 0 ? 'Overpayment:' : 'Balance:'}</span>
+                <span className={remaining > 0 ? 'text-red-600' : remaining < 0 && hasCashPayment ? 'text-blue-600' : remaining < 0 ? 'text-red-600' : 'text-green-600'}>
+                  KES {Math.abs(remaining).toFixed(2)}
+                </span>
+              </div>
+              {remaining > 0 && !selectedCustomer && (
+                <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                  ⚠️ Customer required for partial payments
+                </p>
+              )}
+              {remaining > 0 && selectedCustomer && (
+                <p className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-2 py-1">
+                  KES {remaining.toFixed(2)} will be added to {selectedCustomer.name}'s account
+                </p>
+              )}
+              {overpaid && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1">
+                  ⚠️ Overpayment not allowed for non-cash payments
+                </p>
+              )}
             </div>
 
-            <div>
-              <Label className="text-sm font-medium mb-2 block">Amount *</Label>
-              <Input 
-                ref={amountInputRef}
-                type="number" 
-                value={paymentAmount} 
-                onChange={e => setPaymentAmount(e.target.value)} 
-                onKeyDown={handleAmountKeyDown}
-                placeholder="Enter amount" 
-                step="0.01" 
-                onFocus={(e) => e.target.select()} 
-              />
-            </div>
-
+            {/* Process Button */}
             <Button 
               onClick={processPayment} 
-              disabled={processing} 
+              disabled={processing || overpaid} 
               className="w-full bg-green-600 hover:bg-green-700 text-white h-12"
             >
               {processing ? 'Processing...' : 'Complete Sale'}
             </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog 3c: Manual Entry & Complete */}
-      <Dialog open={mpesaFlowState === 'manual-input'} onOpenChange={(open) => {
-        if (!open) setMpesaFlowState('method-selection')
-      }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Complete Sale - KES {Math.max(0, total).toFixed(2)}</DialogTitle>
-            <DialogDescription>Enter M-Pesa transaction details (optional)</DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            <div>
-              <Label className="text-sm font-medium mb-2 block">
-                M-Pesa Phone Number <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <Input 
-                ref={mpesaPhoneRef}
-                type="tel" 
-                value={mpesaPhone} 
-                onChange={e => setMpesaPhone(e.target.value)} 
-                placeholder="e.g., 0712345678" 
-              />
-            </div>
-
-            <div>
-              <Label className="text-sm font-medium mb-2 block">
-                M-Pesa Transaction Code <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <Input 
-                ref={mpesaCodeRef}
-                type="text" 
-                value={mpesaCode} 
-                onChange={e => setMpesaCode(e.target.value.toUpperCase())} 
-                placeholder="e.g., QGH7XYZ123" 
-                className="uppercase" 
-              />
-              <p className="text-xs text-muted-foreground mt-1">Enter code only if you want to record it</p>
-            </div>
-
-            <div>
-              <Label className="text-sm font-medium mb-2 block">Amount *</Label>
-              <Input 
-                ref={amountInputRef}
-                type="number" 
-                value={paymentAmount} 
-                onChange={e => setPaymentAmount(e.target.value)} 
-                onKeyDown={handleAmountKeyDown}
-                placeholder="Enter amount" 
-                step="0.01" 
-                onFocus={(e) => e.target.select()} 
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <Button 
-                type="button" 
-                variant="ghost"
-                onClick={() => setMpesaFlowState('method-selection')}
-                className="flex-1"
-              >
-                Back
-              </Button>
-              <Button 
-                onClick={processPayment} 
-                disabled={processing} 
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-              >
-                {processing ? 'Processing...' : 'Complete Sale'}
-              </Button>
-            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -891,6 +696,153 @@ function PaymentPageContent() {
           mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}
           paperSize={shopSettings?.receipt?.paperSize || '58mm'}
         />
+      )}
+    </div>
+  )
+}
+
+// Payment Row Component
+function PaymentRow({
+  payment,
+  index,
+  onUpdate,
+  onRemove,
+  canRemove,
+  bankProviders,
+  showAddBank,
+  setShowAddBank,
+  newBankName,
+  setNewBankName,
+  addBankProvider,
+}: {
+  payment: Payment
+  index: number
+  onUpdate: (id: string, field: keyof Payment, value: any) => void
+  onRemove: (id: string) => void
+  canRemove: boolean
+  bankProviders: BankProvider[]
+  showAddBank: boolean
+  setShowAddBank: (show: boolean) => void
+  newBankName: string
+  setNewBankName: (name: string) => void
+  addBankProvider: () => void
+}) {
+  return (
+    <div className="border border-gray-200 rounded-lg p-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-gray-700">Payment {index + 1}</span>
+        {canRemove && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onRemove(payment.id)}
+            className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+          >
+            <Trash2 size={16} />
+          </Button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label className="text-xs mb-1 block">Payment Method *</Label>
+          <Select 
+            value={payment.method} 
+            onValueChange={(value) => onUpdate(payment.id, 'method', value)}
+          >
+            <SelectTrigger><SelectValue placeholder="Select method" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="cash">Cash</SelectItem>
+              <SelectItem value="mobile_money">M-Pesa</SelectItem>
+              <SelectItem value="bank">Bank</SelectItem>
+              <SelectItem value="card">Card</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
+          <Label className="text-xs mb-1 block">Amount *</Label>
+          <Input
+            type="number"
+            step="0.01"
+            value={payment.amount}
+            onChange={(e) => onUpdate(payment.id, 'amount', e.target.value)}
+            placeholder="0.00"
+          />
+        </div>
+      </div>
+
+      {/* Bank Provider Selection */}
+      {payment.method === 'bank' && (
+        <div className="space-y-2">
+          <Label className="text-xs block">Bank Provider *</Label>
+          <div className="flex gap-2">
+            <Select
+              value={payment.bankProviderId || ''}
+              onValueChange={(value) => {
+                const provider = bankProviders.find(b => b._id === value)
+                onUpdate(payment.id, 'bankProviderId', value)
+                onUpdate(payment.id, 'bankProviderName', provider?.name || '')
+              }}
+            >
+              <SelectTrigger className="flex-1">
+                <SelectValue placeholder="Select bank" />
+              </SelectTrigger>
+              <SelectContent>
+                {bankProviders.map(bank => (
+                  <SelectItem key={bank._id} value={bank._id}>{bank.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowAddBank(!showAddBank)}
+              className="px-3"
+            >
+              <Plus size={16} />
+            </Button>
+          </div>
+          
+          {showAddBank && (
+            <div className="flex gap-2">
+              <Input
+                placeholder="Bank name"
+                value={newBankName}
+                onChange={(e) => setNewBankName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addBankProvider()}
+              />
+              <Button size="sm" onClick={addBankProvider}>Add</Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* M-Pesa Fields */}
+      {payment.method === 'mobile_money' && (
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label className="text-xs mb-1 block">M-Pesa Phone (optional)</Label>
+            <Input
+              type="tel"
+              value={payment.mpesaPhone || ''}
+              onChange={(e) => onUpdate(payment.id, 'mpesaPhone', e.target.value)}
+              placeholder="0712345678"
+            />
+          </div>
+          <div>
+            <Label className="text-xs mb-1 block">M-Pesa Code (optional)</Label>
+            <Input
+              type="text"
+              value={payment.mpesaCode || ''}
+              onChange={(e) => onUpdate(payment.id, 'mpesaCode', e.target.value.toUpperCase())}
+              placeholder="QGH7XYZ123"
+              className="uppercase"
+            />
+          </div>
+        </div>
       )}
     </div>
   )

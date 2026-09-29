@@ -11,7 +11,8 @@ export async function GET(request: NextRequest) {
     if (payload.type !== 'user') return NextResponse.json({ error: 'Only admin users can manage staff' }, { status: 403 })
 
     const { models } = await getTenantDB(request)
-    const staff = await models.Staff.find({ userId: payload.userId }).select('-password').sort({ createdAt: -1 })
+    const staff = await models.Staff.find({ userId: payload.userId }).select('-password').sort({ createdAt: -1 }).lean()
+    console.log('[staff GET] Returning staff count:', staff.length, 'Sample:', staff[0])
     return NextResponse.json({ staff })
   } catch (error) {
     console.error('[staff] GET error:', error)
@@ -47,20 +48,6 @@ export async function POST(request: NextRequest) {
       if (!branch) {
         return NextResponse.json({ error: 'Invalid branch' }, { status: 400 })
       }
-      
-      // If setting as branch manager, check if branch already has a manager
-      if (isBranchManager) {
-        const existingManager = await models.Staff.findOne({
-          userId: payload.userId,
-          branchId,
-          isBranchManager: true,
-        })
-        if (existingManager) {
-          return NextResponse.json({ 
-            error: 'This branch already has a manager. Please remove the existing manager first.' 
-          }, { status: 409 })
-        }
-      }
     }
 
     // Check if email already exists in this tenant
@@ -89,6 +76,7 @@ export async function POST(request: NextRequest) {
       permissions: permissions ? normalisePermissions(permissions) : defaultPermissions,
       branchId: branchId || null,
       isBranchManager: isBranchManager || false,
+      managerOfBranches: (isBranchManager && branchId) ? [branchId] : [],
     })
     await staff.save()
 

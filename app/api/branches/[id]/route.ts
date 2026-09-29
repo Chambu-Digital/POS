@@ -2,15 +2,16 @@ import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const { id } = await params
 
-    const branch = await models.Branch.findOne({ _id: params.id, userId: ownerId }).lean()
+    const branch = await models.Branch.findOne({ _id: id, userId: ownerId }).lean()
     if (!branch) return NextResponse.json({ error: 'Branch not found' }, { status: 404 })
 
     return NextResponse.json({ branch })
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -32,9 +33,10 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
     const { models } = await getTenantDB(request)
     const body = await request.json()
+    const { id } = await params
 
     const branch = await models.Branch.findOneAndUpdate(
-      { _id: params.id, userId: payload.userId },
+      { _id: id, userId: payload.userId },
       { ...body, updatedAt: new Date() },
       { new: true }
     )
@@ -48,7 +50,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -59,17 +61,18 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     }
 
     const { models } = await getTenantDB(request)
+    const { id } = await params
 
     // Check if this is the default branch
-    const branch = await models.Branch.findOne({ _id: params.id, userId: payload.userId })
+    const branch = await models.Branch.findOne({ _id: id, userId: payload.userId })
     if (!branch) return NextResponse.json({ error: 'Branch not found' }, { status: 404 })
     if (branch.isDefault) {
       return NextResponse.json({ error: 'Cannot delete default branch' }, { status: 400 })
     }
 
     // Check if branch has inventory or transactions
-    const inventoryCount = await models.Inventory.countDocuments({ branchId: params.id })
-    const transactionCount = await models.InventoryTransaction.countDocuments({ branchId: params.id })
+    const inventoryCount = await models.Inventory.countDocuments({ branchId: id })
+    const transactionCount = await models.InventoryTransaction.countDocuments({ branchId: id })
 
     if (inventoryCount > 0 || transactionCount > 0) {
       return NextResponse.json({ 
@@ -77,7 +80,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       }, { status: 400 })
     }
 
-    await models.Branch.findOneAndDelete({ _id: params.id, userId: payload.userId })
+    await models.Branch.findOneAndDelete({ _id: id, userId: payload.userId })
 
     return NextResponse.json({ success: true })
   } catch (error) {

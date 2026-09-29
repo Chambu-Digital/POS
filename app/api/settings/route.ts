@@ -27,6 +27,11 @@ function buildDefaults(user: { shopName?: string; email?: string; phone?: string
       showLogo: true, showTaxId: true, showAddress: true, showPhone: true,
       customMessage: 'Thank You For Shopping With Us!', paperSize: '58mm',
     },
+    documents: {
+      paperSize: 'A4',        // A4, Letter, 58mm, 80mm
+      fontSize: 12,           // 10-14px
+      fontFamily: 'Arial',    // Arial, Courier, Times
+    },
     restocking: {
       lowStockThreshold: 7,      // days of coverage for "low stock" alert
       criticalStockThreshold: 3, // days of coverage for "critical" alert
@@ -70,6 +75,7 @@ export async function GET(request: NextRequest) {
       notifications: mergeSection(defaults.notifications, (stored.notifications || {}) as object),
       payment:       mergeSection(defaults.payment,       (stored.payment       || {}) as object),
       receipt:       mergeSection(defaults.receipt,       (stored.receipt       || {}) as object),
+      documents:     mergeSection(defaults.documents,     (stored.documents     || {}) as object),
       restocking:    mergeSection(defaults.restocking,    (stored.restocking    || {}) as object),
     }
 

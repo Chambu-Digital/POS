@@ -13,7 +13,10 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status')
 
     const query: any = { userId: ownerId }
-    if (status) query.status = status
+    // Only filter by status if it's not 'all'
+    if (status && status !== 'all') {
+      query.status = status
+    }
 
     const branches = await models.Branch.find(query).sort({ createdAt: -1 }).lean()
     return NextResponse.json({ branches })

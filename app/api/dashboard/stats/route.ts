@@ -1,5 +1,6 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 import { normalisePermissions } from '@/lib/modules'
 
@@ -12,6 +13,9 @@ export async function GET(request: NextRequest) {
     const isStaff = payload.type === 'staff'
     const ownerId = isStaff && payload.adminId ? payload.adminId : payload.userId
     const perms = isStaff ? normalisePermissions(payload.permissions || {}) : null
+    
+    // Get branch context - null means "all branches" for owners
+    const branchContext = await getBranchContext(request)
 
     const canSeeReports   = !isStaff || perms?.['pos.reports'] === true
     const canSeeInventory = !isStaff || perms?.['pos.inventory'] === true
@@ -24,12 +28,16 @@ export async function GET(request: NextRequest) {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
     const todayEnd   = new Date(); todayEnd.setHours(23, 59, 59, 999)
     const staffFilter = isStaff ? { staffId: payload.userId } : {}
+    
+    // Branch filter - apply when branch context exists
+    const branchFilter = branchContext ? { branchId: branchContext } : {}
 
     // Fetch retail sales
     const todaySales = await models.Sale.find({
       userId: ownerId,
       createdAt: { $gte: todayStart, $lte: todayEnd },
       ...staffFilter,
+      ...branchFilter,
     }).lean()
 
     // Fetch hospitality sales (if module exists)
@@ -59,7 +67,11 @@ export async function GET(request: NextRequest) {
 
     // Staff without reports permission — minimal response only
     if (isStaff && !canSeeReports) {
-      const recentOrders = await models.Sale.find({ userId: ownerId, staffId: payload.userId })
+      const recentOrders = await models.Sale.find({ 
+        userId: ownerId, 
+        staffId: payload.userId,
+        ...branchFilter,
+      })
         .sort({ createdAt: -1 }).limit(10).lean()
       
       const recentHospitalityOrders = models.HospitalityOrder ? await models.HospitalityOrder.find({ 
@@ -79,11 +91,19 @@ export async function GET(request: NextRequest) {
           todayStats,
           recentOrders: combinedOrders,
           products: canSeeInventory ? {
-            total: await models.Product.countDocuments({ userId: ownerId }),
-            lowStockItems: await models.Product.countDocuments({
-              userId: ownerId,
-              $expr: { $lt: ['$stock', { $ifNull: ['$lowStockThreshold', 10] }] },
-            }),
+            total: branchContext 
+              ? await models.ProductInventory.countDocuments({ userId: ownerId, branchId: branchContext })
+              : await models.Product.countDocuments({ userId: ownerId }),
+            lowStockItems: branchContext
+              ? await models.ProductInventory.countDocuments({
+                  userId: ownerId,
+                  branchId: branchContext,
+                  stock: { $lt: 10 },
+                })
+              : await models.Product.countDocuments({
+                  userId: ownerId,
+                  $expr: { $lt: ['$stock', { $ifNull: ['$lowStockThreshold', 10] }] },
+                }),
             stockValue: 0, totalStock: 0, outOfStockItems: 0,
           } : null,
         },
@@ -91,8 +111,15 @@ export async function GET(request: NextRequest) {
     }
 
     // Full stats for owner or staff with reports permission
-    const allSales = await models.Sale.find({ userId: ownerId }).lean()
-    const recentSales = await models.Sale.find({ userId: ownerId, createdAt: { $gte: startDate } })
+    const allSales = await models.Sale.find({ 
+      userId: ownerId,
+      ...branchFilter,
+    }).lean()
+    const recentSales = await models.Sale.find({ 
+      userId: ownerId, 
+      createdAt: { $gte: startDate },
+      ...branchFilter,
+    })
       .populate('items.productId').lean()
 
     // Fetch hospitality data
@@ -108,7 +135,9 @@ export async function GET(request: NextRequest) {
     }).lean() : []
 
     const products = await models.Product.find({ userId: ownerId }).lean()
-    const staffCount = await models.Staff.countDocuments({ userId: ownerId, active: true })
+    const staffCount = branchContext 
+      ? await models.Staff.countDocuments({ userId: ownerId, branchId: branchContext, active: true })
+      : await models.Staff.countDocuments({ userId: ownerId, active: true })
 
     const totalSales = allSales.length + allHospitalitySales.length
     const totalRevenue = allSales.reduce((sum, s) => sum + s.total, 0) + allHospitalitySales.reduce((sum: number, s: any) => sum + s.total, 0)
@@ -122,9 +151,69 @@ export async function GET(request: NextRequest) {
       hospitality:  recentHospitalitySales.reduce((sum: number, s: any) => sum + s.total, 0),
     }
 
+    // Calculate product stats based on branch context
+    let productStats
+    if (branchContext) {
+      // Branch-specific: use ProductInventory
+      const inventories = await models.ProductInventory.find({ 
+        userId: ownerId, 
+        branchId: branchContext 
+      }).populate('productId').lean()
+
+      const productIds = inventories.map(inv => inv.productId)
+      const productMap = new Map(
+        products
+          .filter(p => productIds.some(id => id?.toString() === p._id.toString()))
+          .map(p => [p._id.toString(), p])
+      )
+
+      let totalStock = 0
+      let stockValue = 0
+      let stockValueAtCost = 0
+      let lowStockCount = 0
+      let outOfStockCount = 0
+
+      inventories.forEach((inv: any) => {
+        const product = productMap.get(inv.productId?._id?.toString() || inv.productId?.toString())
+        if (product) {
+          const stock = inv.stock || 0
+          totalStock += stock
+          stockValue += stock * (product.sellingPrice || 0)
+          stockValueAtCost += stock * (product.buyingPrice || 0)
+          if (stock < (product.lowStockThreshold || 10)) lowStockCount++
+          if (stock === 0) outOfStockCount++
+        }
+      })
+
+      productStats = {
+        total: inventories.length,
+        totalStock,
+        stockValue,
+        stockValueAtCost,
+        estimatedProfit: stockValue - stockValueAtCost,
+        lowStockItems: lowStockCount,
+        outOfStockItems: outOfStockCount,
+      }
+    } else {
+      // All branches: use Product.stock (legacy/aggregated)
+      productStats = {
+        total: products.length,
+        totalStock: products.reduce((s, p: any) => s + p.stock, 0),
+        stockValue: products.reduce((s, p: any) => s + (p.stock * p.sellingPrice), 0),
+        stockValueAtCost: products.reduce((s, p: any) => s + (p.stock * (p.buyingPrice || 0)), 0),
+        estimatedProfit: products.reduce((s, p: any) => s + (p.stock * ((p.sellingPrice || 0) - (p.buyingPrice || 0))), 0),
+        lowStockItems: products.filter((p: any) => p.stock < (p.lowStockThreshold || 10)).length,
+        outOfStockItems: products.filter((p: any) => p.stock === 0).length,
+      }
+    }
+
     const salesByDay: Record<string, { date: string; sales: number; revenue: number }> = {}
     const last7Days = new Date(); last7Days.setDate(last7Days.getDate() - 7)
-    const salesLast7 = await models.Sale.find({ userId: ownerId, createdAt: { $gte: last7Days } }).lean()
+    const salesLast7 = await models.Sale.find({ 
+      userId: ownerId, 
+      createdAt: { $gte: last7Days },
+      ...branchFilter,
+    }).lean()
     const hospitalitySalesLast7 = models.HospitalityOrder ? await models.HospitalityOrder.find({ 
       tenantId, 
       status: 'completed',
@@ -168,7 +257,10 @@ export async function GET(request: NextRequest) {
     })
 
     // Combine recent orders from both sources
-    const recentRetailOrders = await models.Sale.find({ userId: ownerId })
+    const recentRetailOrders = await models.Sale.find({ 
+      userId: ownerId,
+      ...branchFilter,
+    })
       .sort({ createdAt: -1 }).limit(10)
       .populate('items.productId').populate('staffId', 'name').lean()
     
@@ -182,19 +274,29 @@ export async function GET(request: NextRequest) {
       ...recentHospitalityOrdersList.map((o: any) => ({ ...o, source: 'hospitality', orderNum: o.orderNumber }))
     ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 10)
 
-    const rentalBookings = await models.RentalBooking.find({ userId: ownerId }).lean()
+    const rentalBookings = await models.RentalBooking.find({ 
+      userId: ownerId,
+      ...branchFilter,
+    }).lean()
     const rentalRevenue = rentalBookings
       .filter((b: any) => b.status === 'completed')
       .reduce((sum: number, b: any) => sum + (b.totalAmount || 0), 0)
 
     const kStart = new Date(); kStart.setHours(0, 0, 0, 0)
     const kEnd   = new Date(); kEnd.setHours(23, 59, 59, 999)
-    const todayKitchenOrders = await models.KitchenOrder.find({ userId: ownerId, createdAt: { $gte: kStart, $lte: kEnd } }).lean()
+    const todayKitchenOrders = await models.KitchenOrder.find({ 
+      userId: ownerId, 
+      createdAt: { $gte: kStart, $lte: kEnd },
+      ...branchFilter,
+    }).lean()
     const completedKds = todayKitchenOrders.filter(o => o.status === 'collected')
     const prepTimes = completedKds
       .filter(o => o.preparingAt && o.readyAt)
       .map(o => (new Date(o.readyAt!).getTime() - new Date(o.preparingAt!).getTime()) / 60000)
-    const recentKitchenOrders = await models.KitchenOrder.find({ userId: ownerId }).sort({ createdAt: -1 }).limit(5).lean()
+    const recentKitchenOrders = await models.KitchenOrder.find({ 
+      userId: ownerId,
+      ...branchFilter,
+    }).sort({ createdAt: -1 }).limit(5).lean()
 
     return NextResponse.json({
       stats: {
@@ -206,15 +308,7 @@ export async function GET(request: NextRequest) {
           revenue: recentSales.reduce((s, x) => s + x.total, 0) + recentHospitalitySales.reduce((s: number, x: any) => s + x.total, 0),
           discount: recentSales.reduce((s, x) => s + ((x as any).discount || 0), 0) + recentHospitalitySales.reduce((s: number, x: any) => s + ((x as any).discount || 0), 0),
         },
-        products: {
-          total: products.length,
-          totalStock: products.reduce((s, p: any) => s + p.stock, 0),
-          stockValue: products.reduce((s, p: any) => s + (p.stock * p.sellingPrice), 0),
-          stockValueAtCost: products.reduce((s, p: any) => s + (p.stock * (p.buyingPrice || 0)), 0),
-          estimatedProfit: products.reduce((s, p: any) => s + (p.stock * ((p.sellingPrice || 0) - (p.buyingPrice || 0))), 0),
-          lowStockItems: products.filter((p: any) => p.stock < (p.lowStockThreshold || 10)).length,
-          outOfStockItems: products.filter((p: any) => p.stock === 0).length,
-        },
+        products: productStats,
         staffCount,
         charts: {
           salesByDay: Object.values(salesByDay),

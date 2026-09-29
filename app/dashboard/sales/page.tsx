@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { Plus, Minus, X, Search, AlertCircle } from 'lucide-react'
+import { Plus, Minus, X, Search, AlertCircle, Clock } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
@@ -45,6 +45,7 @@ interface Product {
   productName: string
   category: string
   sellingPrice: number
+  wholeSale: number
   stock: number
   brand?: string
   model?: string
@@ -94,6 +95,7 @@ function SalesPageContent() {
       return saved ? parseFloat(saved) : 0
     } catch { return 0 }
   })
+  const [isWholesaleMode, setIsWholesaleMode] = useState(false)
   const [loading, setLoading] = useState(true)
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
   const [shopSettings, setShopSettings] = useState<any>(null)
@@ -354,6 +356,7 @@ function SalesPageContent() {
       }
       // New item - add to cart and select it (will be at the end)
       setSelectedCartIndex(prevCart.length)
+      const priceToUse = isWholesaleMode && product.wholeSale > 0 ? product.wholeSale : product.sellingPrice
       return [
         ...prevCart,
         {
@@ -362,7 +365,7 @@ function SalesPageContent() {
           brand: product.brand,
           model: product.model,
           variant: product.variant,
-          sellingPrice: product.sellingPrice,
+          sellingPrice: priceToUse,
           quantity: 1,
           discount: 0,
         },
@@ -650,6 +653,31 @@ function SalesPageContent() {
     }
   }
 
+  // Hold current sale for later
+  function holdSale() {
+    if (cart.length === 0) {
+      toast.error('Cart is empty')
+      return
+    }
+
+    const held = JSON.parse(localStorage.getItem('heldOrders') || '[]')
+    held.push({
+      id: `hold-${Date.now()}`,
+      cart,
+      cartDiscount,
+      heldAt: new Date().toISOString(),
+    })
+    localStorage.setItem('heldOrders', JSON.stringify(held))
+
+    // Clear the cart
+    setCart([])
+    setCartDiscount(0)
+    sessionStorage.removeItem('activeCart')
+    sessionStorage.removeItem('activeCartDiscount')
+
+    toast.success('Sale held. Click "Held Orders" to recall.')
+  }
+
   const subtotal = cart.reduce(
     (sum, item) => sum + item.sellingPrice * item.quantity - item.discount,
     0
@@ -736,6 +764,26 @@ function SalesPageContent() {
                 ))}
               </SelectContent>
             </Select>
+            {/* Wholesale Toggle - Compact */}
+            <button
+              type="button"
+              onClick={() => setIsWholesaleMode(!isWholesaleMode)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border transition-all ${
+                isWholesaleMode 
+                  ? 'bg-green-600 text-white border-green-600' 
+                  : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
+              }`}
+              title={isWholesaleMode ? 'Wholesale Mode' : 'Retail Mode'}
+            >
+              <span className="text-sm font-semibold">{isWholesaleMode ? 'W' : 'R'}</span>
+              <div className={`w-7 h-4 rounded-full transition-colors ${
+                isWholesaleMode ? 'bg-green-700' : 'bg-gray-300'
+              } relative`}>
+                <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
+                  isWholesaleMode ? 'translate-x-3.5' : 'translate-x-0.5'
+                }`} />
+              </div>
+            </button>
           </div>
 
           {/* Manual barcode entry */}
@@ -794,7 +842,12 @@ function SalesPageContent() {
                         )}
                         <div className="flex items-center justify-between mt-1">
                           <p className="text-sm font-bold text-primary">
-                            KSh {product.sellingPrice.toLocaleString()}
+                            KSh {(isWholesaleMode && product.wholeSale > 0 ? product.wholeSale : product.sellingPrice).toLocaleString()}
+                            {isWholesaleMode && product.wholeSale > 0 && (
+                              <span className="ml-1 text-xs text-muted-foreground line-through">
+                                {product.sellingPrice.toLocaleString()}
+                              </span>
+                            )}
                           </p>
                           <Badge
                             variant={product.stock > 0 ? 'default' : 'destructive'}
@@ -960,6 +1013,16 @@ function SalesPageContent() {
                 size="lg"
               >
                 Complete Sale
+              </Button>
+              <Button
+                onClick={holdSale}
+                disabled={cart.length === 0}
+                variant="outline"
+                className="w-full"
+                size="lg"
+              >
+                <Clock className="h-4 w-4 mr-2" />
+                Hold Sale
               </Button>
             </CardContent>
           </Card>

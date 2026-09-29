@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Upload, Download, Trash2, Edit2, Search, FolderTree, ArrowLeftRight } from 'lucide-react'
+import { Plus, Upload, Download, Trash2, Edit2, Search, FolderTree, ArrowLeftRight, PackageOpen } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { ProductForm } from '@/components/inventory/product-form'
@@ -24,6 +24,7 @@ import { CategoryManager } from '@/components/inventory/category-manager'
 import { StockInModal } from '@/components/inventory/stock-in-modal'
 import { StockCountModal } from '@/components/inventory/stock-count-modal'
 import { CreateProductTransferModal } from '@/components/stock-transfers/create-product-transfer-modal'
+import { ImportProductsModal } from '@/components/products/import-products-modal'
 import { ProductImage } from '@/components/ui/product-image'
 
 interface Product {
@@ -59,6 +60,7 @@ function InventoryPageContent() {
   const [isStockCountOpen, setIsStockCountOpen] = useState(false)
   const [isTransferOpen, setIsTransferOpen] = useState(false)
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false)
+  const [isImportProductsOpen, setIsImportProductsOpen] = useState(false)
 
   useEffect(() => {
     fetchProducts()
@@ -191,9 +193,17 @@ function InventoryPageContent() {
         </CardHeader>
         <CardContent className="flex gap-2 flex-wrap">
           <Button
-            onClick={() => setIsStockInOpen(true)}
+            onClick={() => setIsImportProductsOpen(true)}
             size="sm"
             variant="default"
+          >
+            <PackageOpen size={16} className="mr-2" />
+            Import from Branch
+          </Button>
+          <Button
+            onClick={() => setIsStockInOpen(true)}
+            size="sm"
+            variant="outline"
           >
             <Plus size={16} className="mr-2" />
             Stock In
@@ -550,6 +560,16 @@ function InventoryPageContent() {
         onClose={() => setIsTransferOpen(false)}
         onSuccess={() => {
           setIsTransferOpen(false)
+          fetchProducts()
+        }}
+      />
+
+      {/* Import Products from Branch Modal */}
+      <ImportProductsModal
+        isOpen={isImportProductsOpen}
+        onClose={() => setIsImportProductsOpen(false)}
+        onSuccess={() => {
+          setIsImportProductsOpen(false)
           fetchProducts()
         }}
       />
