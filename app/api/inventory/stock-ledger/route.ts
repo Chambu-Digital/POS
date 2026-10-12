@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
       .find(query)
       .sort({ timestamp: -1 })
       .limit(limit)
-      .populate('productId', 'productName')
+      .populate('productId', 'productName brand model variant')
       .populate('supplierId', 'name')
       .populate('staffId', 'name')
       .lean()

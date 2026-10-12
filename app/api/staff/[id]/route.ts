@@ -40,17 +40,30 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     // Validate branchId if being updated
     if (data.branchId !== undefined) {
-      if (data.branchId) {
-        const branch = await models.Branch.findOne({ _id: data.branchId, userId: payload.userId })
-        if (!branch) {
-          return NextResponse.json({ error: 'Invalid branch' }, { status: 400 })
-        }
+      if (!data.branchId) {
+        return NextResponse.json({ error: 'Branch assignment is required for all staff' }, { status: 400 })
+      }
+      const branch = await models.Branch.findOne({ _id: data.branchId, userId: payload.userId })
+      if (!branch) {
+        return NextResponse.json({ error: 'Invalid branch' }, { status: 400 })
       }
     }
 
     const fields = ['name','role','active','permissions','phone','jobDescription','firstName','middleName',
       'lastName','nationalId','kraPin','nhifNo','nssfNo','leaveDays','salary','commissionStructure',
-      'employmentType','branchId','isBranchManager','managerOfBranches']
+      'employmentType','branchId','managerOfBranches']
+    
+    // Validate managerOfBranches if being updated
+    if (data.managerOfBranches !== undefined && Array.isArray(data.managerOfBranches) && data.managerOfBranches.length > 0) {
+      const branches = await models.Branch.find({ 
+        _id: { $in: data.managerOfBranches }, 
+        userId: payload.userId 
+      })
+      if (branches.length !== data.managerOfBranches.length) {
+        return NextResponse.json({ error: 'Invalid branch in managerOfBranches' }, { status: 400 })
+      }
+    }
+    
     fields.forEach(f => { if (data[f] !== undefined) (staff as any)[f] = data[f] })
     if (data.password) staff.password = data.password
 

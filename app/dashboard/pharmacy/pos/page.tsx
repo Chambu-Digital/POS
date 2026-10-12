@@ -600,26 +600,11 @@ function PharmacyPOSContent() {
                     <Plus size={11} />
                   </button>
                 </div>
-                {/* Price + override */}
+                {/* Price display - click to override */}
                 <div className="text-right">
-                  {overrideItem === item.productId ? (
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        value={overridePrice}
-                        onChange={e => setOverridePrice(e.target.value)}
-                        className="w-20 text-xs border border-green-400 rounded px-1 py-0.5"
-                        placeholder="New price"
-                        autoFocus
-                        onKeyDown={e => { if (e.key === 'Enter') applyPriceOverride(item.productId); if (e.key === 'Escape') setOverrideItem(null) }}
-                      />
-                      <button onClick={() => applyPriceOverride(item.productId)} className="text-xs text-green-600 font-semibold">OK</button>
-                    </div>
-                  ) : (
-                    <button onClick={() => { setOverrideItem(item.productId); setOverridePrice(String(item.sellingPrice)) }} className="text-sm font-bold text-gray-900 hover:text-green-600">
-                      KES {(item.sellingPrice * item.quantity - item.discount).toLocaleString()}
-                    </button>
-                  )}
+                  <button onClick={() => { setOverrideItem(item.productId); setOverridePrice(String(item.sellingPrice)) }} className="text-sm font-bold text-gray-900 hover:text-green-600">
+                    KES {(item.sellingPrice * item.quantity - item.discount).toLocaleString()}
+                  </button>
                   {item.sellingPrice !== item.originalPrice && (
                     <p className="text-[10px] text-amber-500">Override</p>
                   )}
@@ -819,6 +804,47 @@ function PharmacyPOSContent() {
           onMakeNewSale={() => { setShowCompletion(false); searchRef.current?.focus() }}
         />
       )}
+
+      {/* ── PRICE OVERRIDE DIALOG ────────────────────────────────────────── */}
+      <Dialog open={overrideItem !== null} onOpenChange={(open) => { if (!open) setOverrideItem(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogTitle>Override Price</DialogTitle>
+          <DialogDescription className="sr-only">Enter a new price for this item</DialogDescription>
+          <div className="space-y-4 mt-4">
+            <div>
+              <label className="text-xs font-semibold text-gray-700">New Price (KES)</label>
+              <input
+                type="number"
+                value={overridePrice}
+                onChange={e => setOverridePrice(e.target.value)}
+                className="w-full mt-2 px-3 py-2 border border-gray-300 rounded-lg text-lg font-bold focus:outline-none focus:ring-2 focus:ring-green-500"
+                placeholder="0"
+                autoFocus
+                onKeyDown={e => { 
+                  if (e.key === 'Enter') {
+                    applyPriceOverride(overrideItem!); 
+                  }
+                  if (e.key === 'Escape') setOverrideItem(null)
+                }}
+              />
+            </div>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => { applyPriceOverride(overrideItem!); setOverrideItem(null) }} 
+                className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg"
+              >
+                Apply
+              </button>
+              <button 
+                onClick={() => setOverrideItem(null)} 
+                className="flex-1 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ── HIDDEN RECEIPT ───────────────────────────────────────────────── */}
       {lastSale && userInfo && (

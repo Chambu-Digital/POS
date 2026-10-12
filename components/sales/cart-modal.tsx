@@ -29,6 +29,7 @@ interface CartModalProps {
   onCompleteSale: () => void
   onEnterEditing?: () => void
   onExitEditing?: () => void
+  onPriceOverride?: (productId: string) => void
 }
 
 export function CartModal({
@@ -43,6 +44,7 @@ export function CartModal({
   onCompleteSale,
   onEnterEditing,
   onExitEditing,
+  onPriceOverride,
 }: CartModalProps) {
   if (!isOpen) return null
 
@@ -174,11 +176,14 @@ export function CartModal({
                     </div>
 
                     {/* Item Total */}
-                    <div className="text-right">
+                    <button
+                      onClick={() => onPriceOverride?.(item.productId)}
+                      className="text-right hover:opacity-70 transition-opacity cursor-pointer"
+                    >
                       <p className="text-sm font-bold whitespace-nowrap text-primary">
                         KSh {(item.sellingPrice * item.quantity - item.discount).toLocaleString()}
                       </p>
-                    </div>
+                    </button>
                   </div>
                 </div>
               ))}

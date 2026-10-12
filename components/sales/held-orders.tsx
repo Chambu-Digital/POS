@@ -46,9 +46,11 @@ export function HeldOrders({ onRecall, storageKey = 'heldOrders' }: Props) {
     function refresh() { setOrders(loadFromStorage()) }
     window.addEventListener('storage', refresh)
     window.addEventListener('focus', refresh)
+    window.addEventListener('heldOrderUpdated', refresh)
     return () => {
       window.removeEventListener('storage', refresh)
       window.removeEventListener('focus', refresh)
+      window.removeEventListener('heldOrderUpdated', refresh)
     }
   }, [storageKey])
 

@@ -1,6 +1,7 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { getBranchContext } from '@/lib/branch-context'
+import { releaseReservation } from '@/lib/inventory-reservation'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
@@ -53,64 +54,25 @@ export async function PUT(
     session.startTransaction()
 
     try {
-      // Restore stock to source branch for each item
+      // Release reserved stock to source branch for each item
       for (const item of transfer.items) {
-        if (item.productId) {
-          // Restore retail product stock in ProductInventory
-          const inventory = await models.ProductInventory.findOne({
-            userId: ownerId,
-            branchId: transfer.fromBranchId,
-            productId: item.productId,
-          }).session(session)
+        const itemType = item.productId ? 'product' : 'drug'
+        const itemId = item.productId || item.drugId
 
-          if (inventory) {
-            const previousStock = inventory.stock
-            inventory.stock += item.quantitySent
-            inventory.lastUpdated = new Date()
-            await inventory.save({ session })
-
-            // Create ledger entry for restoration
-            await models.StockLedger.create([{
-              userId: ownerId,
-              productId: item.productId,
-              type: 'ADJUSTMENT',
-              quantity: item.quantitySent,
-              previousStock,
-              newStock: inventory.stock,
-              notes: `Transfer rejected - ${transfer.transferNumber}. Reason: ${reason}`,
-              staffId: payload.type === 'staff' ? payload.userId : undefined,
-            }], { session })
-          }
-
-        } else if (item.drugId) {
-          // Restore pharmacy inventory
-          const inventory = await models.Inventory.findOne({
-            userId: ownerId,
-            branchId: transfer.fromBranchId,
-            drugId: item.drugId,
-          }).session(session)
-
-          if (inventory) {
-            const previousBalance = inventory.quantityAvailable
-            inventory.quantityAvailable += item.quantitySent
-            inventory.lastStockUpdate = new Date()
-            await inventory.save({ session })
-
-            // Create transaction entry
-            await models.InventoryTransaction.create([{
-              userId: ownerId,
-              branchId: transfer.fromBranchId,
-              drugId: item.drugId,
-              type: 'ADJUSTMENT',
-              quantity: item.quantitySent,
-              previousBalance,
-              newBalance: inventory.quantityAvailable,
-              referenceId: transfer._id.toString(),
-              referenceType: 'transfer',
-              userIdPerformed: payload.type === 'staff' ? payload.userId : ownerId,
-              reason: `Transfer rejected - ${transfer.transferNumber}. Reason: ${reason}`,
-            }], { session })
-          }
+        try {
+          await releaseReservation(
+            models,
+            ownerId,
+            transfer.fromBranchId,
+            itemId,
+            itemType,
+            item.quantitySent,
+            `transfer_rejected_${reason}`,
+            session
+          )
+        } catch (error: any) {
+          console.error(`Failed to release reservation for item ${item.itemName}:`, error)
+          // Continue anyway - best effort
         }
       }
 
@@ -139,7 +101,7 @@ export async function PUT(
 
       return NextResponse.json({
         transfer,
-        message: 'Transfer rejected and stock restored',
+        message: 'Transfer rejected and stock reserved released',
       })
 
     } catch (error: any) {

@@ -11,17 +11,27 @@ import { normaliseFeatures, DEFAULT_MODULE_FEATURES } from '@/lib/modules'
 import { getAuthPayload } from '@/lib/jwt'
 
 export async function getTenantDB(_request?: NextRequest) {
-  const payload = await getAuthPayload()
+  try {
+    const payload = await getAuthPayload()
 
-  // Authenticated request with a tenant URI in the token
-  if (payload?.mongoUri) {
-    const features = normaliseFeatures(payload.tenantFeatures || {})
-    const conn = await connectTenantDB(payload.mongoUri)
-    return { conn, models: getModels(conn), features }
+    // Authenticated request with a tenant URI in the token
+    if (payload?.mongoUri) {
+      try {
+        const features = normaliseFeatures(payload.tenantFeatures || {})
+        const conn = await connectTenantDB(payload.mongoUri)
+        return { conn, models: getModels(conn), features }
+      } catch (error) {
+        console.error('[getTenantDB] Failed to connect to tenant URI:', error)
+        throw new Error(`Failed to connect to tenant database: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      }
+    }
+
+    // Localhost dev / no token — fall back to default MONGODB_URI
+    await connectDB()
+    const conn = mongoose.connection
+    return { conn, models: getModels(conn), features: DEFAULT_MODULE_FEATURES }
+  } catch (error) {
+    console.error('[getTenantDB] Error:', error)
+    throw error
   }
-
-  // Localhost dev / no token — fall back to default MONGODB_URI
-  await connectDB()
-  const conn = mongoose.connection
-  return { conn, models: getModels(conn), features: DEFAULT_MODULE_FEATURES }
 }

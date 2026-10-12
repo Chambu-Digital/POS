@@ -39,10 +39,9 @@ interface Staff {
   active: boolean
   createdAt: string
   permissions?: Record<string, boolean>
+  managerOfBranches?: string[]  // IDs of branches this staff manages
   isOwner?: boolean   // synthetic flag for the admin user
   position?: string
-  branchId?: string
-  isBranchManager?: boolean
 }
 
 interface Branch {
@@ -200,6 +199,7 @@ export default function StaffPage() {
   const [newRole, setNewRole]           = useState<Staff['role']>('employee')
   const [newPassword, setNewPassword]   = useState('')
   const [editPerms, setEditPerms]       = useState<Record<string, boolean>>({ ...DEFAULT_PERMS })
+  const [tenantFeatures, setTenantFeatures] = useState<Record<string, boolean>>({})
 
   const [form, setForm] = useState({
     name: '', email: '', phone: '', jobDescription: '',
@@ -208,11 +208,40 @@ export default function StaffPage() {
     leaveDays: 14, salary: 0, commissionStructure: '', employmentType: '',
     password: '', role: 'employee' as Staff['role'],
     permissions: { ...DEFAULT_PERMS },
-    branchId: 'none',
-    isBranchManager: false,
+    branchId: '',
   })
 
-  useEffect(() => { checkAccess(); fetchStaff(); fetchOwner(); fetchBranches() }, [])
+  useEffect(() => { checkAccess(); fetchStaff(); fetchOwner(); fetchBranches(); loadTenantFeatures() }, [])
+
+  function loadTenantFeatures() {
+    try {
+      // Read from sidebar cache using the same key
+      const cached = localStorage.getItem('sidebar_tenant_features')
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        setTenantFeatures(parsed)
+      } else {
+        // Fallback: show all features if cache is empty
+        const allFeatures: Record<string, boolean> = {}
+        MODULES.forEach(mod => {
+          mod.features.forEach(f => {
+            allFeatures[f.key] = true
+          })
+        })
+        setTenantFeatures(allFeatures)
+      }
+    } catch (e) {
+      console.error('Failed to load tenant features:', e)
+      // On error, fallback to showing all features
+      const allFeatures: Record<string, boolean> = {}
+      MODULES.forEach(mod => {
+        mod.features.forEach(f => {
+          allFeatures[f.key] = true
+        })
+      })
+      setTenantFeatures(allFeatures)
+    }
+  }
 
   async function checkAccess() {
     const res = await fetch('/api/auth/me')
@@ -291,8 +320,7 @@ export default function StaffPage() {
       nationalId: '', kraPin: '', nhifNo: '', nssfNo: '',
       leaveDays: 14, salary: 0, commissionStructure: '', employmentType: '',
       password: '', role: 'employee', permissions: { ...DEFAULT_PERMS },
-      branchId: 'none',
-      isBranchManager: false,
+      branchId: '',
     })
     setShowPwd(false)
     setFormOpen(true)
@@ -310,8 +338,7 @@ export default function StaffPage() {
       commissionStructure: s.commissionStructure || '', employmentType: s.employmentType || '',
       password: '', role: s.role,
       permissions: { ...DEFAULT_PERMS, ...(s.permissions || {}) },
-      branchId: s.branchId || 'none',
-      isBranchManager: s.isBranchManager || false,
+      branchId: s.branchId || '',
     })
     setShowPwd(false)
     setViewOpen(false)
@@ -359,6 +386,13 @@ export default function StaffPage() {
     e.preventDefault()
     setSubmitting(true)
     try {
+      // Validate required fields
+      if (!form.branchId) {
+        toast.error('Branch assignment is required')
+        setSubmitting(false)
+        return
+      }
+
       if (editingStaff) {
         const fullName = [form.firstName, form.middleName, form.lastName].filter(Boolean).join(' ') || form.name
         const updated = await patchStaff(editingStaff._id, {
@@ -370,19 +404,14 @@ export default function StaffPage() {
           leaveDays: form.leaveDays, salary: form.salary,
           commissionStructure: form.commissionStructure, employmentType: form.employmentType,
           permissions: form.permissions as Staff['permissions'],
-          branchId: form.branchId === 'none' ? null : form.branchId,
-          isBranchManager: form.isBranchManager,
+          branchId: form.branchId,
         })
         toast.success('Employee updated')
         setFormOpen(false)
         setViewStaff(updated)
         setViewOpen(true)
       } else {
-        const submitData = {
-          ...form,
-          branchId: form.branchId === 'none' ? undefined : form.branchId,
-        }
-        const result = await apiPost<Staff>('/api/staff', submitData)
+        const result = await apiPost<Staff>('/api/staff', form)
         if (!result.success || !result.data) {
           throw new Error(result.error?.message || 'Failed to create employee')
         }
@@ -531,14 +560,14 @@ export default function StaffPage() {
                         <div className="text-sm text-gray-700">
                           {branches.find(b => b._id === s.branchId)?.name || 'Unknown'}
                         </div>
-                        {s.isBranchManager && (
+                        {s.managerOfBranches && s.managerOfBranches.length > 0 && (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200 mt-0.5">
                             MANAGER
                           </span>
                         )}
                       </div>
                     ) : (
-                      <span className="text-gray-400 text-xs">No Branch</span>
+                      <span className="text-amber-600 text-xs">No Branch</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-gray-600">{s.phone || '—'}</td>
@@ -617,8 +646,8 @@ export default function StaffPage() {
                     { 
                       label: 'Branch', 
                       field: '', 
-                      value: viewStaff.isOwner ? 'All Branches' : (viewStaff.branchId ? (branches.find(b => b._id === viewStaff.branchId)?.name || 'Unknown') : 'All Branches'),
-                      display: viewStaff.isOwner ? 'All Branches' : (viewStaff.branchId ? (branches.find(b => b._id === viewStaff.branchId)?.name || 'Unknown') : 'All Branches'),
+                      value: viewStaff.isOwner ? 'N/A' : (viewStaff.branchId ? (branches.find(b => b._id === viewStaff.branchId)?.name || 'Unknown') : 'Not assigned'),
+                      display: viewStaff.isOwner ? 'N/A' : (viewStaff.branchId ? (branches.find(b => b._id === viewStaff.branchId)?.name || 'Unknown') : 'Not assigned'),
                       editable: false 
                     },
                   ] as { label: string; field: string; value: string; display: string; editable: boolean }[]).map(row => (
@@ -635,14 +664,7 @@ export default function StaffPage() {
                     />
                   ))}
                   
-                  {/* Branch Manager Badge */}
-                  {!viewStaff.isOwner && viewStaff.isBranchManager && viewStaff.branchId && (
-                    <div className="mt-2 pt-2 border-t border-gray-100">
-                      <span className="inline-flex items-center px-2 py-1 rounded text-xs font-bold bg-blue-100 text-blue-700 border border-blue-200">
-                        🏢 BRANCH MANAGER
-                      </span>
-                    </div>
-                  )}                </div>
+                  {/* Branch Manager Badge - Removed, manage in Branch Settings */}                </div>
 
                 {/* Right: stats + recent sales */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-4">
@@ -708,7 +730,7 @@ export default function StaffPage() {
           <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
             {/* Core Resources Section */}
             {MODULES.filter(m => m.key === 'core').map(mod => {
-              const coreFeatures = mod.features.filter(f => !f.adminOnly)
+              const coreFeatures = mod.features.filter(f => !f.adminOnly && tenantFeatures[f.key] === true)
               if (coreFeatures.length === 0) return null
               
               return (
@@ -739,6 +761,11 @@ export default function StaffPage() {
             {/* Business Modules Section */}
             {MODULES.filter(m => m.key !== 'core').map(mod => {
               const ModIcon = mod.icon
+              // Filter module features by tenant enablement
+              const visibleFeatures = mod.features.filter(f => tenantFeatures[f.key] === true)
+              // Skip module if no features are enabled for tenant
+              if (visibleFeatures.length === 0) return null
+              
               return (
                 <div key={mod.key} className="border border-gray-200 rounded-lg overflow-hidden">
                   <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border-b border-gray-100">
@@ -746,7 +773,7 @@ export default function StaffPage() {
                     <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">{mod.label}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 py-2.5">
-                    {mod.features.map(f => (
+                    {visibleFeatures.map(f => (
                       <label key={f.key} className="flex items-center gap-2 cursor-pointer">
                         <Checkbox
                           checked={!!editPerms[f.key]}
@@ -839,15 +866,16 @@ export default function StaffPage() {
               </div>
             </div>
 
-            {/* Branch Assignment */}
+            {/* Branch Assignment - Required */}
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-gray-600">Assign to Branch</label>
-              <Select value={form.branchId || "none"} onValueChange={v => setForm(f => ({ ...f, branchId: v === "none" ? "" : v, isBranchManager: v === "none" ? false : f.isBranchManager }))}>
+              <label className="text-xs font-semibold text-gray-600">
+                Assign to Branch <span className="text-red-500">*</span>
+              </label>
+              <Select value={form.branchId || ""} onValueChange={v => setForm(f => ({ ...f, branchId: v }))}>
                 <SelectTrigger className="text-sm focus:ring-green-500">
-                  <SelectValue placeholder="No Branch (Access All)" />
+                  <SelectValue placeholder="Select branch (required)" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No Branch (Access All)</SelectItem>
                   {branches.map(branch => (
                     <SelectItem key={branch._id} value={branch._id}>
                       {branch.name} ({branch.code})
@@ -856,29 +884,16 @@ export default function StaffPage() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-gray-500 mt-1">
-                If assigned to a branch, this staff will only see data from that branch.
+                Each staff member must be assigned to their home branch
               </p>
             </div>
 
-            {/* Branch Manager Checkbox */}
-            {form.branchId && form.branchId !== 'none' && (
-              <div className="flex items-start gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <Checkbox
-                  id="branch-manager"
-                  checked={form.isBranchManager}
-                  onCheckedChange={v => setForm(f => ({ ...f, isBranchManager: !!v }))}
-                  className="mt-0.5"
-                />
-                <div className="flex-1">
-                  <label htmlFor="branch-manager" className="text-sm font-semibold text-blue-900 cursor-pointer">
-                    Make Branch Manager
-                  </label>
-                  <p className="text-xs text-blue-700 mt-0.5">
-                    Branch managers have elevated permissions for their assigned branch and can manage staff within that branch.
-                  </p>
-                </div>
-              </div>
-            )}
+            {/* Branch Manager Assignment - Managed in Branch Settings */}
+            <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
+              <p className="text-sm text-blue-900">
+                <strong>Manager Assignment:</strong> To make this staff member a branch manager, go to <strong>Settings → Branches</strong> and assign them to manage the branch.
+              </p>
+            </div>
 
             {/* National ID + KRA PIN */}
             <div className="grid grid-cols-2 gap-3">

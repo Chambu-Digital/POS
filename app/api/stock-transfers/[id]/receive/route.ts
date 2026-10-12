@@ -1,6 +1,7 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { getBranchContext } from '@/lib/branch-context'
+import { canApproveTransfer, validateBranchAccess } from '@/lib/staff-branch-permissions'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
@@ -28,6 +29,29 @@ export async function PUT(
     const branchContext = await getBranchContext(request)
     if (!branchContext) {
       return NextResponse.json({ error: 'Branch context is required' }, { status: 400 })
+    }
+
+    // If staff, verify manager status and branch access using JWT token
+    if (payload.type === 'staff') {
+      if (!canApproveTransfer({ isBranchManager: payload.isBranchManager })) {
+        return NextResponse.json({ 
+          error: 'Only branch managers can approve transfers. Contact your branch manager.' 
+        }, { status: 403 })
+      }
+
+      try {
+        validateBranchAccess(
+          { 
+            isBranchManager: payload.isBranchManager, 
+            managerOfBranches: payload.managerOfBranches,
+            branchId: payload.branchId 
+          }, 
+          branchContext, 
+          'receive transfer at this branch'
+        )
+      } catch (error: any) {
+        return NextResponse.json({ error: error.message }, { status: 403 })
+      }
     }
 
     // Find transfer

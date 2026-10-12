@@ -19,6 +19,9 @@ interface Branch {
 interface Product {
   _id: string
   productName: string
+  category: string
+  brand?: string
+  variant?: string
   sku: string
   sellingPrice: number
   stock: number // Current branch stock from ProductInventory
@@ -82,6 +85,12 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
     } finally {
       setIsLoading(false)
     }
+  }
+
+  function formatProductName(product: Product) {
+    const variant = product.variant ? ` ${product.variant}` : ''
+    const brand = product.brand ? ` ${product.brand}` : ''
+    return `${product.category} › ${brand}${variant} ${product.productName}`.trim()
   }
 
   function addItem(product: Product) {
@@ -224,7 +233,7 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
                       className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center justify-between border-b last:border-0"
                     >
                       <div>
-                        <div className="font-medium text-sm">{product.productName}</div>
+                        <div className="font-medium text-sm">{formatProductName(product)}</div>
                         <div className="text-xs text-gray-500">SKU: {product.sku}</div>
                       </div>
                       <div className="text-right">

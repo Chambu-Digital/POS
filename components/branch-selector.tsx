@@ -24,9 +24,11 @@ interface Branch {
 interface BranchSelectorProps {
   branches: Branch[]
   selectedBranch: Branch | null
+  isBranchManager?: boolean
+  managerOfBranches?: string[]
 }
 
-export function BranchSelector({ branches, selectedBranch }: BranchSelectorProps) {
+export function BranchSelector({ branches, selectedBranch, isBranchManager, managerOfBranches }: BranchSelectorProps) {
   const [isChanging, setIsChanging] = useState(false)
   const [currentBranch, setCurrentBranch] = useState(selectedBranch)
 
@@ -62,7 +64,15 @@ export function BranchSelector({ branches, selectedBranch }: BranchSelectorProps
 
   if (branches.length === 0) return null
 
-  const activeBranches = branches.filter(b => b.status === 'active')
+  // For branch managers, filter to only show branches they manage
+  let displayBranches = branches
+  if (isBranchManager && managerOfBranches && managerOfBranches.length > 0) {
+    displayBranches = branches.filter(b => 
+      managerOfBranches.some(mid => mid === b._id || mid.toString() === b._id.toString())
+    )
+  }
+
+  const activeBranches = displayBranches.filter(b => b.status === 'active')
   if (activeBranches.length === 0) return null
 
   return (

@@ -31,10 +31,11 @@ export async function POST(request: NextRequest) {
       name, email, password, role, permissions, phone, jobDescription,
       firstName, middleName, lastName, nationalId, kraPin, nhifNo, nssfNo,
       leaveDays, salary, commissionStructure, employmentType,
-      branchId, isBranchManager,
+      branchId, managerOfBranches,
     } = await request.json()
 
     if (!email || !password || !role) return NextResponse.json({ error: 'Email, password and role are required' }, { status: 400 })
+    if (!branchId) return NextResponse.json({ error: 'Branch assignment is required for all staff' }, { status: 400 })
 
     const displayName = name || [firstName, middleName, lastName].filter(Boolean).join(' ') || email
 
@@ -47,6 +48,17 @@ export async function POST(request: NextRequest) {
       const branch = await models.Branch.findOne({ _id: branchId, userId: payload.userId })
       if (!branch) {
         return NextResponse.json({ error: 'Invalid branch' }, { status: 400 })
+      }
+    }
+
+    // Validate managerOfBranches if provided
+    if (managerOfBranches && Array.isArray(managerOfBranches) && managerOfBranches.length > 0) {
+      const branches = await models.Branch.find({ 
+        _id: { $in: managerOfBranches }, 
+        userId: payload.userId 
+      })
+      if (branches.length !== managerOfBranches.length) {
+        return NextResponse.json({ error: 'Invalid branch in managerOfBranches' }, { status: 400 })
       }
     }
 
@@ -74,9 +86,8 @@ export async function POST(request: NextRequest) {
       leaveDays: leaveDays ?? 14, salary: salary ?? 0,
       commissionStructure: commissionStructure || '', employmentType: employmentType || '',
       permissions: permissions ? normalisePermissions(permissions) : defaultPermissions,
-      branchId: branchId || null,
-      isBranchManager: isBranchManager || false,
-      managerOfBranches: (isBranchManager && branchId) ? [branchId] : [],
+      branchId: branchId,  // Required
+      managerOfBranches: managerOfBranches || [],
     })
     await staff.save()
 

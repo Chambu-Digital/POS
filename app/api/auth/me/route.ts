@@ -46,11 +46,17 @@ export async function GET(request: NextRequest) {
       // Get branches for the admin (staff can only access branches assigned to them)
       const branches = await models.Branch.find({ userId: staff.userId, status: 'active' }).lean()
       
-      // Get selected branch or default
+      // Get selected branch from JWT
       let selectedBranch = null
       if (payload.branchId) {
-        selectedBranch = branches.find(b => b._id.toString() === payload.branchId)
-      } else {
+        selectedBranch = branches.find(b => b._id.toString() === payload.branchId.toString())
+        if (!selectedBranch) {
+          console.warn('[auth/me] Staff branchId not found in active branches:', payload.branchId)
+        }
+      }
+      
+      // Fallback only if no branchId in JWT
+      if (!selectedBranch && !payload.branchId) {
         selectedBranch = branches.find(b => b.isDefault) || branches[0] || null
       }
 
@@ -62,6 +68,8 @@ export async function GET(request: NextRequest) {
           permissions: normalisePermissions(staff.permissions || {}),
           isCashierMode: payload.isCashierMode || false,
           allowedRoutes: payload.allowedRoutes || [],
+          isBranchManager: payload.isBranchManager || false,
+          managerOfBranches: payload.managerOfBranches || [],
           branches,
           selectedBranch,
         },

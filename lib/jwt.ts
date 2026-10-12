@@ -14,6 +14,8 @@ export interface TokenPayload {
   permissions?: Record<string, boolean>     // Staff permissions (staff only)
   isDemo?: boolean
   branchId?: string         // Selected branch for multi-branch operations
+  isBranchManager?: boolean // True if staff has manager role (derived from role field)
+  managerOfBranches?: string[]  // Branch IDs staff manages (for client-side permission checks)
   isCashierMode?: boolean   // Cashier mode: skip permission checks for offline-first
   allowedRoutes?: string[]  // Routes allowed for cashier (static list for offline)
 }

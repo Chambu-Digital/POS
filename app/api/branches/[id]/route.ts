@@ -1,5 +1,7 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { validateBranchActive } from '@/lib/branch-validation'
+import { clearBranchCookie } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -35,13 +37,30 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     const body = await request.json()
     const { id } = await params
 
+    // Get current branch
+    const currentBranch = await models.Branch.findOne({ _id: id, userId: payload.userId })
+    if (!currentBranch) {
+      return NextResponse.json({ error: 'Branch not found' }, { status: 404 })
+    }
+
+    // Prevent setting to inactive/closed via update if it has staff assignments
+    if (body.status && body.status !== currentBranch.status) {
+      if (body.status !== 'active') {
+        // Check if branch has staff assigned
+        const staffCount = await models.Staff.countDocuments({ branchId: id, active: true })
+        if (staffCount > 0) {
+          return NextResponse.json({ 
+            error: 'Cannot set branch to inactive/closed while staff are assigned. Reassign staff first.' 
+          }, { status: 400 })
+        }
+      }
+    }
+
     const branch = await models.Branch.findOneAndUpdate(
       { _id: id, userId: payload.userId },
       { ...body, updatedAt: new Date() },
       { new: true }
     )
-
-    if (!branch) return NextResponse.json({ error: 'Branch not found' }, { status: 404 })
 
     return NextResponse.json({ branch })
   } catch (error) {
@@ -66,23 +85,34 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     // Check if this is the default branch
     const branch = await models.Branch.findOne({ _id: id, userId: payload.userId })
     if (!branch) return NextResponse.json({ error: 'Branch not found' }, { status: 404 })
+    
     if (branch.isDefault) {
-      return NextResponse.json({ error: 'Cannot delete default branch' }, { status: 400 })
+      return NextResponse.json({ error: 'Cannot delete default branch. Set another branch as default first.' }, { status: 400 })
     }
 
-    // Check if branch has inventory or transactions
-    const inventoryCount = await models.Inventory.countDocuments({ branchId: id })
-    const transactionCount = await models.InventoryTransaction.countDocuments({ branchId: id })
+    // Check if branch has inventory or transactions (both pharmacy and retail)
+    const [pharmacyInventoryCount, pharmacyTransactionCount, retailInventoryCount] = await Promise.all([
+      models.Inventory.countDocuments({ branchId: id }),
+      models.InventoryTransaction.countDocuments({ branchId: id }),
+      models.ProductInventory.countDocuments({ branchId: id }),
+    ])
 
-    if (inventoryCount > 0 || transactionCount > 0) {
+    if (pharmacyInventoryCount > 0 || pharmacyTransactionCount > 0 || retailInventoryCount > 0) {
       return NextResponse.json({ 
         error: 'Cannot delete branch with inventory or transactions. Archive it instead.' 
       }, { status: 400 })
     }
 
-    await models.Branch.findOneAndDelete({ _id: id, userId: payload.userId })
+    // Delete the branch
+    const deletedBranch = await models.Branch.findOneAndDelete({ _id: id, userId: payload.userId })
 
-    return NextResponse.json({ success: true })
+    // If owner's cookie points to deleted branch, clear it (will fallback to default on next request)
+    await clearBranchCookie()
+
+    return NextResponse.json({ 
+      success: true,
+      message: 'Branch deleted successfully'
+    })
   } catch (error) {
     console.error('[branches DELETE]', error)
     return NextResponse.json({ error: 'Failed to delete branch' }, { status: 500 })

@@ -69,6 +69,14 @@ export async function POST(request: NextRequest) {
 
     const totalPaid = payments.reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0)
     
+    // ── EARLY WALK-IN VALIDATION: Reject walk-in for any underpayment ─────────
+    const debt = Math.max(0, saleTotal - totalPaid)
+    if (debt > 0 && !data.customerId) {
+      return NextResponse.json({ 
+        error: 'Walk-in customers cannot have unpaid balances. Please select a registered customer or pay the full amount.' 
+      }, { status: 400 })
+    }
+    
     // Allow overpayment for cash (change scenario), but prevent for other methods
     const hasCashPayment = payments.some((p: any) => p.method === 'cash')
     if (totalPaid > saleTotal && !hasCashPayment) {
@@ -77,17 +85,50 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
-    // Calculate debt (for non-cash overpayment is already blocked above)
-    const debt = Math.max(0, saleTotal - totalPaid)
+    // Determine payment status
     let paymentStatus: 'paid' | 'partial' | 'unpaid' = 'paid'
+    let debtOffsetAmount = 0  // Track how much existing debt was cleared
+    
     if (debt > 0) {
       paymentStatus = totalPaid > 0 ? 'partial' : 'unpaid'
+    }
+
+    // ── SMART DEBT OFFSET: Apply overpayment to existing customer debt ────────
+    if (totalPaid > saleTotal && data.customerId) {
+      const overpayment = totalPaid - saleTotal
+      const customer = await models.Customer.findById(data.customerId)
       
-      // If there's debt but no customer, reject the sale
-      if (!data.customerId) {
-        return NextResponse.json({ 
-          error: 'Customer must be selected for unpaid or partial payments. Please select a customer or pay the full amount.' 
-        }, { status: 400 })
+      if (customer && customer.creditBalance > 0) {
+        // Apply overpayment to existing debt
+        const debtCleared = Math.min(overpayment, customer.creditBalance)
+        customer.creditBalance -= debtCleared
+        debtOffsetAmount = debtCleared
+        
+        // Add ledger entry for debt offset
+        customer.ledger.push({
+          date: new Date(),
+          type: 'payment',
+          amount: -debtCleared,  // Negative = debt reduced
+          balance: customer.creditBalance,
+          saleId: null,  // Will be updated after sale creation
+          note: `Overpayment from sale ${orderNumber} - Debt offset`,
+        })
+        
+        // If there's remaining overpayment beyond clearing debt, store as credit (wallet)
+        const remainingCredit = overpayment - debtCleared
+        if (remainingCredit > 0) {
+          customer.creditBalance = -remainingCredit  // Negative balance = store credit
+          customer.ledger.push({
+            date: new Date(),
+            type: 'payment',
+            amount: -remainingCredit,
+            balance: customer.creditBalance,
+            saleId: null,
+            note: `Credit balance from overpayment on sale ${orderNumber}`,
+          })
+        }
+        
+        await customer.save()
       }
     }
 
@@ -124,12 +165,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ── CUSTOMER DEBT HANDLING ────────────────────────────────────────────────
+    // ── CUSTOMER DEBT HANDLING (for underpayment) ─────────────────────────────
     let customerId = data.customerId || null
     let customerName = data.customerName || ''
 
     if (customerId && debt > 0) {
-      // Auto-record debt for customer
+      // Auto-record new debt for underpayment
       const customer = await models.Customer.findById(customerId)
       if (!customer) {
         return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
@@ -148,7 +189,7 @@ export async function POST(request: NextRequest) {
       await customer.save()
       customerName = customer.name
     } else if (customerId) {
-      // No debt, but customer is selected (fully paid)
+      // No new debt, but customer is selected (fully paid or overpaid)
       const customer = await models.Customer.findById(customerId)
       if (customer) {
         customerName = customer.name
@@ -186,7 +227,7 @@ export async function POST(request: NextRequest) {
       paymentMethod: payments[0]?.method || 'cash',
       mpesaCode: payments.find((p: any) => p.method === 'mobile_money')?.mpesaCode || '',
       mpesaPhone: payments.find((p: any) => p.method === 'mobile_money')?.mpesaPhone || '',
-      creditApplied: 0,
+      creditApplied: debtOffsetAmount,  // Track debt offset amount
       
       notes: data.notes || '',
       source: data.source || 'pos',
@@ -204,7 +245,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({ sale }, { status: 201 })
+    // Fetch updated customer balance for receipt
+    let customerBalance: number | null = null
+    if (customerId) {
+      const updatedCustomer = await models.Customer.findById(customerId).select('creditBalance').lean() as any
+      if (updatedCustomer) {
+        customerBalance = updatedCustomer.creditBalance
+      }
+    }
+
+    // Prepare payment breakdown for receipt (cash paid vs debt created)
+    const cashPaid = totalPaid - Math.max(0, debt)  // Actual cash received
+    const debtCreated = Math.max(0, debt)           // Amount added to customer account
+
+    return NextResponse.json({ 
+      sale, 
+      customerBalance,
+      paymentBreakdown: {
+        cashPaid,
+        debtCreated,
+      }
+    }, { status: 201 })
   } catch (error) {
     console.error('[sales] POST error:', error)
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to create sale' }, { status: 500 })

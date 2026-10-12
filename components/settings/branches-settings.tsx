@@ -34,7 +34,7 @@ interface Staff {
   email: string
   role: string
   branchId?: string
-  isBranchManager: boolean
+  managerOfBranches?: string[]
 }
 
 export function BranchesSettings() {
@@ -200,7 +200,6 @@ export function BranchesSettings() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               managerOfBranches: updatedBranches,
-              isBranchManager: updatedBranches.length > 0, // Clear flag if no longer managing any branch
             }),
           })
           
@@ -227,7 +226,6 @@ export function BranchesSettings() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               managerOfBranches: updatedBranches,
-              isBranchManager: true,
             }),
           })
           

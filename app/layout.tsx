@@ -1,10 +1,6 @@
-'use client'
-
 import type { Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
-import { ServiceWorkerRegister } from '@/components/pwa/service-worker-register'
-import { PWADebug } from '@/components/pwa/pwa-debug'
-import { Toaster } from 'sonner'
+import { RootLayoutClient } from '@/components/root-layout-client'
 
 import './globals.css'
 
@@ -42,10 +38,9 @@ export default function RootLayout({
         <link rel="mask-icon" href="/chambu-logo.svg" color="#10b981" />
       </head>
       <body className="font-sans antialiased" suppressHydrationWarning>
-        {children}
-        <Toaster position="top-center" richColors />
-        <ServiceWorkerRegister />
-        <PWADebug />
+        <RootLayoutClient>
+          {children}
+        </RootLayoutClient>
       </body>
     </html>
   )

@@ -15,19 +15,23 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search') || ''
     const category = searchParams.get('category') || ''
 
-    const query: any = { userId: ownerId, status: 'active' }
+    // Build query with proper MongoDB syntax
+    const filters: any[] = [
+      { userId: ownerId, status: 'active' }
+    ]
     
     // Filter by branch context if available
     if (branchContext) {
-      query.$or = [
-        { branchId: branchContext },  // Branch-specific drugs
-        { branchId: null },            // Global drugs (no branch assignment)
-      ]
+      filters.push({
+        $or: [
+          { branchId: branchContext },  // Branch-specific drugs
+          { branchId: null },            // Global drugs (no branch assignment)
+        ]
+      })
     }
     
     if (search) {
-      query.$and = query.$and || []
-      query.$and.push({
+      filters.push({
         $or: [
           { genericName: { $regex: search, $options: 'i' } },
           { brandName: { $regex: search, $options: 'i' } },
@@ -36,13 +40,17 @@ export async function GET(request: NextRequest) {
       })
     }
     
-    if (category) query.category = category
+    if (category) {
+      filters.push({ category })
+    }
 
+    const query = filters.length === 1 ? filters[0] : { $and: filters }
     const drugs = await models.Drug.find(query).sort({ genericName: 1 }).lean()
     return NextResponse.json({ drugs })
   } catch (error) {
     console.error('[pharmacy/drugs GET]', error)
-    return NextResponse.json({ error: 'Failed to fetch drugs' }, { status: 500 })
+    const message = error instanceof Error ? error.message : 'Failed to fetch drugs'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
 
@@ -70,6 +78,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ drug }, { status: 201 })
   } catch (error) {
     console.error('[pharmacy/drugs POST]', error)
-    return NextResponse.json({ error: 'Failed to create drug' }, { status: 500 })
+    const message = error instanceof Error ? error.message : 'Failed to create drug'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

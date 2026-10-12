@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
+import { AlertsWidget } from '@/components/alerts/alerts-widget'
 import { 
   PackageSearch, 
   TrendingUp, 
@@ -636,6 +637,9 @@ function RestockingPageContent() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Alerts Widget */}
+      <AlertsWidget />
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">

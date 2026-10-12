@@ -1,6 +1,8 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { getBranchContext } from '@/lib/branch-context'
+import { activeOnlyQuery } from '@/lib/branch-validation'
+import { reserveInventory, releaseReservation } from '@/lib/inventory-reservation'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
@@ -77,23 +79,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Source branch context is required' }, { status: 400 })
     }
 
-    // Validate branches exist
+    // Validate branches exist AND are active
     const [fromBranch, toBranch] = await Promise.all([
-      models.Branch.findOne({ _id: fromBranchId, userId: ownerId }),
-      models.Branch.findOne({ _id: toBranchId, userId: ownerId }),
+      models.Branch.findOne(activeOnlyQuery({ _id: fromBranchId, userId: ownerId })),
+      models.Branch.findOne(activeOnlyQuery({ _id: toBranchId, userId: ownerId })),
     ])
 
-    if (!fromBranch || !toBranch) {
-      return NextResponse.json({ error: 'Invalid branches' }, { status: 400 })
+    if (!fromBranch) {
+      return NextResponse.json({ error: 'Source branch not found or is not active' }, { status: 400 })
+    }
+    if (!toBranch) {
+      return NextResponse.json({ error: 'Destination branch not found or is not active' }, { status: 400 })
     }
 
     if (fromBranchId === toBranchId) {
       return NextResponse.json({ error: 'Cannot transfer to same branch' }, { status: 400 })
     }
-
-    // Generate transfer number
-    const count = await models.StockTransfer.countDocuments({ userId: ownerId })
-    const transferNumber = `ST-${new Date().getFullYear()}-${String(count + 1).padStart(5, '0')}`
 
     // Validate and deduct stock for each item
     const session = await models.StockTransfer.db.startSession()
@@ -101,78 +102,29 @@ export async function POST(request: NextRequest) {
 
     try {
       for (const item of items) {
-        // Check if it's a product (retail)
-        if (item.productId) {
-          const inventory = await models.ProductInventory.findOne({
-            userId: ownerId,
-            branchId: fromBranchId,
-            productId: item.productId,
-          }).session(session)
+        // Reserve stock (pessimistic lock) - throws if insufficient
+        const itemType = item.productId ? 'product' : 'drug'
+        const itemId = item.productId || item.drugId
 
-          if (!inventory) {
-            throw new Error(`Product ${item.itemName} not found in branch inventory`)
-          }
-
-          if (inventory.stock < item.quantitySent) {
-            throw new Error(`Insufficient stock for ${item.itemName}. Available: ${inventory.stock}, Requested: ${item.quantitySent}`)
-          }
-
-          // Deduct stock from ProductInventory
-          const previousStock = inventory.stock
-          inventory.stock -= item.quantitySent
-          inventory.lastUpdated = new Date()
-          await inventory.save({ session })
-
-          // Create ledger entry
-          await models.StockLedger.create([{
-            userId: ownerId,
-            productId: item.productId,
-            type: 'TRANSFER_OUT',
-            quantity: -item.quantitySent,
-            previousStock,
-            newStock: inventory.stock,
-            notes: `Transfer to ${toBranch.name} - ${transferNumber}`,
-            staffId: payload.type === 'staff' ? payload.userId : undefined,
-          }], { session })
-
-        } else if (item.drugId) {
-          // Handle pharmacy drugs
-          const inventory = await models.Inventory.findOne({
-            userId: ownerId,
-            branchId: fromBranchId,
-            drugId: item.drugId,
-          }).session(session)
-
-          if (!inventory) {
-            throw new Error(`Drug ${item.itemName} not found in inventory`)
-          }
-
-          if (inventory.quantityAvailable < item.quantitySent) {
-            throw new Error(`Insufficient stock for ${item.itemName}. Available: ${inventory.quantityAvailable}, Requested: ${item.quantitySent}`)
-          }
-
-          // Deduct inventory
-          inventory.quantityAvailable -= item.quantitySent
-          inventory.lastStockUpdate = new Date()
-          await inventory.save({ session })
-
-          // Create transaction entry
-          await models.InventoryTransaction.create([{
-            userId: ownerId,
-            branchId: fromBranchId,
-            drugId: item.drugId,
-            type: 'TRANSFER',
-            quantity: -item.quantitySent,
-            previousBalance: inventory.quantityAvailable + item.quantitySent,
-            newBalance: inventory.quantityAvailable,
-            referenceType: 'transfer',
-            userIdPerformed: payload.type === 'staff' ? payload.userId : ownerId,
-            reason: `Transfer to ${toBranch.name} - ${transferNumber}`,
-          }], { session })
-        } else {
-          throw new Error(`Invalid item: must have either productId or drugId`)
+        try {
+          await reserveInventory(
+            models,
+            ownerId,
+            fromBranchId,
+            itemId,
+            itemType,
+            item.quantitySent,
+            new Types.ObjectId(), // Will be filled with actual transfer ID later
+            session
+          )
+        } catch (error: any) {
+          throw new Error(`Failed to reserve ${item.itemName}: ${error.message}`)
         }
       }
+
+      // Generate transfer number
+      const count = await models.StockTransfer.countDocuments({ userId: ownerId }).session(session)
+      const transferNumber = `ST-${new Date().getFullYear()}-${String(count + 1).padStart(5, '0')}`
 
       // Create transfer record
       const transfer = await models.StockTransfer.create([{
@@ -213,7 +165,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         transfer: transfer[0],
-        message: 'Transfer created successfully',
+        message: 'Transfer created successfully and stock reserved',
       }, { status: 201 })
 
     } catch (error: any) {

@@ -19,12 +19,14 @@ import { Plus, Upload, Download, Trash2, Edit2, Search, FolderTree, ArrowLeftRig
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { ProductForm } from '@/components/inventory/product-form'
+import { BatchProductForm } from '@/components/inventory/batch-product-form'
 import { ImportModal } from '@/components/inventory/import-modal'
 import { CategoryManager } from '@/components/inventory/category-manager'
 import { StockInModal } from '@/components/inventory/stock-in-modal'
 import { StockCountModal } from '@/components/inventory/stock-count-modal'
 import { CreateProductTransferModal } from '@/components/stock-transfers/create-product-transfer-modal'
 import { ImportProductsModal } from '@/components/products/import-products-modal'
+import { BulkEditModal } from '@/components/inventory/bulk-edit-modal'
 import { ProductImage } from '@/components/ui/product-image'
 
 interface Product {
@@ -61,6 +63,7 @@ function InventoryPageContent() {
   const [isTransferOpen, setIsTransferOpen] = useState(false)
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false)
   const [isImportProductsOpen, setIsImportProductsOpen] = useState(false)
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false)
 
   useEffect(() => {
     fetchProducts()
@@ -192,6 +195,14 @@ function InventoryPageContent() {
           <CardTitle className="text-sm font-medium">Quick Actions</CardTitle>
         </CardHeader>
         <CardContent className="flex gap-2 flex-wrap">
+          <Button
+            onClick={() => setIsBulkEditOpen(true)}
+            size="sm"
+            variant="default"
+          >
+            <Edit2 size={16} className="mr-2" />
+            Bulk Edit
+          </Button>
           <Button
             onClick={() => setIsImportProductsOpen(true)}
             size="sm"
@@ -365,27 +376,46 @@ function InventoryPageContent() {
         </CardContent>
       </Card>
 
-      {/* Create/Edit Product Dialog */}
-      <Dialog open={isCreateOpen || isEditOpen} onOpenChange={(open) => {
+      {/* Create Product Dialog - Batch Form */}
+      <Dialog open={isCreateOpen} onOpenChange={(open) => {
         if (!open) {
           setIsCreateOpen(false)
+          setSelectedProduct(null)
+        }
+      }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Create Products</DialogTitle>
+            <DialogDescription>
+              Add one or multiple products to your inventory
+            </DialogDescription>
+          </DialogHeader>
+          <BatchProductForm
+            onSuccess={() => {
+              setIsCreateOpen(false)
+              fetchProducts()
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Product Dialog - Single Form */}
+      <Dialog open={isEditOpen} onOpenChange={(open) => {
+        if (!open) {
           setIsEditOpen(false)
           setSelectedProduct(null)
         }
       }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              {selectedProduct ? 'Edit Product' : 'Create Product'}
-            </DialogTitle>
+            <DialogTitle>Edit Product</DialogTitle>
             <DialogDescription>
-              {selectedProduct ? 'Update product information' : 'Add a new product to your inventory'}
+              Update product information
             </DialogDescription>
           </DialogHeader>
           <ProductForm
             product={selectedProduct}
             onSuccess={() => {
-              setIsCreateOpen(false)
               setIsEditOpen(false)
               setSelectedProduct(null)
               fetchProducts()
@@ -570,6 +600,17 @@ function InventoryPageContent() {
         onClose={() => setIsImportProductsOpen(false)}
         onSuccess={() => {
           setIsImportProductsOpen(false)
+          fetchProducts()
+        }}
+      />
+
+      {/* Bulk Edit Modal */}
+      <BulkEditModal
+        open={isBulkEditOpen}
+        onOpenChange={setIsBulkEditOpen}
+        products={filteredProducts}
+        onSuccess={() => {
+          setIsBulkEditOpen(false)
           fetchProducts()
         }}
       />

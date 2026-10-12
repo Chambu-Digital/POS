@@ -26,6 +26,9 @@ interface StockMovement {
   productId?: {
     _id: string
     productName: string
+    brand?: string
+    model?: string
+    variant?: string
   }
   supplierId?: {
     _id: string
@@ -47,19 +50,31 @@ interface StockMovement {
   supplierName?: string
 }
 
-type MovementType = 'all' | 'STOCK_IN' | 'SALE' | 'RETURN' | 'DAMAGE' | 'WASTAGE' | 'EXPIRED' | 'LOSS' | 'ADJUSTMENT'
+type MovementType = 'all' | 'STOCK_IN' | 'SALE' | 'RETURN' | 'DAMAGE' | 'WASTAGE' | 'EXPIRED' | 'LOSS' | 'ADJUSTMENT' | 'EXCHANGE_IN' | 'EXCHANGE_OUT'
 
 const MOVEMENT_TYPES: { value: MovementType; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'STOCK_IN', label: 'Stock In' },
   { value: 'SALE', label: 'Sales' },
   { value: 'RETURN', label: 'Returns' },
+  { value: 'EXCHANGE_IN', label: 'Exchange In' },
+  { value: 'EXCHANGE_OUT', label: 'Exchange Out' },
   { value: 'DAMAGE', label: 'Damage' },
   { value: 'WASTAGE', label: 'Wastage' },
   { value: 'EXPIRED', label: 'Expired' },
   { value: 'LOSS', label: 'Loss' },
   { value: 'ADJUSTMENT', label: 'Adjustment' },
 ]
+
+function formatProductName(product: StockMovement['productId']): string {
+  if (!product) return 'Unknown'
+  const parts = [
+    product.brand,
+    product.variant,
+    product.productName,
+  ].filter(Boolean)
+  return parts.join(' › ')
+}
 
 export default function StockMovementsPage() {
   return (
@@ -111,6 +126,10 @@ function StockMovementsPageContent() {
         return <TrendingDown size={16} className="text-blue-600" />
       case 'RETURN':
         return <TrendingUp size={16} className="text-purple-600" />
+      case 'EXCHANGE_IN':
+        return <TrendingUp size={16} className="text-cyan-600" />
+      case 'EXCHANGE_OUT':
+        return <TrendingDown size={16} className="text-cyan-600" />
       case 'DAMAGE':
       case 'WASTAGE':
       case 'EXPIRED':
@@ -131,6 +150,9 @@ function StockMovementsPageContent() {
         return 'bg-blue-100 text-blue-800'
       case 'RETURN':
         return 'bg-purple-100 text-purple-800'
+      case 'EXCHANGE_IN':
+      case 'EXCHANGE_OUT':
+        return 'bg-cyan-100 text-cyan-800'
       case 'DAMAGE':
       case 'WASTAGE':
       case 'EXPIRED':
@@ -314,7 +336,7 @@ function StockMovementsPageContent() {
                         </span>
                       </TableCell>
                       <TableCell className="font-medium">
-                        {movement.productId?.productName || 'Unknown'}
+                        {formatProductName(movement.productId)}
                       </TableCell>
                       <TableCell>
                         <Badge className={getMovementColor(movement.type)}>
@@ -380,7 +402,7 @@ function StockMovementsPageContent() {
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Product</p>
                 <p className="text-lg font-semibold">
-                  {selectedMovement.productId?.productName || 'Unknown'}
+                  {formatProductName(selectedMovement.productId)}
                 </p>
               </div>
 

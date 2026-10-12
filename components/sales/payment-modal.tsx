@@ -66,9 +66,18 @@ export function PaymentModal({
   saleEndpoint = '/api/sales',
 }: PaymentModalProps) {
   const [selectedPayment, setSelectedPayment] = useState<string>('')
-  const [paymentAmount, setPaymentAmount] = useState<string>(total.toFixed(2))
+  const [paymentAmount, setPaymentAmount] = useState<string>('')
   const [mpesaCode, setMpesaCode] = useState<string>('')
   const [mpesaPhone, setMpesaPhone] = useState<string>('')
+  
+  // Multi-payment state
+  interface AccumulatedPayment {
+    method: string
+    amount: number
+    mpesaPhone?: string
+    mpesaCode?: string
+  }
+  const [payments, setPayments] = useState<AccumulatedPayment[]>([])
   
   // M-Pesa state machine
   type MpesaFlowState = 
@@ -97,10 +106,65 @@ export function PaymentModal({
   const mpesaPhoneInputRef = useRef<HTMLInputElement>(null)
   const mpesaCodeInputRef = useRef<HTMLInputElement>(null)
 
-  // Reset payment amount when total changes
-  useEffect(() => {
-    setPaymentAmount(total.toFixed(2))
-  }, [total])
+  // Calculate remaining balance
+  function calculateRemaining(): number {
+    const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0)
+    return Math.max(0, total - totalPaid)
+  }
+
+  // Add current payment to list
+  function addPayment() {
+    if (!selectedPayment) {
+      toast.error('Please select a payment method')
+      return
+    }
+    if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
+      toast.error('Please enter a valid amount')
+      return
+    }
+    if (selectedPayment === 'credit' && !selectedCustomer) {
+      toast.error('Please select a customer for credit payment')
+      return
+    }
+
+    const newPayment: AccumulatedPayment = {
+      method: selectedPayment,
+      amount: parseFloat(paymentAmount),
+    }
+
+    // Include M-Pesa details if present
+    if (selectedPayment === 'mobile_money') {
+      if (mpesaPhone.trim()) newPayment.mpesaPhone = mpesaPhone.trim()
+      if (mpesaCode.trim()) newPayment.mpesaCode = mpesaCode.trim()
+    }
+
+    setPayments([...payments, newPayment])
+    
+    // Clear form for next payment
+    setSelectedPayment('')
+    setPaymentAmount('')
+    setMpesaCode('')
+    setMpesaPhone('')
+    setMpesaFlowState('idle')
+    
+    toast.success(`${selectedPayment.replace('_', ' ')} payment added`)
+  }
+
+  // Remove payment from list
+  function removePayment(index: number) {
+    setPayments(payments.filter((_, i) => i !== index))
+  }
+
+  // Get payment method display name
+  function getPaymentMethodName(method: string): string {
+    const names: Record<string, string> = {
+      'cash': 'Cash',
+      'mobile_money': 'M-Pesa',
+      'card': 'Card',
+      'credit': 'Credit',
+    }
+    return names[method] || method
+  }
 
   // Auto-focus payment method when modal opens
   useEffect(() => {
@@ -114,16 +178,15 @@ export function PaymentModal({
     if (showCustomerSearch) searchCustomers(customerSearch)
   }, [customerSearch, showCustomerSearch])
 
-  // Handle Enter key in payment amount field
-  function handlePaymentAmountKeyDown(e: React.KeyboardEvent) {
+  const handlePaymentAmountKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       e.preventDefault()
       if (selectedPayment === 'mobile_money' && mpesaFlowState === 'manual-input') {
         // In M-Pesa manual: Amount → Phone
         mpesaPhoneInputRef.current?.focus()
       } else {
-        // Other payments: submit
-        processPayment()
+        // For cash/card/credit and M-Pesa STK: Add payment
+        addPayment()
       }
     }
   }
@@ -227,16 +290,12 @@ export function PaymentModal({
   }
 
   async function processPayment() {
-    if (!selectedPayment) {
-      toast.error('Please select a payment method')
+    if (payments.length === 0) {
+      toast.error('Please add at least one payment method')
       return
     }
-    if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
-      toast.error('Please enter a valid payment amount')
-      return
-    }
-    if (selectedPayment === 'credit' && !selectedCustomer) {
-      toast.error('Please select a customer for credit payment')
+    if (calculateRemaining() > 0) {
+      toast.error('Please settle the remaining balance')
       return
     }
 
@@ -254,16 +313,16 @@ export function PaymentModal({
         subtotal,
         discount: cartDiscount,
         total: Math.max(0, total),
-        amountPaid: parseFloat(paymentAmount),
-        paymentMethod: selectedPayment,
+        payments: payments.map(p => ({
+          method: p.method,
+          amount: p.amount,
+          ...(p.mpesaPhone && { mpesaPhone: p.mpesaPhone }),
+          ...(p.mpesaCode && { mpesaCode: p.mpesaCode }),
+        })),
+        amountPaid: payments.reduce((sum, p) => sum + p.amount, 0),
+        paymentMethod: payments.length === 1 ? payments[0].method : 'multiple',
         customerName: selectedCustomer?.name || '',
         customerId: selectedCustomer?._id || null,
-      }
-
-      // Only include M-Pesa details if they're provided (optional)
-      if (selectedPayment === 'mobile_money') {
-        if (mpesaCode.trim()) saleData.mpesaCode = mpesaCode.trim()
-        if (mpesaPhone.trim()) saleData.mpesaPhone = mpesaPhone.trim()
       }
 
       if (isOnline()) {
@@ -308,12 +367,16 @@ export function PaymentModal({
           subtotal,
           discount: cartDiscount,
           total: Math.max(0, total),
-          amountPaid: parseFloat(paymentAmount),
-          paymentMethod: selectedPayment,
+          amountPaid: saleData.amountPaid,
+          paymentMethod: saleData.paymentMethod,
+          payments: payments,
           customerName: selectedCustomer?.name || 'Cash Sale',
           date: new Date(),
           receiptNumber: orderNumber,
-          creditBalance: selectedCustomer?.creditBalance,
+          creditBalance: result.customerBalance,
+          creditCleared: selectedCustomer && selectedCustomer.creditBalance > 0 && result.customerBalance <= 0,
+          cashPaid: result.paymentBreakdown?.cashPaid,
+          debtCreated: result.paymentBreakdown?.debtCreated,
         }
 
         toast.success('Payment completed successfully')
@@ -346,8 +409,9 @@ export function PaymentModal({
           subtotal,
           discount: cartDiscount,
           total: Math.max(0, total),
-          amountPaid: parseFloat(paymentAmount),
-          paymentMethod: selectedPayment,
+          amountPaid: saleData.amountPaid,
+          paymentMethod: saleData.paymentMethod,
+          payments: payments,
           customerName: selectedCustomer?.name || 'Cash Sale',
           date: new Date(),
           receiptNumber: `OFFLINE-${Date.now()}`,
@@ -367,17 +431,17 @@ export function PaymentModal({
       // Reset form
       setSelectedPayment('')
       setSelectedCustomer(null)
+      setPaymentAmount('')
       setMpesaCode('')
       setMpesaPhone('')
       setMpesaFlowState('idle')
+      setPayments([])
     } catch (error: any) {
       toast.error(error.message || 'Error processing payment')
     } finally {
       setProcessing(false)
     }
   }
-
-  const change = parseFloat(paymentAmount) - Math.max(0, total)
 
   return (
     <>
@@ -421,6 +485,44 @@ export function PaymentModal({
               )}
             </div>
 
+            {/* PAYMENTS ADDED Section */}
+            {payments.length > 0 && (
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-slate-600 uppercase">Payments</p>
+                <div className="space-y-2">
+                  {payments.map((payment, index) => (
+                    <div key={index} className="flex items-center justify-between bg-white border border-slate-200 rounded px-3 py-2">
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-slate-800">
+                          {getPaymentMethodName(payment.method)}: <span className="text-green-600">KSh {payment.amount.toLocaleString()}</span>
+                        </p>
+                        {payment.mpesaCode && (
+                          <p className="text-xs text-slate-500">Code: {payment.mpesaCode}</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => removePayment(index)}
+                        className="ml-2 text-red-500 hover:text-red-700 hover:bg-red-50 p-1 rounded transition-colors"
+                        title="Remove payment"
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                
+                {/* Remaining Balance */}
+                <div className="border-t border-slate-200 pt-2 mt-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-slate-700">Remaining:</span>
+                    <span className={`text-sm font-semibold ${calculateRemaining() === 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                      KSh {calculateRemaining().toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Payment Method */}
             <div>
               <Label className="text-sm font-medium mb-2 block">Payment Method *</Label>
@@ -451,6 +553,13 @@ export function PaymentModal({
                     Current balance: KSh {selectedCustomer.creditBalance.toLocaleString()}
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* Walk-in partial payment warning */}
+            {!selectedCustomer && parseFloat(paymentAmount || '0') < Math.max(0, total) && (
+              <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                Walk-in customers must pay full amount. Select a customer for partial payment.
               </div>
             )}
 
@@ -533,7 +642,7 @@ export function PaymentModal({
                     onKeyDown={e => {
                       if (e.key === 'Enter') {
                         e.preventDefault()
-                        processPayment()
+                        addPayment()
                       }
                     }}
                     placeholder="Enter amount"
@@ -543,11 +652,11 @@ export function PaymentModal({
                 </div>
 
                 <Button
-                  onClick={processPayment}
+                  onClick={addPayment}
                   disabled={processing}
                   className="w-full bg-green-600 hover:bg-green-700 text-white h-12"
                 >
-                  {processing ? 'Processing...' : 'Complete Sale'}
+                  {processing ? 'Adding...' : calculateRemaining() === 0 ? 'Complete' : 'Add'}
                 </Button>
               </>
             )}
@@ -593,11 +702,11 @@ export function PaymentModal({
                 </div>
 
                 <Button
-                  onClick={processPayment}
+                  onClick={addPayment}
                   disabled={processing}
                   className="w-full bg-green-600 hover:bg-green-700 text-white h-12"
                 >
-                  {processing ? 'Processing...' : 'Complete Sale'}
+                  {processing ? 'Adding...' : calculateRemaining() === 0 ? 'Complete' : 'Add'}
                 </Button>
 
                 <Button
@@ -633,38 +742,63 @@ export function PaymentModal({
                 {selectedPayment === 'cash' && parseFloat(paymentAmount) > 0 && (
                   <div
                     className={`mt-2 flex justify-between px-3 py-2 rounded-lg text-sm font-semibold ${
-                      change >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
+                      (parseFloat(paymentAmount) - calculateRemaining()) >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
                     }`}
                   >
                     <span>Change</span>
-                    <span>KSh {Math.max(0, change).toFixed(2)}</span>
+                    <span>KSh {Math.max(0, parseFloat(paymentAmount) - calculateRemaining()).toFixed(2)}</span>
+                  </div>
+                )}
+                {selectedPayment === 'cash' &&
+                  selectedCustomer &&
+                  parseFloat(paymentAmount) > 0 &&
+                  parseFloat(paymentAmount) < calculateRemaining() && (
+                  <div className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+                    KSh {(calculateRemaining() - parseFloat(paymentAmount || '0')).toFixed(2)} to account
                   </div>
                 )}
                 {selectedPayment === 'credit' &&
                   selectedCustomer &&
-                  parseFloat(paymentAmount) < total && (
+                  parseFloat(paymentAmount) < calculateRemaining() && (
                   <p className="text-xs text-amber-600 mt-1">
-                    KSh {(total - parseFloat(paymentAmount || '0')).toFixed(2)} will be added to{' '}
+                    KSh {(calculateRemaining() - parseFloat(paymentAmount || '0')).toFixed(2)} will be added to{' '}
                     {selectedCustomer.name}'s credit balance
                   </p>
+                )}
+
+                {/* Payment Summary - Show breakdown when partial payment */}
+                {selectedCustomer && parseFloat(paymentAmount || '0') > 0 && parseFloat(paymentAmount) < calculateRemaining() && (
+                  <div className="mt-2 text-xs text-gray-600 bg-gray-50 rounded px-2 py-1">
+                    Balance: KSh {(calculateRemaining() - parseFloat(paymentAmount || '0')).toFixed(2)}
+                  </div>
                 )}
               </div>
             )}
 
             <Separator />
 
-            {/* Process Button - Show for non-M-Pesa flows only */}
+            {/* Action Buttons - Show based on remaining balance */}
             {mpesaFlowState === 'idle' && (
-              <Button
-                ref={processButtonRef}
-                onClick={processPayment}
-                disabled={
-                  !selectedPayment || processing || (selectedPayment === 'credit' && !selectedCustomer)
-                }
-                className="w-full bg-green-600 hover:bg-green-700 text-white text-lg py-6"
-              >
-                {processing ? 'Processing...' : `Process Payment - KSh ${Math.max(0, total).toLocaleString()}`}
-              </Button>
+              <div className="space-y-2">
+                {calculateRemaining() > 0 ? (
+                  <Button
+                    onClick={addPayment}
+                    disabled={!selectedPayment || !paymentAmount || processing}
+                    className="w-full bg-green-600 hover:bg-green-700 text-white text-lg py-6"
+                  >
+                    {processing ? 'Adding...' : 'Add'}
+                  </Button>
+                ) : (
+                  <Button
+                    ref={processButtonRef}
+                    onClick={processPayment}
+                    disabled={payments.length === 0 || processing}
+                    className="w-full bg-green-600 hover:bg-green-700 text-white text-lg py-6"
+                  >
+                    {processing ? 'Processing...' : 'Complete'}
+                  </Button>
+                )}
+              </div>
             )}
           </div>
         </DialogContent>

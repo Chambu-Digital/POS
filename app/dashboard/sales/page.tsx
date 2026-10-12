@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Plus, Minus, X, Search, AlertCircle, Clock } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
@@ -110,10 +111,13 @@ function SalesPageContent() {
   const completeSaleButtonRef = useRef<HTMLButtonElement>(null)
   const quantityInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({})
   const discountInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({})
+  const priceOverrideInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({})
   const validationTimerRef = useRef<{ [key: string]: ReturnType<typeof setTimeout> | null }>({})
   
   // Track selected cart item index for keyboard navigation
   const [selectedCartIndex, setSelectedCartIndex] = useState<number>(-1)
+  const [overrideItem, setOverrideItem] = useState<string | null>(null)
+  const [overridePrice, setOverridePrice] = useState('')
 
   useEffect(() => { productsRef2.current = products }, [products])
 
@@ -451,16 +455,14 @@ function SalesPageContent() {
 
       // Q key - focus selected item's quantity (works everywhere)
       if (e.key === 'q' || e.key === 'Q') {
-        e.preventDefault()
-        if (isTypingInField) {
-          // Blur current input first
-          (target as HTMLInputElement).blur()
-        }
-        if (selectedItem) {
-          const input = quantityInputRefs.current[selectedItem.productId]
-          if (input) {
-            input.focus()
-            input.select()
+        if (!isTypingInField) {
+          e.preventDefault()
+          if (selectedItem) {
+            const input = quantityInputRefs.current[selectedItem.productId]
+            if (input) {
+              input.focus()
+              input.select()
+            }
           }
         }
         return
@@ -468,17 +470,37 @@ function SalesPageContent() {
 
       // D key - focus selected item's discount (works everywhere)
       if (e.key === 'd' || e.key === 'D') {
+        if (!isTypingInField) {
+          e.preventDefault()
+          if (selectedItem) {
+            const input = discountInputRefs.current[selectedItem.productId]
+            if (input) {
+              input.focus()
+              input.select()
+            }
+          }
+        }
+        return
+      }
+
+      // P key - enter price override for selected item (works everywhere)
+      if (e.key === 'p' || e.key === 'P') {
         e.preventDefault()
         if (isTypingInField) {
           // Blur current input first
           (target as HTMLInputElement).blur()
         }
         if (selectedItem) {
-          const input = discountInputRefs.current[selectedItem.productId]
-          if (input) {
-            input.focus()
-            input.select()
-          }
+          setOverrideItem(selectedItem.productId)
+          setOverridePrice(String(selectedItem.sellingPrice))
+          // Focus the price override input on next render
+          setTimeout(() => {
+            const input = priceOverrideInputRefs.current[selectedItem.productId]
+            if (input) {
+              input.focus()
+              input.select()
+            }
+          }, 0)
         }
         return
       }
@@ -601,6 +623,24 @@ function SalesPageContent() {
     )
   }
 
+  function applyPriceOverride(productId: string) {
+    const price = parseFloat(overridePrice)
+    if (isNaN(price) || price < 0) { 
+      toast.error('Invalid price')
+      return 
+    }
+    setCart((prevCart) =>
+      prevCart.map((item) =>
+        item.productId === productId 
+          ? { ...item, sellingPrice: price } 
+          : item
+      )
+    )
+    setOverrideItem(null)
+    setOverridePrice('')
+    toast.success('Price updated')
+  }
+
   function removeFromCart(productId: string) {
     setCart((prevCart) => prevCart.filter((item) => item.productId !== productId))
   }
@@ -668,6 +708,9 @@ function SalesPageContent() {
       heldAt: new Date().toISOString(),
     })
     localStorage.setItem('heldOrders', JSON.stringify(held))
+
+    // Dispatch custom event to notify HeldOrders component
+    window.dispatchEvent(new Event('heldOrderUpdated'))
 
     // Clear the cart
     setCart([])
@@ -967,9 +1010,43 @@ function SalesPageContent() {
                           onClick={(e) => e.stopPropagation()}
                           className="w-16 h-6 text-xs discount-input"
                         />
-                        <p className="text-xs font-semibold ml-auto whitespace-nowrap">
-                          KSh {(item.sellingPrice * item.quantity - item.discount).toLocaleString()}
-                        </p>
+                        {overrideItem === item.productId ? (
+                          <div className="flex items-center gap-1 ml-auto">
+                            <Input
+                              ref={(el) => {
+                                priceOverrideInputRefs.current[item.productId] = el
+                              }}
+                              type="number"
+                              value={overridePrice}
+                              onChange={(e) => setOverridePrice(e.target.value)}
+                              className="w-20 text-xs border border-green-400 rounded px-1 py-0.5"
+                              placeholder="Price per unit"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') applyPriceOverride(item.productId)
+                                if (e.key === 'Escape') setOverrideItem(null)
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <button 
+                              onClick={() => applyPriceOverride(item.productId)} 
+                              className="text-xs text-green-600 font-semibold hover:text-green-700"
+                            >
+                              OK
+                            </button>
+                          </div>
+                        ) : (
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setOverrideItem(item.productId)
+                              setOverridePrice(String(item.sellingPrice))
+                            }}
+                            className="text-xs font-semibold ml-auto whitespace-nowrap text-gray-900 hover:text-blue-600 cursor-pointer"
+                          >
+                            KSh {(item.sellingPrice * item.quantity - item.discount).toLocaleString()}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1045,6 +1122,10 @@ function SalesPageContent() {
         onCompleteSale={completeSale}
         onEnterEditing={enterEditing}
         onExitEditing={exitEditing}
+        onPriceOverride={(productId) => {
+          setOverrideItem(productId)
+          setOverridePrice(String(cart.find(i => i.productId === productId)?.sellingPrice || 0))
+        }}
       />
 
       {/* Scanner feedback overlay */}
@@ -1081,6 +1162,47 @@ function SalesPageContent() {
         />
       )}
 
+      {/* Price Override Dialog */}
+      <Dialog open={overrideItem !== null} onOpenChange={(open) => { if (!open) setOverrideItem(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogTitle>Override Price</DialogTitle>
+          <DialogDescription className="sr-only">Enter a new price for this item</DialogDescription>
+          <div className="space-y-4 mt-4">
+            <div>
+              <label className="text-xs font-semibold text-gray-700">New Price (KSh)</label>
+              <input
+                type="number"
+                value={overridePrice}
+                onChange={e => setOverridePrice(e.target.value)}
+                className="w-full mt-2 px-3 py-2 border border-gray-300 rounded-lg text-lg font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                placeholder="0"
+                autoFocus
+                onKeyDown={e => { 
+                  if (e.key === 'Enter') {
+                    applyPriceOverride(overrideItem!); 
+                  }
+                  if (e.key === 'Escape') setOverrideItem(null)
+                }}
+              />
+            </div>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => { applyPriceOverride(overrideItem!); setOverrideItem(null) }} 
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg"
+              >
+                Apply
+              </button>
+              <button 
+                onClick={() => setOverrideItem(null)} 
+                className="flex-1 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Hidden Receipt */}
       {lastSale && userInfo && (
         <Receipt
@@ -1102,6 +1224,11 @@ function SalesPageContent() {
           mpesaPaybill={shopSettings?.payment?.mpesaPaybill}
           mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}
           paperSize={shopSettings?.receipt?.paperSize || '58mm'}
+          customerBalance={lastSale.creditBalance}
+          creditCleared={lastSale.creditCleared}
+          cashPaid={lastSale.cashPaid}
+          debtCreated={lastSale.debtCreated}
+          payments={lastSale.payments}
         />
       )}
 

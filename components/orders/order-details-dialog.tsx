@@ -16,8 +16,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { CheckCircle2, ChevronDown, Printer, Edit, Package } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Printer, Edit, Package, ArrowRightLeft } from 'lucide-react'
 import { ReturnModal } from '@/components/sales/return-modal'
+import { ExchangeModal } from '@/components/sales/exchange-modal'
+
+interface PaymentEntry {
+  method: string
+  amount: number
+  mpesaPhone?: string
+  mpesaCode?: string
+}
 
 interface OrderItem {
   productId: {
@@ -64,12 +72,14 @@ interface OrderDetailsDialogProps {
     totalReturned?: number
     isPartiallyReturned?: boolean
     isFullyReturned?: boolean
+    payments?: PaymentEntry[]
   } | null
 }
 
 export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: OrderDetailsDialogProps) {
   const [showNoteInput, setShowNoteInput] = useState(false)
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false)
+  const [isExchangeModalOpen, setIsExchangeModalOpen] = useState(false)
   const [order, setOrder] = useState(initialOrder)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -118,6 +128,26 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
 
   function formatCurrency(amount: number) {
     return `KES ${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+
+  function getPaymentMethodName(method: string): string {
+    const names: Record<string, string> = {
+      'cash': 'Cash',
+      'mobile_money': 'M-Pesa',
+      'card': 'Card',
+      'credit': 'Credit',
+    }
+    return names[method] || method.charAt(0).toUpperCase() + method.slice(1)
+  }
+
+  function consolidatePayments(paymentList: PaymentEntry[] | undefined) {
+    if (!paymentList || paymentList.length === 0) return {}
+    
+    const consolidated: Record<string, number> = {}
+    paymentList.forEach(payment => {
+      consolidated[payment.method] = (consolidated[payment.method] || 0) + payment.amount
+    })
+    return consolidated
   }
 
   const orderNumber = `SALE-${order._id.slice(-8).toUpperCase()}`
@@ -173,10 +203,36 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
             </div>
             <div className="col-span-2">
               <span className="text-muted-foreground">Payment:</span>
-              <span className="ml-2 font-semibold">
-                {order.paymentMethod === 'mobile_money' ? 'M-Pesa' : 
-                 order.paymentMethod.charAt(0).toUpperCase() + order.paymentMethod.slice(1)}
-              </span>
+              <div className="ml-2 font-semibold">
+                {order.payments && order.payments.length > 0 ? (
+                  <div className="space-y-2">
+                    {Object.entries(consolidatePayments(order.payments)).map(([method, amount]) => (
+                      <div key={method} className="text-sm flex justify-between gap-4">
+                        <span>{getPaymentMethodName(method)}:</span>
+                        <span>{formatCurrency(amount)}</span>
+                      </div>
+                    ))}
+                    <div className="border-t border-gray-300 pt-2 mt-2 text-sm">
+                      <div className="flex justify-between gap-4 mb-1">
+                        <span>Total Paid:</span>
+                        <span className="font-bold">{formatCurrency(order.payments.reduce((sum, p) => sum + p.amount, 0))}</span>
+                      </div>
+                      {order.payments.reduce((sum, p) => sum + p.amount, 0) > order.total && (
+                        <div className="flex justify-between gap-4 mb-1">
+                          <span>Change:</span>
+                          <span className="font-bold text-green-600">{formatCurrency(order.payments.reduce((sum, p) => sum + p.amount, 0) - order.total)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between gap-4 border-t border-gray-300 pt-1">
+                        <span>Sale Total:</span>
+                        <span className="font-bold">{formatCurrency(order.total)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  getPaymentMethodName(order.paymentMethod)
+                )}
+              </div>
             </div>
           </div>
 
@@ -189,7 +245,27 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
               <Printer className="h-4 w-4 mr-2" />
               Print Receipt
             </Button>
-            {(order.status !== 'refunded' && !order.isFullyReturned) && (
+            {(order.status !== 'refunded' && !order.isFullyReturned && order.status !== 'exchanged') && (
+              <>
+                <Button
+                  className="flex-1"
+                  variant="outline"
+                  onClick={() => setIsExchangeModalOpen(true)}
+                >
+                  <ArrowRightLeft className="h-4 w-4 mr-2" />
+                  Exchange
+                </Button>
+                <Button
+                  className="flex-1"
+                  variant="outline"
+                  onClick={() => setIsReturnModalOpen(true)}
+                >
+                  <Package className="h-4 w-4 mr-2" />
+                  Return Items
+                </Button>
+              </>
+            )}
+            {(order.status !== 'refunded' && !order.isFullyReturned && order.status === 'exchanged') && (
               <Button
                 className="flex-1"
                 variant="outline"
@@ -471,6 +547,16 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
         <ReturnModal
           open={isReturnModalOpen}
           onOpenChange={setIsReturnModalOpen}
+          sale={order as any}
+          onSuccess={() => {
+            refreshOrder()
+          }}
+        />
+
+        {/* Exchange Modal */}
+        <ExchangeModal
+          open={isExchangeModalOpen}
+          onOpenChange={setIsExchangeModalOpen}
           sale={order as any}
           onSuccess={() => {
             refreshOrder()

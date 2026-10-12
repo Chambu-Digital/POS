@@ -19,6 +19,7 @@ import { toast } from 'sonner'
 interface Product {
   _id: string
   productName: string
+  category: string
   brand?: string
   variant?: string
   stock: number
@@ -44,6 +45,8 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState<string>('all')
 
   useEffect(() => {
     if (open) {
@@ -84,7 +87,9 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
   }
 
   function formatProductName(product: Product) {
-    return [product.variant, product.brand, product.productName].filter(Boolean).join(' ')
+    const variant = product.variant ? ` ${product.variant}` : ''
+    const brand = product.brand ? ` ${product.brand}` : ''
+    return `${product.category} › ${brand}${variant} ${product.productName}`.trim()
   }
 
   function updatePhysicalCount(productId: string, value: number) {
@@ -178,6 +183,38 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
   const totalDifference = getTotalDifference()
   const adjustmentCount = getAdjustmentCount()
 
+  // Get unique categories
+  const categories = Array.from(new Set(products.map(p => p.category))).sort()
+
+  // Filter counts based on search and category
+  const filteredCounts = counts.filter(count => {
+    const product = products.find(p => p._id === count.productId)
+    if (!product) return false
+    
+    // Category filter
+    if (selectedCategory !== 'all' && product.category !== selectedCategory) {
+      return false
+    }
+    
+    // Search filter (search in formatted product name)
+    if (searchQuery) {
+      const searchLower = searchQuery.toLowerCase()
+      const productName = product.productName?.toLowerCase() || ''
+      const brand = product.brand?.toLowerCase() || ''
+      const variant = product.variant?.toLowerCase() || ''
+      const category = product.category?.toLowerCase() || ''
+      
+      return (
+        productName.includes(searchLower) ||
+        brand.includes(searchLower) ||
+        variant.includes(searchLower) ||
+        category.includes(searchLower)
+      )
+    }
+    
+    return true
+  })
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
@@ -223,6 +260,40 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
               </div>
             </div>
 
+            {/* Search and Category Filter */}
+            <div className="flex gap-3 items-end">
+              <div className="flex-1">
+                <Label htmlFor="search" className="text-xs font-medium mb-1 block">
+                  Search
+                </Label>
+                <Input
+                  id="search"
+                  placeholder="Search by name, brand, variant, category..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="w-48">
+                <Label htmlFor="category" className="text-xs font-medium mb-1 block">
+                  Category
+                </Label>
+                <select
+                  id="category"
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="h-8 w-full px-3 border border-input rounded-md text-sm bg-background"
+                >
+                  <option value="all">All Categories ({products.length})</option>
+                  {categories.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat} ({products.filter(p => p.category === cat).length})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             {/* Count Table */}
             <div className="border rounded-lg overflow-hidden">
               <div className="overflow-x-auto max-h-[400px]">
@@ -236,7 +307,7 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
                     </tr>
                   </thead>
                   <tbody>
-                    {counts.map((count) => {
+                    {filteredCounts.map((count) => {
                       const difference = getDifference(count)
                       return (
                         <tr key={count.productId} className="border-t hover:bg-muted/50">

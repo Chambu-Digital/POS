@@ -27,6 +27,13 @@ interface ReturnEntry {
   returnedAt: string
 }
 
+interface PaymentEntry {
+  method: string
+  amount: number
+  mpesaPhone?: string
+  mpesaCode?: string
+}
+
 interface ReceiptProps {
   shopName: string
   shopLogo?: string
@@ -59,6 +66,14 @@ interface ReceiptProps {
   totalReturned?: number
   isPartiallyReturned?: boolean
   isFullyReturned?: boolean
+  // Customer credit/debt balance
+  customerBalance?: number  // remaining balance (positive=owed, negative=credit)
+  creditCleared?: boolean   // whether previous debt was paid off
+  // Payment breakdown
+  cashPaid?: number         // actual cash received
+  debtCreated?: number      // amount added to customer account
+  // Multi-payment support
+  payments?: PaymentEntry[] // array of payment methods used
 }
 export interface ReceiptRef {
   print: () => void
@@ -93,6 +108,11 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
   totalReturned,
   isPartiallyReturned,
   isFullyReturned,
+  customerBalance,
+  creditCleared,
+  cashPaid,
+  debtCreated,
+  payments,
 }, ref) => {
   const receiptRef = useRef<HTMLDivElement>(null)
 
@@ -174,6 +194,26 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
   const rateLabel = (rateType?: string) => {
     if (!rateType) return ''
     return { per_minute: '/min', hourly: '/hr', daily: '/day', weekly: '/wk' }[rateType] || `/${rateType}`
+  }
+
+  const getPaymentMethodName = (method: string): string => {
+    const names: Record<string, string> = {
+      'cash': 'Cash',
+      'mobile_money': 'M-Pesa',
+      'card': 'Card',
+      'credit': 'Credit',
+    }
+    return names[method] || method.charAt(0).toUpperCase() + method.slice(1)
+  }
+
+  const consolidatePayments = (paymentList: PaymentEntry[] | undefined) => {
+    if (!paymentList || paymentList.length === 0) return {}
+    
+    const consolidated: Record<string, number> = {}
+    paymentList.forEach(payment => {
+      consolidated[payment.method] = (consolidated[payment.method] || 0) + payment.amount
+    })
+    return consolidated
   }
 
   return (
@@ -327,8 +367,50 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
       {!isSlip && (
         <div className="payment-info">
           <div><strong>Payment</strong></div>
-          <div>Method: {paymentMethod === 'mobile_money' ? 'M-Pesa' : paymentMethod.charAt(0).toUpperCase() + paymentMethod.slice(1)}</div>
-          <div>Amount: {total.toFixed(2)}</div>
+          
+          {/* Show consolidated payment methods if available */}
+          {payments && payments.length > 0 ? (
+            <>
+              {Object.entries(consolidatePayments(payments)).map(([method, amount]) => (
+                <div key={method}>
+                  <div>Method: {getPaymentMethodName(method)}</div>
+                  <div>Amount: {amount.toFixed(2)}</div>
+                </div>
+              ))}
+              <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #ccc' }}>
+                <div style={{ marginBottom: '4px' }}>
+                  <span>Total Paid:</span>
+                  <span style={{ float: 'right', fontWeight: 'bold' }}>{payments.reduce((sum, p) => sum + p.amount, 0).toFixed(2)}</span>
+                </div>
+                {payments.reduce((sum, p) => sum + p.amount, 0) > total && (
+                  <div style={{ marginBottom: '4px' }}>
+                    <span>Change:</span>
+                    <span style={{ float: 'right', fontWeight: 'bold', color: '#16a34a' }}>{(payments.reduce((sum, p) => sum + p.amount, 0) - total).toFixed(2)}</span>
+                  </div>
+                )}
+                <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #ccc' }}>
+                  <span style={{ fontWeight: 'bold' }}>Sale Total:</span>
+                  <span style={{ float: 'right', fontWeight: 'bold' }}>{total.toFixed(2)}</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>Method: {paymentMethod === 'mobile_money' ? 'M-Pesa' : paymentMethod.charAt(0).toUpperCase() + paymentMethod.slice(1)}</div>
+              {/* Show payment breakdown if debt was created */}
+              {debtCreated && debtCreated > 0 ? (
+                <>
+                  <div>Cash Received: {cashPaid?.toFixed(2) || '0.00'}</div>
+                  <div>Amount on Account: {debtCreated.toFixed(2)}</div>
+                  <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #ccc' }}>
+                    <strong>Total: {total.toFixed(2)}</strong>
+                  </div>
+                </>
+              ) : (
+                <div>Amount: {total.toFixed(2)}</div>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -343,8 +425,28 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
       )}
 
       <div className="footer">
+        {creditCleared && (
+          <div style={{ backgroundColor: '#dcfce7', padding: '8px', borderRadius: '4px', marginBottom: '10px', textAlign: 'center', fontSize: '12px', fontWeight: 'bold', color: '#166534' }}>
+            ✓ CREDIT CLEARED
+          </div>
+        )}
+        {customerBalance != null && customerBalance > 0 && !creditCleared && (
+          <div style={{ backgroundColor: '#fef3c7', padding: '8px', borderRadius: '4px', marginBottom: '10px', textAlign: 'center', fontSize: '12px', fontWeight: 'bold', color: '#92400e' }}>
+            Balance Due: KES {customerBalance.toFixed(2)}
+          </div>
+        )}
+        {customerBalance != null && customerBalance < 0 && (
+          <div style={{ backgroundColor: '#dbeafe', padding: '8px', borderRadius: '4px', marginBottom: '10px', textAlign: 'center', fontSize: '12px', fontWeight: 'bold', color: '#0c2d6b' }}>
+            Credit Available: KES {Math.abs(customerBalance).toFixed(2)}
+          </div>
+        )}
+        {debtCreated && debtCreated > 0 && (
+          <div style={{ backgroundColor: '#fef08a', padding: '8px', borderRadius: '4px', marginBottom: '10px', textAlign: 'center', fontSize: '11px', color: '#78350f' }}>
+            KES {debtCreated.toFixed(2)} added to your account balance
+          </div>
+        )}
         <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
-          {isSlip ? 'Thank you! Please keep this slip.' : 'Thank You For Shopping With Us!'}
+          {receiptType === 'rental_slip' ? 'Thank you! Please keep this slip.' : 'Thank You For Shopping With Us!'}
         </div>
         <div style={{ fontSize: '10px', color: '#666', marginTop: '10px' }}>
           Powered by Chambu Digital

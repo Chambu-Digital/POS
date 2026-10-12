@@ -131,7 +131,28 @@ export const saleSchema = new mongoose.Schema(
     totalReturned:        { type: Number, default: 0 },
     isPartiallyReturned:  { type: Boolean, default: false },
     isFullyReturned:      { type: Boolean, default: false },
-    status:    { type: String, enum: ['completed', 'pending', 'held', 'refunded', 'partially_refunded'], default: 'completed' },
+    
+    // Exchange tracking (customer returns item + gets new one)
+    exchanges: [{
+      returnedProductId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+      returnedProductName: { type: String, required: true },
+      quantityReturned:    { type: Number, required: true },
+      returnedPrice:       { type: Number, required: true },
+      
+      newProductId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+      newProductName:      { type: String, required: true },
+      quantityReceived:    { type: Number, required: true },
+      newPrice:            { type: Number, required: true },
+      
+      priceDifference:     { type: Number, required: true },  // positive = customer pays extra, negative = customer receives credit
+      reason:              { type: String, required: true },
+      notes:               String,
+      processedBy:         { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+      processedAt:         { type: Date, default: Date.now },
+    }],
+    totalExchanged:       { type: Number, default: 0 },  // sum of price differences for all exchanges
+    
+    status:    { type: String, enum: ['completed', 'pending', 'held', 'refunded', 'partially_refunded', 'exchanged'], default: 'completed' },
     synced:    { type: Boolean, default: true },
     createdAt: { type: Date, default: Date.now },
   },
@@ -190,7 +211,6 @@ export const staffSchema = new mongoose.Schema(
   {
     userId:              { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     branchId:            { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' }, // Primary branch assignment
-    isBranchManager:     { type: Boolean, default: false }, // Is a branch manager flag
     managerOfBranches:   { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Branch' }], default: [] }, // Array of branches they manage
     name:                { type: String, required: true },
     email:               { type: String, required: true, lowercase: true, trim: true },
@@ -228,7 +248,6 @@ export const staffSchema = new mongoose.Schema(
 )
 staffSchema.index({ userId: 1, email: 1 })
 staffSchema.index({ userId: 1, branchId: 1 })
-staffSchema.index({ userId: 1, isBranchManager: 1 })
 staffSchema.index({ userId: 1, managerOfBranches: 1 })
 staffSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next()
@@ -490,7 +509,7 @@ export const stockLedgerSchema = new mongoose.Schema(
     staffId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
     type: {
       type: String,
-      enum: ['STOCK_IN', 'SALE', 'RETURN', 'DAMAGE', 'WASTAGE', 'EXPIRED', 'LOSS', 'ADJUSTMENT', 'IMPORT', 'MANUAL', 'TRANSFER_OUT', 'TRANSFER_IN'],
+      enum: ['STOCK_IN', 'SALE', 'RETURN', 'DAMAGE', 'WASTAGE', 'EXPIRED', 'LOSS', 'ADJUSTMENT', 'IMPORT', 'MANUAL', 'TRANSFER_OUT', 'TRANSFER_IN', 'EXCHANGE_IN', 'EXCHANGE_OUT'],
       required: true,
     },
     quantity:        { type: Number, required: true },   // negative = stock out, positive = stock in

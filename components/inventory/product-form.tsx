@@ -37,6 +37,7 @@ interface Product {
   buyingPrice: number
   sellingPrice: number
   wholeSale?: number
+  lowStockThreshold?: number
   description?: string
   stock: number
   images?: string[]
@@ -71,6 +72,7 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
       buyingPrice: 0,
       sellingPrice: 0,
       wholeSale: 0,
+      lowStockThreshold: 10,
       description: '',
       stock: 0,
       images: [],
@@ -501,6 +503,23 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             onFocus={(e) => e.target.select()}
             disabled={loading}
           />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="lowStockThreshold">Low Stock Threshold</Label>
+          <Input
+            id="lowStockThreshold"
+            name="lowStockThreshold"
+            type="number"
+            step="1"
+            min="1"
+            value={formData.lowStockThreshold || 10}
+            onChange={handleChange}
+            onFocus={(e) => e.target.select()}
+            disabled={loading}
+            placeholder="10"
+          />
+          <p className="text-xs text-muted-foreground">Alert when stock falls below this level</p>
         </div>
 
         <div className="space-y-2 col-span-3">

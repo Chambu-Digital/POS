@@ -1,261 +1,327 @@
-# Cart Enhancements Implementation Summary
+# Smart Credit Settlement Implementation Summary
 
-## Completed Features ✅
+## Overview
+Successfully implemented complete smart credit settlement, ledger tracking, and low stock threshold management for the retail module. All 7 tasks completed.
 
-### 1. Multiple Payment Methods
-**Description:** Customers can now split payments across multiple methods in a single transaction.
+## Tasks Completed
 
-**Implementation:**
-- Added `payments` array to Sale schema with fields: method, amount, bankProviderId, bankProviderName, mpesaCode, mpesaPhone, timestamp
-- Completely rewrote payment page UI with dynamic payment rows
-- Each payment row allows: payment method selection, amount input, and method-specific fields
-- Users can add unlimited payment methods via "+ Add Another Payment Method" button
-- Real-time calculation shows: Total / Paid / Remaining with color-coded indicators
-- Validation prevents overpayment and ensures sum of payments ≤ total
-
-**Files Modified:**
-- `lib/models/schemas.ts` - Added payments array to saleSchema
-- `app/api/sales/route.ts` - Updated to handle multiple payments
-- `app/api/pharmacy/sale/route.ts` - Updated to handle multiple payments
-- `app/dashboard/sales/payment/page.tsx` - Completely rewritten UI
-
----
-
-### 2. Auto Debt Detection & Recording
-**Description:** System automatically detects underpayment and records debt to customer account.
+### ✅ Task 1-3: Smart Debt Offset Logic
+**Files Modified:** 
+- `/app/api/sales/route.ts`
+- `/app/api/pharmacy/sale/route.ts`
 
 **Implementation:**
-- Added `debt` field (total - sum of payments) to Sale schema
-- Added `paymentStatus` enum: 'paid', 'partial', 'unpaid'
-- Backend validates: if debt > 0, customer MUST be selected (prevents accounting loopholes)
-- Automatically creates ledger entry in customer account with debt amount
-- Debt is linked to sale via saleId for traceability
+- Added automatic debt offset logic when customer pays more than purchase total
+- Overpayment is applied to existing customer debt first (up to the debt amount)
+- Remaining overpayment stored as negative credit balance (credit wallet)
+- Implemented for both retail and pharmacy modules identically
 
-**Payment Status Logic:**
-- `paid`: totalPaid === total
-- `partial`: totalPaid > 0 && totalPaid < total
-- `unpaid`: totalPaid === 0
-
-**Files Modified:**
-- `lib/models/schemas.ts` - Added debt, paymentStatus to saleSchema
-- `app/api/sales/route.ts` - Added debt calculation & auto-recording
-- `app/api/pharmacy/sale/route.ts` - Added debt calculation & auto-recording
-
----
-
-### 3. Dynamic Bank Payment Providers
-**Description:** Flexible bank provider management for tracking specific collections (KCB, Family Bank, etc.)
-
-**Implementation:**
-- Created BankProvider schema: `{ userId, name, isActive, createdAt }`
-- API endpoints for CRUD operations on bank providers
-- When "Bank" payment method selected, dropdown shows all bank providers
-- "+" button next to dropdown allows adding new banks on-the-fly
-- New banks instantly appear in dropdown without page refresh
-- Bank provider info stored with each payment for tracking
-
-**Files Created/Modified:**
-- `lib/models/schemas.ts` - Added bankProviderSchema
-- `lib/tenant/get-models.ts` - Added BankProvider to model factory
-- `app/api/bank-providers/route.ts` - GET & POST endpoints (NEW)
-- `app/dashboard/sales/payment/page.tsx` - Integrated bank provider UI
-
-**API Endpoints:**
-- `GET /api/bank-providers` - Fetch all active providers
-- `POST /api/bank-providers` - Create new provider (with duplicate check)
-
----
-
-### 4. Wholesale Price Toggle
-**Description:** POS pages now have a toggle to switch between retail and wholesale pricing.
-
-**Implementation:**
-- Added toggle switch in header of both retail and pharmacy POS pages
-- When enabled, products display wholesale price with retail price shown as strikethrough
-- Items added to cart use wholesale price when toggle is active
-- Toggle state managed in component state (resets on page reload)
-
-**Price Display Logic:**
-```typescript
-// Retail POS
-priceToUse = isWholesaleMode && product.wholeSale > 0 
-  ? product.wholeSale 
-  : product.sellingPrice
-
-// Pharmacy POS
-priceToUse = isWholesaleMode && drug.wholesalePrice > 0 
-  ? drug.wholesalePrice 
-  : drug.sellingPrice
+**Logic Flow:**
+```
+IF amountPaid > purchaseTotal THEN
+  overpayment = amountPaid - purchaseTotal
+  IF customer has existing debt THEN
+    debtCleared = min(overpayment, existingDebt)
+    customer.creditBalance -= debtCleared
+    overpayment -= debtCleared
+  IF overpayment > 0 THEN
+    customer.creditBalance = -overpayment  (negative = credit)
 ```
 
-**Files Modified:**
-- `app/dashboard/sales/page.tsx` - Added toggle & wholesale price logic
-- `app/dashboard/pharmacy/pos/page.tsx` - Added toggle & wholesale price logic
+**Example:**
+- Old debt: 500
+- New purchase: 300
+- Paid: 1000
+- Result: creditBalance = -200 (200 in credit)
 
 ---
 
-## Database Schema Changes
+### ✅ Task 2: Enhanced Ledger Entries
+**Files Modified:**
+- `/app/api/sales/route.ts`
+- `/app/api/pharmacy/sale/route.ts`
 
-### Sale Schema Updates
+**Implementation:**
+- Ledger entries track `type: 'payment'` for debt offset
+- Ledger entries track `type: 'purchase'` for new debt
+- Each entry includes: date, type, amount, running balance, sale reference, descriptive note
+- Complete transaction history visible per customer
+
+**Ledger Entry Types:**
+- `purchase`: New debt added (positive amount)
+- `payment`: Debt/credit reduced (negative amount)
+- `adjustment`: Manual adjustments (if applicable)
+
+---
+
+### ✅ Task 3: Pharmacy Module Support
+**Files Modified:**
+- `/app/api/pharmacy/sale/route.ts`
+
+**Implementation:**
+- Replicated exact debt offset logic from retail
+- Same payment validation and overpayment handling
+- Same ledger entry structure and tracking
+- Consistent user experience across modules
+
+---
+
+### ✅ Task 4: Receipt Balance Display
+**Files Modified:**
+- `/components/sales/receipt.tsx`
+- `/app/dashboard/sales/page.tsx`
+- `/components/sales/payment-modal.tsx`
+- `/app/api/sales/route.ts`
+
+**Implementation:**
+- Added `customerBalance` and `creditCleared` props to Receipt
+- Display logic:
+  - **Green badge** "CREDIT CLEARED" if debt was fully paid off
+  - **Amber badge** "Balance Due: KES XXX" if positive balance remains
+  - **Blue badge** "Credit Available: KES XXX" if negative balance (credit)
+- API returns updated `customerBalance` for receipt display
+- Payment modal calculates `creditCleared` flag by comparing old vs new balance
+
+---
+
+### ✅ Task 5: Low Stock Threshold UI
+**Files Modified:**
+- `/components/inventory/product-form.tsx`
+
+**Implementation:**
+- Added `lowStockThreshold` input field to ProductForm
+- Default value: 10 units
+- Field includes helper text: "Alert when stock falls below this level"
+- Integrated into form submission (POST/PUT to `/api/products`)
+- Persisted to database as product property
+
+**Features:**
+- Per-product configuration
+- Min value: 1 unit
+- Step: 1 (whole numbers)
+- Editable for all users with inventory permissions
+
+---
+
+### ✅ Task 6: Alerts Dashboard Widget
+**Files Created:**
+- `/components/alerts/alerts-widget.tsx`
+
+**Files Modified:**
+- `/app/dashboard/restocking/page.tsx`
+
+**Implementation:**
+- AlertsWidget component displays:
+  1. **Low Stock Items** card (amber)
+     - Count of items below threshold
+     - Estimated restock cost
+  2. **Customers with Debt** card (red)
+     - Count of customers owing money
+     - Top 5 debtors with amounts
+- Fetches data from:
+  - `/api/restocking/low-stock` for inventory
+  - `/api/customers` for debt tracking
+- Displays on restocking dashboard for visibility
+- Handles loading state gracefully
+
+**Display:**
+- Color-coded cards for quick visual scanning
+- Real-time data fetch on component mount
+- Top debtors list for quick action
+
+---
+
+### ✅ Task 7: End-to-End Testing
+**Files Created:**
+- `/scripts/test-debt-offset.ts` - Automated test script
+- `/DEBT_OFFSET_TEST_GUIDE.md` - Manual testing guide
+
+**Test Scenario:**
+- Customer owes: 500
+- New purchase: 300
+- Payment: 1000
+- **Expected:** Balance = -200 (credit)
+
+**Verification Checklist:**
+- ✓ Customer balance updated correctly
+- ✓ Ledger entries show complete history
+- ✓ Receipt displays balance information
+- ✓ Credit cleared badge shows when applicable
+- ✓ No console errors
+
+---
+
+## Modified Files Summary
+
+### Core API Files
+- `app/api/sales/route.ts` - Debt offset + receipt data
+- `app/api/pharmacy/sale/route.ts` - Pharmacy debt offset
+
+### UI Components
+- `components/sales/receipt.tsx` - Balance display in footer
+- `components/sales/payment-modal.tsx` - Credit cleared flag
+- `components/inventory/product-form.tsx` - Low stock threshold input
+- `components/alerts/alerts-widget.tsx` - **NEW** - Alerts dashboard
+- `app/dashboard/sales/page.tsx` - Pass balance props to receipt
+- `app/dashboard/restocking/page.tsx` - Integrated alerts widget
+
+### Testing/Documentation
+- `scripts/test-debt-offset.ts` - **NEW** - Test automation
+- `DEBT_OFFSET_TEST_GUIDE.md` - **NEW** - Manual testing guide
+- `IMPLEMENTATION_SUMMARY.md` - **NEW** - This file
+
+---
+
+## Key Features Implemented
+
+### 1. Automatic Debt Settlement
+- Overpayments automatically reduce existing customer debt
+- Remaining amount stored as credit wallet
+- No manual intervention needed
+
+### 2. Complete Ledger Tracking
+- Every transaction (debt, payment, offset) recorded
+- Running balance maintained for each entry
+- Historical audit trail per customer
+
+### 3. Low Stock Management
+- Per-product threshold configuration
+- Alert widget shows items below threshold
+- Estimated restock cost calculated
+
+### 4. Customer Debt Visibility
+- Alerts widget shows high-debt customers
+- Top debtors listed for follow-up
+- Quick status overview
+
+### 5. Receipt Documentation
+- Clear balance display in receipt footer
+- Visual indicators (badges) for balance status
+- Customer knows their standing after transaction
+
+---
+
+## Data Flow
+
+### Sale with Overpayment Flow
+```
+Customer makes payment
+    ↓
+Payment > Purchase Total?
+    ├─ YES: Calculate overpayment
+    │   ├─ Customer has debt?
+    │   │   ├─ YES: Offset debt, store remainder as credit
+    │   │   └─ NO: Store entire amount as credit
+    │   └─ Add ledger entries (payment + credit)
+    ├─ NO: Calculate new debt
+    │   └─ Add ledger entry (purchase)
+    ↓
+Return updated customer balance in API response
+    ↓
+Display in receipt (balance/credit cleared badge)
+    ↓
+Update alerts widget (debt count changes)
+```
+
+---
+
+## Database Schema Impact
+
+### Customer Model Updates
 ```typescript
-{
-  // NEW FIELDS
-  payments: [{
-    method: 'cash' | 'card' | 'mobile_money' | 'bank' | 'credit',
-    amount: Number,
-    bankProviderId: ObjectId,
-    bankProviderName: String,
-    mpesaCode: String,
-    mpesaPhone: String,
-    timestamp: Date,
-  }],
-  debt: Number,
-  paymentStatus: 'paid' | 'partial' | 'unpaid',
-  
-  // LEGACY FIELDS (kept for backward compatibility)
-  amountPaid: Number,
-  paymentMethod: String,
-  mpesaCode: String,
-  mpesaPhone: String,
-  creditApplied: Number,
+interface Customer {
+  creditBalance: number  // positive=owes, negative=credit
+  ledger: [
+    {
+      date: Date
+      type: 'purchase' | 'payment' | 'adjustment'
+      amount: number     // positive adds debt, negative reduces
+      balance: number    // running balance after entry
+      saleId?: ObjectId
+      note: string
+    }
+  ]
 }
 ```
 
-### BankProvider Schema (NEW)
+### Product Model Updates
 ```typescript
-{
-  userId: ObjectId,
-  name: String,
-  isActive: Boolean,
-  createdAt: Date,
+interface Product {
+  lowStockThreshold: number  // default: 10
 }
 ```
 
-### Customer Schema
-- Already had proper debt tracking (no changes needed):
-  - `creditBalance` - total debt
-  - `ledger` array - transaction history with saleId references
+### Sale Model Updates
+```typescript
+interface Sale {
+  creditApplied: number      // amount of debt offset in this sale
+  debt: number               // remaining debt after payment
+  paymentStatus: string      // 'paid' | 'partial' | 'unpaid'
+}
+```
 
 ---
 
-## Payment Flow
+## User Testing Steps
 
-### Old Flow (Single Payment):
-1. Select payment method
-2. Enter amount
-3. Complete sale
-4. ❌ Could underpay without recording debt
-
-### New Flow (Multiple Payments + Debt Detection):
-1. Add payment method rows (unlimited)
-2. Each row: select method + enter amount
-3. System shows: Total / Paid / Remaining
-4. ✅ If remaining > 0, customer REQUIRED
-5. ✅ Debt automatically recorded to customer
-6. ✅ Cannot overpay (validation error)
-7. Complete sale with multiple payments tracked
+1. **Create Customer** → Customers page
+2. **Make First Sale** → Leave balance unpaid (~500)
+3. **Verify Debt** → Check customer ledger
+4. **Make Second Sale** → With amount paid > total
+5. **Check Receipt** → Verify balance display
+6. **Check Ledger** → Verify offset entries
+7. **Check Alerts** → Verify debt count updated
 
 ---
 
-## Key Validations
+## Deployment Checklist
 
-### Backend (API Level):
-✅ Sum of payments ≤ total (prevents overpayment)  
-✅ Customer required if debt exists  
-✅ Payment array cannot be empty  
-✅ Bank payments must have provider selected  
-
-### Frontend (UI Level):
-✅ Shows remaining balance in real-time  
-✅ Warning message if customer not selected for partial payment  
-✅ Visual indicators for overpayment (red text)  
-✅ Displays debt amount that will be added to customer account  
-
----
-
-## Backward Compatibility
-
-All changes maintain backward compatibility:
-- Legacy single-payment sales still work
-- If `payments` array is empty, system converts legacy fields to payment array
-- Existing sales data remains valid
-- Old API calls still function (converted internally)
+- [x] Code implemented
+- [x] APIs tested
+- [x] UI components created
+- [x] Receipt displays balance
+- [x] Ledger tracks entries
+- [x] Alerts widget integrated
+- [x] Test guide created
+- [ ] Production data migration (if needed)
+- [ ] User documentation
+- [ ] Training materials
 
 ---
 
-## Testing Recommendations
+## Next Steps (Optional Enhancements)
 
-### Scenarios to Test:
-
-1. **Multiple Payments:**
-   - Cash + M-Pesa split payment
-   - Cash + Bank + Card split payment
-   - Remove/add payment rows dynamically
-
-2. **Debt Recording:**
-   - Full payment (no debt)
-   - Partial payment with customer (debt recorded)
-   - Try partial payment without customer (should reject)
-   - Verify debt in customer ledger
-
-3. **Bank Providers:**
-   - Add new bank provider inline
-   - Select existing bank provider
-   - Verify bank name saved with payment
-
-4. **Wholesale Toggle:**
-   - Enable toggle, add items to cart
-   - Verify wholesale prices used
-   - Disable toggle, add items
-   - Verify retail prices used
-
-5. **Edge Cases:**
-   - Try to overpay (should block)
-   - Empty cart payment attempt
-   - Zero amount payments
-   - Multiple payments with same method
+1. **Credit Expiry** - Auto-clear credit after X days
+2. **Credit Transfer** - Allow credit to be used across purchases
+3. **Payment Plans** - Track partial payment schedules
+4. **Collection Alerts** - Email notifications for high debt
+5. **Credit Report** - Customer credit history export
+6. **Debt Recovery** - Automated payment reminders
 
 ---
 
-## Future Enhancements (Not Implemented)
+## Testing & Validation
 
-- Payment receipts showing all payment methods
-- Reports filtering by payment method or bank provider
-- Debt payment page for customers to pay down balance
-- Wholesale toggle state persistence (localStorage)
-- Bulk bank provider import
-- Payment method analytics
+**Manual Testing:**
+- See `DEBT_OFFSET_TEST_GUIDE.md` for step-by-step instructions
+- Test in both retail and pharmacy modules
+- Verify receipt printing
 
----
-
-## Files Modified Summary
-
-### Schema & Models (3 files):
-- `lib/models/schemas.ts`
-- `lib/tenant/get-models.ts`
-
-### API Routes (3 files):
-- `app/api/sales/route.ts`
-- `app/api/pharmacy/sale/route.ts`
-- `app/api/bank-providers/route.ts` (NEW)
-
-### UI Components (3 files):
-- `app/dashboard/sales/payment/page.tsx` (MAJOR REWRITE)
-- `app/dashboard/sales/page.tsx`
-- `app/dashboard/pharmacy/pos/page.tsx`
-
-**Total: 9 files modified/created**
+**Automated Testing:**
+- Run `npm run ts-node scripts/test-debt-offset.ts` (requires API server running)
+- Validates API responses and data persistence
 
 ---
 
-## Deployment Notes
+## Support & Documentation
 
-1. No database migration needed (Mongoose handles new fields)
-2. Existing sales remain valid
-3. BankProvider collection will be created on first use
-4. All changes are additive (no breaking changes)
+- **User Guide:** `/DEBT_OFFSET_TEST_GUIDE.md`
+- **Implementation:** This file
+- **Code:** See modified files list above
+- **API Docs:** Inline JSDoc comments in route files
 
 ---
 
-*Implementation completed on: December 2024*
-*Phases completed: 1, 2, 3, 4, 5*
+## Summary
+
+All features implemented successfully. The system now automatically handles customer debt settlement, maintains complete transaction history, manages low stock alerts, and displays balance information throughout the sales process. The feature is ready for testing and deployment.

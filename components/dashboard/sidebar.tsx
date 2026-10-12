@@ -58,6 +58,8 @@ export function Sidebar() {
   const [permissions, setPermissions]   = useState<Record<string, boolean>>({})
   const [isCashierMode, setIsCashierMode] = useState(false)
   const [allowedRoutes, setAllowedRoutes] = useState<string[]>([])
+  const [isBranchManager, setIsBranchManager] = useState(false)
+  const [managerOfBranches, setManagerOfBranches] = useState<string[]>([])
   const [features, setFeatures]         = useState<Record<string, boolean>>(DEFAULT_MODULE_FEATURES)
   const [branches, setBranches]         = useState<any[]>([])
   const [selectedBranch, setSelectedBranch] = useState<any>(null)
@@ -92,6 +94,8 @@ export function Sidebar() {
               if (data.user.permissions) setPermissions(data.user.permissions)
               if (data.user.isCashierMode) setIsCashierMode(data.user.isCashierMode)
               if (data.user.allowedRoutes) setAllowedRoutes(data.user.allowedRoutes)
+              if (data.user.isBranchManager !== undefined) setIsBranchManager(data.user.isBranchManager)
+              if (data.user.managerOfBranches) setManagerOfBranches(data.user.managerOfBranches)
             }
             if (data.user.branches)       setBranches(data.user.branches)
             if (data.user.selectedBranch) setSelectedBranch(data.user.selectedBranch)
@@ -372,13 +376,18 @@ export function Sidebar() {
             </div>
           </div>
 
-          {/* Branch selector - only for owners */}
-          {branches.length > 0 && userType === 'user' && (
-            <BranchSelector branches={branches} selectedBranch={selectedBranch} />
+          {/* Branch selector - for owners and branch managers */}
+          {branches.length > 0 && (userType === 'user' || (userType === 'staff' && isBranchManager)) && (
+            <BranchSelector 
+              branches={branches} 
+              selectedBranch={selectedBranch}
+              isBranchManager={isBranchManager}
+              managerOfBranches={managerOfBranches}
+            />
           )}
           
-          {/* Branch indicator for staff - read-only */}
-          {branches.length > 0 && userType === 'staff' && selectedBranch && (
+          {/* Branch indicator for regular staff - read-only */}
+          {branches.length > 0 && userType === 'staff' && !isBranchManager && selectedBranch && (
             <div className="mb-4 px-3 py-2 rounded-lg bg-[hsl(var(--sidebar-accent))] border border-[hsl(var(--sidebar-accent-foreground))]/20">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-blue-500"></div>

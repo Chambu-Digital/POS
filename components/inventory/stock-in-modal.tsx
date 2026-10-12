@@ -138,7 +138,9 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
   }
 
   function formatProductName(product: Product) {
-    return [product.variant, product.brand, product.productName].filter(Boolean).join(' ')
+    const variant = product.variant ? ` ${product.variant}` : ''
+    const brand = product.brand ? ` ${product.brand}` : ''
+    return `${product.category} › ${brand}${variant} ${product.productName}`.trim()
   }
 
   function handleQuickAddSupplierSuccess(newSupplier: { _id: string; name: string }) {

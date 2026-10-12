@@ -171,13 +171,24 @@ export async function POST(request: NextRequest) {
       ? getCashierPermissions() 
       : foundStaff.permissions
     
+    // Derive isBranchManager from role and managerOfBranches array
+    const isBranchManager = foundStaff.managerOfBranches && foundStaff.managerOfBranches.length > 0
+    const managerOfBranches = isBranchManager 
+      ? foundStaff.managerOfBranches.map((id: any) => id.toString())
+      : []
+    
+    // Use staff's assigned branchId as their initial branch
+    const initialBranchId = foundStaff.branchId?.toString()
+    
     const token = await createToken({
       userId: foundStaff._id.toString(),
       email: foundStaff.email,
       role: foundStaff.role,
       type: 'staff',
       adminId: foundStaff.userId.toString(),
-      branchId: foundStaff.branchId?.toString(),  // Include branch assignment
+      branchId: initialBranchId,  // Set to staff's assigned branch
+      isBranchManager,  // Derived from managerOfBranches
+      managerOfBranches,  // Include managed branches
       mongoUri: foundMongoUri || undefined,
       tenantFeatures: foundMongoUri ? foundFeatures : undefined,
       permissions: staffPermissions,
@@ -193,6 +204,10 @@ export async function POST(request: NextRequest) {
     console.log('\n========================================')
     console.log('[staff-login] ✅ LOGIN SUCCESS')
     console.log(`[staff-login] Role: ${foundStaff.role}${isCashierMode ? ' (CASHIER MODE - Offline First)' : ''}`)
+    console.log(`[staff-login] Branch: ${initialBranchId || 'Not assigned'}`)
+    if (isBranchManager) {
+      console.log(`[staff-login] Branch Manager: manages ${managerOfBranches.length} branch(es)`)
+    }
     console.log('[staff-login] 📊 PERFORMANCE SUMMARY:')
     console.log(`[staff-login]   Tenant load:         ${timings.tenantLoad}ms`)
     console.log(`[staff-login]   Tenant search:       ${timings.tenantSearch}ms`)
