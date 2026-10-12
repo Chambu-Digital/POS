@@ -205,7 +205,7 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
                 <div className="text-xs space-y-1 text-muted-foreground">
                   {change.buyingPrice !== undefined && (
                     <p>
-                      Buying Price: KSh {products.find((p) => p._id === change.id)?.buyingPrice.toLocaleString()} →{' '}
+                      Buying Price: KSh {(products.find((p) => p._id === change.id)?.buyingPrice ?? 0).toLocaleString()} →{' '}
                       <span className="text-primary font-semibold">
                         KSh {Number(change.buyingPrice).toLocaleString()}
                       </span>
@@ -213,7 +213,7 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
                   )}
                   {change.sellingPrice !== undefined && (
                     <p>
-                      Selling Price: KSh {products.find((p) => p._id === change.id)?.sellingPrice.toLocaleString()} →{' '}
+                      Selling Price: KSh {(products.find((p) => p._id === change.id)?.sellingPrice ?? 0).toLocaleString()} →{' '}
                       <span className="text-primary font-semibold">
                         KSh {Number(change.sellingPrice).toLocaleString()}
                       </span>
