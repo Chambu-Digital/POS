@@ -6,7 +6,7 @@ import {
   kitchenOrderSchema, menuItemSchema, expenseSchema, expenseCategorySchema,
   reportSchema, stockLedgerSchema, supplierSchema,
   customerSchema, drugBatchSchema, drugSchema,
-  branchSchema, inventorySchema, inventoryTransactionSchema,
+  branchSchema, mobileShopSchema, inventorySchema, inventoryTransactionSchema,
 
   purchaseOrderSchema, restockPlanSchema, quotationSchema,
   hospitalityMenuItemSchema, hospitalityServingTypeSchema, hospitalityServingInventorySchema,
@@ -37,6 +37,7 @@ export function getModels(conn: mongoose.Connection) {
     DrugBatch:       conn.models.DrugBatch       || conn.model('DrugBatch',       drugBatchSchema),
     Drug:            conn.models.Drug            || conn.model('Drug',            drugSchema),
     Branch:          conn.models.Branch          || conn.model('Branch',          branchSchema),
+    MobileShop:      conn.models.MobileShop      || conn.model('MobileShop',      mobileShopSchema),
     Inventory:       conn.models.Inventory       || conn.model('Inventory',       inventorySchema),
     InventoryTransaction: conn.models.InventoryTransaction || conn.model('InventoryTransaction', inventoryTransactionSchema),
 

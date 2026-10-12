@@ -2,7 +2,7 @@ import { connectDB } from '@/lib/db'
 import { connectTenantDB } from '@/lib/db-tenant'
 import { getModels } from '@/lib/tenant/get-models'
 import { createToken, setAuthCookie } from '@/lib/jwt'
-import { normaliseFeatures, DEFAULT_MODULE_FEATURES } from '@/lib/modules'
+import { normaliseFeatures, normalisePermissions, DEFAULT_MODULE_FEATURES } from '@/lib/modules'
 import { getAdminModels } from '@/lib/admin-models'
 import { CASHIER_ALLOWED_ROUTES, getCashierPermissions } from '@/lib/cashier-routes'
 import { NextRequest, NextResponse } from 'next/server'
@@ -169,7 +169,7 @@ export async function POST(request: NextRequest) {
     // For cashiers, use static permission set instead of custom permissions
     const staffPermissions = isCashierMode 
       ? getCashierPermissions() 
-      : foundStaff.permissions
+      : normalisePermissions(foundStaff.permissions || {})
     
     // Derive isBranchManager from role and managerOfBranches array
     const isBranchManager = foundStaff.managerOfBranches && foundStaff.managerOfBranches.length > 0

@@ -155,7 +155,7 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
       })
 
       if (response.ok) {
-        toast.success('Transfer created successfully')
+        toast.success('Stock out successful - transfer created')
         onSuccess()
         onClose()
         // Reset form
@@ -183,7 +183,7 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Create Stock Transfer - Retail Products</DialogTitle>
+          <DialogTitle>Stock Out - Transfer to Branch</DialogTitle>
           <DialogDescription>
             Transfer products from your current branch to another branch
           </DialogDescription>
@@ -304,7 +304,7 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
               onClick={handleSubmit}
               disabled={isSubmitting || items.length === 0 || !toBranchId}
             >
-              {isSubmitting ? 'Creating...' : 'Create Transfer'}
+              {isSubmitting ? 'Processing Stock Out...' : 'Stock Out'}
             </Button>
           </div>
         </div>

@@ -3,7 +3,7 @@ import { connectTenantDB } from '@/lib/db-tenant'
 import { getModels } from '@/lib/tenant/get-models'
 import { createToken, setAuthCookie } from '@/lib/jwt'
 import { DEMO_EMAIL, DEMO_PASSWORD, DEMO_USER_ID, getDemoUser } from '@/lib/demo'
-import { normaliseFeatures, DEFAULT_MODULE_FEATURES } from '@/lib/modules'
+import { normaliseFeatures, normalisePermissions, DEFAULT_MODULE_FEATURES } from '@/lib/modules'
 import { NextRequest, NextResponse } from 'next/server'
 import mongoose from 'mongoose'
 import { connectDB } from '@/lib/db'
@@ -259,7 +259,9 @@ export async function POST(request: NextRequest) {
     }
 
     const tokenStart = Date.now()
-    const token = await createToken({
+    
+    // Build token payload based on user type
+    const tokenPayload: any = {
       userId:         winner.record._id.toString(),
       email:          winner.record.email,
       role:           winner.record.role,
@@ -267,8 +269,20 @@ export async function POST(request: NextRequest) {
       adminId:        winner.type === 'staff' ? winner.record.userId?.toString() : undefined,
       mongoUri:       winner.mongoUri || undefined,
       tenantFeatures: winner.mongoUri ? winner.features : undefined,
-      permissions:    winner.type === 'staff' ? winner.record.permissions : undefined,
-    })
+      permissions:    winner.type === 'staff' ? normalisePermissions(winner.record.permissions || {}) : undefined,
+    }
+    
+    // Add staff-specific fields
+    if (winner.type === 'staff') {
+      const staff = winner.record
+      tokenPayload.branchId = staff.branchId?.toString()
+      tokenPayload.isBranchManager = staff.managerOfBranches && staff.managerOfBranches.length > 0
+      tokenPayload.managerOfBranches = staff.managerOfBranches 
+        ? staff.managerOfBranches.map((id: any) => id.toString())
+        : []
+    }
+    
+    const token = await createToken(tokenPayload)
     timings.tokenCreation = Date.now() - tokenStart
 
     await setAuthCookie(token)
@@ -277,6 +291,12 @@ export async function POST(request: NextRequest) {
     
     console.log('\n========================================')
     console.log('[login] ✅ LOGIN SUCCESS')
+    if (winner.type === 'staff' && tokenPayload.branchId) {
+      console.log(`[login] Staff Branch: ${tokenPayload.branchId}`)
+      if (tokenPayload.isBranchManager) {
+        console.log(`[login] Branch Manager: manages ${tokenPayload.managerOfBranches.length} branch(es)`)
+      }
+    }
     console.log('[login] 📊 PERFORMANCE SUMMARY:')
     console.log(`[login]   Tenant load:           ${timings.tenantLoad}ms`)
     console.log(`[login]   Tenant search:         ${timings.tenantSearch}ms`)

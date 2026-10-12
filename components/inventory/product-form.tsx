@@ -442,8 +442,10 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             onChange={handleChange}
             onFocus={(e) => e.target.select()}
             required
-            disabled={loading}
+            disabled={true}
+            className="bg-muted cursor-not-allowed"
           />
+          <p className="text-xs text-muted-foreground">Stock is managed through Stock Movements</p>
         </div>
 
         <div className="space-y-2">

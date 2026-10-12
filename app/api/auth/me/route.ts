@@ -49,15 +49,20 @@ export async function GET(request: NextRequest) {
       // Get selected branch from JWT
       let selectedBranch = null
       if (payload.branchId) {
+        console.log('[auth/me] Looking for staff branch:', payload.branchId)
+        console.log('[auth/me] Available branches:', branches.map(b => ({ id: b._id.toString(), name: b.name })))
         selectedBranch = branches.find(b => b._id.toString() === payload.branchId.toString())
         if (!selectedBranch) {
           console.warn('[auth/me] Staff branchId not found in active branches:', payload.branchId)
+        } else {
+          console.log('[auth/me] Found branch:', selectedBranch.name)
         }
       }
       
       // Fallback only if no branchId in JWT
       if (!selectedBranch && !payload.branchId) {
         selectedBranch = branches.find(b => b.isDefault) || branches[0] || null
+        console.log('[auth/me] Using fallback branch:', selectedBranch?.name)
       }
 
       return NextResponse.json({

@@ -26,27 +26,40 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    const products = await models.Product.find(query).sort({ createdAt: -1 }).lean()
-
-    // Get branch-specific stock if branch context exists
-    if (branchContext && products.length > 0) {
-      const productIds = products.map(p => p._id)
+    // Branch-specific inventory: only show products that exist in this branch
+    if (branchContext) {
+      // Get ProductInventory records for this branch
       const inventories = await models.ProductInventory.find({
         userId: ownerId,
         branchId: branchContext,
-        productId: { $in: productIds }
       }).lean()
 
+      if (inventories.length === 0) {
+        return NextResponse.json({ products: [] })
+      }
+
+      // Get product IDs that exist in this branch's inventory
+      const branchProductIds = inventories.map(inv => inv.productId)
+      
+      // Add productId filter to query
+      query._id = { $in: branchProductIds }
+
+      const products = await models.Product.find(query).sort({ createdAt: -1 }).lean()
+
+      // Map inventory data to products
       const inventoryMap = new Map(inventories.map(inv => [inv.productId.toString(), inv]))
 
-      // Merge stock from ProductInventory
       products.forEach((product: any) => {
         const inventory = inventoryMap.get(product._id.toString())
         product.stock = inventory?.stock || 0
         product.reserved = inventory?.reserved || 0
       })
+
+      return NextResponse.json({ products })
     }
 
+    // No branch context: return all products (catalog view for owner)
+    const products = await models.Product.find(query).sort({ createdAt: -1 }).lean()
     return NextResponse.json({ products })
   } catch (error) {
     console.error('[products] GET error:', error)

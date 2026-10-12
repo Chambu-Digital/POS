@@ -241,6 +241,11 @@ export const staffSchema = new mongoose.Schema(
         'rentals.manage': false,
       }),
     },
+    // Temp seller fields for mobile shops
+    isTemporary:      { type: Boolean, default: false },  // True for day workers
+    lastDeployedDate: { type: Date },  // Last time deployed to mobile shop
+    deploymentCount:  { type: Number, default: 0 },  // Total deployments
+    mobileShopId:     { type: mongoose.Schema.Types.ObjectId, ref: 'MobileShop' },  // Current active mobile shop
     active:    { type: Boolean, default: true },
     createdAt: { type: Date, default: Date.now },
   },
@@ -249,6 +254,8 @@ export const staffSchema = new mongoose.Schema(
 staffSchema.index({ userId: 1, email: 1 })
 staffSchema.index({ userId: 1, branchId: 1 })
 staffSchema.index({ userId: 1, managerOfBranches: 1 })
+staffSchema.index({ userId: 1, isTemporary: 1 })
+staffSchema.index({ userId: 1, mobileShopId: 1 })
 staffSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next()
   const salt = await bcryptjs.genSalt(10)
@@ -504,6 +511,7 @@ reportSchema.index({ userId: 1, reportType: 1, createdAt: -1 })
 export const stockLedgerSchema = new mongoose.Schema(
   {
     userId:     { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },  // Branch where movement occurred
     productId:  { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
     saleId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' },       // set on sale
     staffId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
@@ -532,6 +540,7 @@ export const stockLedgerSchema = new mongoose.Schema(
   { collection: 'stock_ledger' }
 )
 stockLedgerSchema.index({ userId: 1, productId: 1, timestamp: -1 })
+stockLedgerSchema.index({ userId: 1, branchId: 1, timestamp: -1 })
 stockLedgerSchema.index({ userId: 1, saleId: 1 })
 stockLedgerSchema.index({ userId: 1, supplierId: 1, timestamp: -1 })
 stockLedgerSchema.index({ userId: 1, type: 1, timestamp: -1 })
@@ -650,6 +659,65 @@ export const branchSchema = new mongoose.Schema(
 branchSchema.index({ userId: 1, status: 1 })
 branchSchema.index({ userId: 1, code: 1 }, { unique: true })
 branchSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
+
+// ── MobileShop ─────────────────────────────────────────────────────────────────
+// Field sales operations with temporary sellers
+export const mobileShopSchema = new mongoose.Schema(
+  {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    name: { type: String, required: true, trim: true }, // e.g., "Market Day - Gikomba"
+    sourceBranchId: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
+    status: { type: String, enum: ['active', 'closed'], default: 'active' },
+    
+    // Stock tracking
+    stockOut: [{
+      productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+      productName: { type: String, required: true },
+      quantity: { type: Number, required: true },
+      deployedAt: { type: Date, default: Date.now }
+    }],
+    stockReturned: [{
+      productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+      productName: { type: String, required: true },
+      quantity: { type: Number, required: true },
+      returnedAt: { type: Date, default: Date.now }
+    }],
+    
+    // Sellers assigned to this shop
+    sellers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Staff' }],
+    
+    // Sales summary (calculated on close)
+    salesMade: {
+      totalRevenue: { type: Number, default: 0 },
+      salesCount: { type: Number, default: 0 },
+      itemsSold: { type: Number, default: 0 }
+    },
+    
+    // Stock variance (calculated on close)
+    variance: [{
+      productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+      productName: { type: String },
+      expected: { type: Number }, // stockOut - sold
+      actual: { type: Number },   // stockReturned
+      difference: { type: Number }, // actual - expected (negative = loss, positive = gain)
+      notes: { type: String }
+    }],
+    
+    // Lifecycle
+    deployedAt: { type: Date, default: Date.now },
+    closedAt: { type: Date },
+    closedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
+    notes: { type: String, default: '' },
+    
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now },
+  },
+  { collection: 'mobile_shops' }
+)
+mobileShopSchema.index({ userId: 1, status: 1 })
+mobileShopSchema.index({ userId: 1, sourceBranchId: 1 })
+mobileShopSchema.index({ userId: 1, deployedAt: -1 })
+mobileShopSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
 
 // ── Inventory ───────────────────────────────────────────────────────────────────
 // Pharmacy inventory - derived from transactions, not directly edited

@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { getBranchContext } from '@/lib/branch-context'
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,6 +21,7 @@ export async function GET(request: NextRequest) {
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const branchContext = await getBranchContext(request)
     const { searchParams } = new URL(request.url)
     
     // Parse query parameters
@@ -33,6 +35,12 @@ export async function GET(request: NextRequest) {
 
     // Build query
     const query: any = { userId: ownerId }
+    
+    // Filter by branch context (staff see only their branch, owner sees all)
+    if (branchContext) {
+      query.branchId = branchContext
+    }
+    
     if (type) query.type = type
     if (productId) query.productId = productId
     if (supplierId) query.supplierId = supplierId
@@ -56,8 +64,19 @@ export async function GET(request: NextRequest) {
         query.productId = { $in: productIds }
       } else {
         // No products match search, return empty
+        console.log('[stock-ledger] No products match search:', search)
         return NextResponse.json({ ledger: [] })
       }
+    }
+
+    console.log('[stock-ledger] Query:', JSON.stringify(query))
+    console.log('[stock-ledger] Payload:', { type: payload.type, userId: payload.userId, ownerId })
+    console.log('[stock-ledger] BranchContext:', branchContext)
+
+    // Check if StockLedger model exists
+    if (!(models as any).StockLedger) {
+      console.error('[stock-ledger] StockLedger model not found!')
+      return NextResponse.json({ error: 'StockLedger model not found' }, { status: 500 })
     }
 
     const ledger = await (models as any).StockLedger
@@ -69,9 +88,11 @@ export async function GET(request: NextRequest) {
       .populate('staffId', 'name')
       .lean()
 
+    console.log('[stock-ledger] Found', ledger.length, 'records')
+
     return NextResponse.json({ ledger })
   } catch (error) {
     console.error('[inventory/stock-ledger] GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch stock ledger' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to fetch stock ledger', details: String(error) }, { status: 500 })
   }
 }

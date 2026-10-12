@@ -233,7 +233,7 @@ function InventoryPageContent() {
             variant="outline"
           >
             <ArrowLeftRight size={16} className="mr-2" />
-            Transfer Stock
+            Stock Out
           </Button>
           <Button
             onClick={() => setIsCreateOpen(true)}
@@ -584,7 +584,7 @@ function InventoryPageContent() {
         }}
       />
 
-      {/* Transfer Stock Modal */}
+      {/* Stock Out Modal */}
       <CreateProductTransferModal
         isOpen={isTransferOpen}
         onClose={() => setIsTransferOpen(false)}

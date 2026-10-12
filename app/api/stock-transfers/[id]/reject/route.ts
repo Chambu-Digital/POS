@@ -14,9 +14,31 @@ export async function PUT(
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    // Check permission
-    if (payload.type === 'staff' && !payload.permissions?.['stock-transfers.receive']) {
-      return NextResponse.json({ error: 'No permission to reject transfers' }, { status: 403 })
+    // Only managers of the receiving branch or owners can reject transfers
+    if (payload.type === 'staff') {
+      const { models } = await getTenantDB(request)
+      
+      // Get the transfer to check destination branch
+      const transfer = await models.StockTransfer.findOne({
+        _id: id,
+        userId: payload.adminId,
+      })
+      
+      if (!transfer) {
+        return NextResponse.json({ error: 'Transfer not found' }, { status: 404 })
+      }
+      
+      // Staff must be a manager of the receiving branch
+      const staff = await models.Staff.findById(payload.userId)
+      const isManagerOfReceivingBranch = staff?.managerOfBranches?.some(
+        (branchId: any) => branchId.toString() === transfer.toBranchId.toString()
+      )
+      
+      if (!isManagerOfReceivingBranch) {
+        return NextResponse.json({ 
+          error: 'Only managers of the receiving branch can reject transfers' 
+        }, { status: 403 })
+      }
     }
 
     const { models } = await getTenantDB(request)

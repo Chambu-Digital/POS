@@ -50,11 +50,13 @@ interface StockMovement {
   supplierName?: string
 }
 
-type MovementType = 'all' | 'STOCK_IN' | 'SALE' | 'RETURN' | 'DAMAGE' | 'WASTAGE' | 'EXPIRED' | 'LOSS' | 'ADJUSTMENT' | 'EXCHANGE_IN' | 'EXCHANGE_OUT'
+type MovementType = 'all' | 'STOCK_IN' | 'SALE' | 'RETURN' | 'DAMAGE' | 'WASTAGE' | 'EXPIRED' | 'LOSS' | 'ADJUSTMENT' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'EXCHANGE_IN' | 'EXCHANGE_OUT'
 
 const MOVEMENT_TYPES: { value: MovementType; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'STOCK_IN', label: 'Stock In' },
+  { value: 'TRANSFER_OUT', label: 'Stock Out (Transfer)' },
+  { value: 'TRANSFER_IN', label: 'Transfer In' },
   { value: 'SALE', label: 'Sales' },
   { value: 'RETURN', label: 'Returns' },
   { value: 'EXCHANGE_IN', label: 'Exchange In' },
@@ -121,7 +123,10 @@ function StockMovementsPageContent() {
   function getMovementIcon(type: string) {
     switch (type) {
       case 'STOCK_IN':
+      case 'TRANSFER_IN':
         return <TrendingUp size={16} className="text-green-600" />
+      case 'TRANSFER_OUT':
+        return <TrendingDown size={16} className="text-orange-600" />
       case 'SALE':
         return <TrendingDown size={16} className="text-blue-600" />
       case 'RETURN':
@@ -145,7 +150,10 @@ function StockMovementsPageContent() {
   function getMovementColor(type: string) {
     switch (type) {
       case 'STOCK_IN':
+      case 'TRANSFER_IN':
         return 'bg-green-100 text-green-800'
+      case 'TRANSFER_OUT':
+        return 'bg-orange-100 text-orange-800'
       case 'SALE':
         return 'bg-blue-100 text-blue-800'
       case 'RETURN':
@@ -184,7 +192,8 @@ function StockMovementsPageContent() {
   }
 
   // Calculate stats
-  const stockInCount = movements.filter(m => m.type === 'STOCK_IN').length
+  const stockInCount = movements.filter(m => ['STOCK_IN', 'TRANSFER_IN'].includes(m.type)).length
+  const stockOutCount = movements.filter(m => ['TRANSFER_OUT'].includes(m.type)).length
   const saleCount = movements.filter(m => m.type === 'SALE').length
   const issueCount = movements.filter(m => ['DAMAGE', 'WASTAGE', 'EXPIRED', 'LOSS'].includes(m.type)).length
 
@@ -225,6 +234,20 @@ function StockMovementsPageContent() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">{stockInCount}</div>
+            <p className="text-xs text-muted-foreground">Received & Transfers In</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <TrendingDown size={16} className="text-orange-600" />
+              Stock Out
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">{stockOutCount}</div>
+            <p className="text-xs text-muted-foreground">Transfers Out</p>
           </CardContent>
         </Card>
 

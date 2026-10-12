@@ -58,11 +58,7 @@ export async function POST(request: NextRequest) {
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    // Check permission
-    if (payload.type === 'staff' && !payload.permissions?.['stock-transfers.create']) {
-      return NextResponse.json({ error: 'No permission to create transfers' }, { status: 403 })
-    }
-
+    // Anyone with access can create a transfer (approval happens at receiving end)
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
     const body = await request.json()
@@ -101,6 +97,7 @@ export async function POST(request: NextRequest) {
     session.startTransaction()
 
     try {
+      // Validate and reserve stock, then create TRANSFER_OUT ledger entries
       for (const item of items) {
         // Reserve stock (pessimistic lock) - throws if insufficient
         const itemType = item.productId ? 'product' : 'drug'
@@ -139,12 +136,40 @@ export async function POST(request: NextRequest) {
         notes: notes || '',
       }], { session })
 
+      // Create TRANSFER_OUT StockLedger entries for each product
+      for (const item of items) {
+        if (item.productId) {
+          // Get current inventory to record stock levels
+          const inventory = await models.ProductInventory.findOne({
+            userId: ownerId,
+            branchId: fromBranchId,
+            productId: new Types.ObjectId(item.productId),
+          }).session(session)
+
+          if (inventory) {
+            await models.StockLedger.create([{
+              userId: ownerId,
+              branchId: fromBranchId,
+              productId: new Types.ObjectId(item.productId),
+              type: 'TRANSFER_OUT',
+              quantity: -item.quantitySent,
+              previousStock: inventory.stock + inventory.reserved, // Before reservation
+              newStock: inventory.stock, // After deduction (reserved subtracted)
+              notes: `Transfer to ${toBranch.name} - ${transferNumber}`,
+              reference: transferNumber,
+              staffId: payload.type === 'staff' ? new Types.ObjectId(payload.userId) : undefined,
+              timestamp: new Date(),
+            }], { session })
+          }
+        }
+      }
+
       // Create notification for receiving branch staff/manager
       const receivingStaff = await models.Staff.find({
         userId: ownerId,
         branchId: toBranchId,
         active: true,
-        'permissions.stock-transfers.receive': true,
+        'permissions.core.stock-transfers.receive': true,
       }).session(session)
 
       if (receivingStaff.length > 0) {

@@ -4,6 +4,7 @@
 
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
@@ -33,6 +34,7 @@ export async function POST(
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const branchContext = await getBranchContext(request)
     const staffId = payload.type === 'staff' ? payload.userId : null
 
     const { id } = await params
@@ -149,6 +151,7 @@ export async function POST(
     // EXCHANGE_IN: returned product back into stock
     await (models as any).StockLedger.create({
       userId: ownerId,
+      branchId: branchContext ? new Types.ObjectId(branchContext) : null,
       productId: returnedProductObjId,
       saleId: saleId,
       staffId: staffId ? new Types.ObjectId(staffId) : null,
@@ -165,6 +168,7 @@ export async function POST(
     // EXCHANGE_OUT: new product sold out
     await (models as any).StockLedger.create({
       userId: ownerId,
+      branchId: branchContext ? new Types.ObjectId(branchContext) : null,
       productId: newProductObjId,
       saleId: saleId,
       staffId: staffId ? new Types.ObjectId(staffId) : null,

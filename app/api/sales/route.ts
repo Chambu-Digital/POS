@@ -137,17 +137,63 @@ export async function POST(request: NextRequest) {
       if (!item.productId) continue
       try {
         const productObjId = new Types.ObjectId(item.productId)
-        const product = await models.Product.findById(productObjId).select('stock').lean() as any
-        if (!product) continue
-        const previousStock = product.stock ?? 0
-        const newStock      = Math.max(0, previousStock - item.quantity)
-        await models.Product.findByIdAndUpdate(
-          productObjId,
-          { $inc: { stock: -item.quantity }, updatedAt: new Date() }
-        )
+        
+        let previousStock = 0
+        let newStock = 0
+
+        // Multi-branch: update ProductInventory (branch-specific stock)
+        if (branchContext) {
+          const inventory = await models.ProductInventory.findOne({
+            userId: ownerId,
+            branchId: branchContext,
+            productId: productObjId,
+          })
+
+          if (inventory) {
+            previousStock = inventory.stock ?? 0
+            newStock = Math.max(0, previousStock - item.quantity)
+            
+            // Update branch-specific inventory
+            inventory.stock = newStock
+            inventory.lastUpdated = new Date()
+            await inventory.save()
+          } else {
+            console.warn(`[sales] No ProductInventory found for product ${productObjId} in branch ${branchContext}`)
+            continue
+          }
+
+          // Also update Product.stock for backward compatibility (legacy field)
+          await models.Product.findByIdAndUpdate(
+            productObjId,
+            { $inc: { stock: -item.quantity }, updatedAt: new Date() }
+          )
+        } else {
+          // Legacy single-branch: update Product.stock only
+          const product = await models.Product.findById(productObjId).select('stock').lean() as any
+          if (!product) continue
+          
+          previousStock = product.stock ?? 0
+          newStock = Math.max(0, previousStock - item.quantity)
+          
+          await models.Product.findByIdAndUpdate(
+            productObjId,
+            { $inc: { stock: -item.quantity }, updatedAt: new Date() }
+          )
+        }
+
         try {
-          await (models as any).StockLedger.create({
+          console.log('[sales] Creating StockLedger entry:', {
+            userId: ownerId,
+            branchId: branchContext,
+            branchIdType: typeof branchContext,
+            productId: productObjId,
+            type: 'SALE',
+            quantity: -item.quantity,
+          })
+          
+          const ledgerEntry = await (models as any).StockLedger.create({
             userId:        ownerId,
+            branchId:      branchContext ? new Types.ObjectId(branchContext) : null,
             productId:     productObjId,
             staffId:       payload.type === 'staff' ? new Types.ObjectId(payload.userId) : null,
             type:          'SALE',
@@ -156,6 +202,12 @@ export async function POST(request: NextRequest) {
             newStock,
             orderNumber,
             timestamp:     new Date(),
+          })
+          
+          console.log('[sales] StockLedger created:', {
+            id: ledgerEntry._id,
+            branchId: ledgerEntry.branchId,
+            hasBranchId: !!ledgerEntry.branchId,
           })
         } catch (ledgerError) {
           console.error('[sales] StockLedger creation failed:', ledgerError)

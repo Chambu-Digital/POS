@@ -116,6 +116,14 @@ export const CORE_MODULE: ModuleDefinition = {
       defaultOn: true,
     },
     {
+      key: 'core.mobile-shops',
+      label: 'Mobile Shops',
+      description: 'Field sales operations with temporary sellers',
+      href: '/dashboard/mobile-shops',
+      adminOnly: false,
+      defaultOn: true,
+    },
+    {
       key: 'core.settings',
       label: 'Settings',
       description: 'Business settings and configuration',
@@ -372,6 +380,9 @@ export const LEGACY_KEY_MAP: Record<string, string> = {
   'pos.customers': 'core.customers',
   'pos.suppliers': 'core.suppliers',
   'pos.settings':  'core.settings',
+  // Stock transfer permission migrations (added core. prefix)
+  'stock-transfers.create':  'core.stock-transfers.create',
+  'stock-transfers.receive': 'core.stock-transfers.receive',
 }
 
 /**
@@ -437,6 +448,7 @@ export const DEFAULT_STAFF_PERMISSIONS: Record<string, boolean> = {
   'core.stock-transfers':  false,
   'core.stock-transfers.create':  false,
   'core.stock-transfers.receive': false,
+  'core.mobile-shops': false,
   'rentals.bookings': false,
   'rentals.manage':   false,
   'pharmacy.pos':          false,
@@ -468,6 +480,7 @@ export const DEFAULT_MANAGER_PERMISSIONS: Record<string, boolean> = {
   'core.stock-transfers':  true,
   'core.stock-transfers.create':  true,
   'core.stock-transfers.receive': true,
+  'core.mobile-shops': true,
   'rentals.bookings': false,
   'rentals.manage':   false,
   'pharmacy.pos':          false,

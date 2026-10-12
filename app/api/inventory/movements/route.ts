@@ -4,6 +4,7 @@
 
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
@@ -18,6 +19,7 @@ export async function POST(request: NextRequest) {
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const branchContext = await getBranchContext(request)
     const staffId = payload.type === 'staff' ? payload.userId : null
     
     const body = await request.json()
@@ -82,6 +84,7 @@ export async function POST(request: NextRequest) {
     // Create movement entry (quantity is negative for stock reduction)
     const movement = await (models as any).StockLedger.create({
       userId: ownerId,
+      branchId: branchContext ? new Types.ObjectId(branchContext) : null,
       productId: productObjId,
       staffId: staffId ? new Types.ObjectId(staffId) : null,
       type,
