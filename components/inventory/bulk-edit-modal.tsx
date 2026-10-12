@@ -104,10 +104,10 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
         filteredProducts.map((p) => ({
           id: p._id,
           productName: formatProductName(p),
-          buyingPrice: p.buyingPrice,
-          sellingPrice: p.sellingPrice,
-          wholeSale: p.wholeSale || 0,
-          barcode: p.barcode || '',
+          buyingPrice: p.buyingPrice ?? 0,
+          sellingPrice: p.sellingPrice ?? 0,
+          wholeSale: p.wholeSale ?? 0,
+          barcode: p.barcode ?? '',
         }))
       )
     } else {
