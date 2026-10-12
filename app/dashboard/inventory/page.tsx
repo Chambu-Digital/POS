@@ -335,12 +335,12 @@ function InventoryPageContent() {
                       <TableCell>{(product as any).model || '-'}</TableCell>
                       <TableCell className="text-green-600 font-semibold">{product.stock}</TableCell>
                       <TableCell>{(product as any).unit || 'pieces'}</TableCell>
-                      <TableCell>KSh {product.buyingPrice.toLocaleString()}</TableCell>
-                      <TableCell>KSh {product.sellingPrice.toLocaleString()}</TableCell>
+                      <TableCell>KSh {(product.buyingPrice || 0).toLocaleString()}</TableCell>
+                      <TableCell>KSh {(product.sellingPrice || 0).toLocaleString()}</TableCell>
                       <TableCell>KSh {((product as any).wholeSale || 0).toLocaleString()}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">{product.description || '-'}</TableCell>
                       <TableCell className="text-primary font-semibold">
-                        KSh {(product.stock * product.sellingPrice).toLocaleString()}
+                        KSh {((product.stock || 0) * (product.sellingPrice || 0)).toLocaleString()}
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <div className="flex gap-2">
