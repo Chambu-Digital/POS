@@ -52,13 +52,14 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
   }, [products])
 
   function formatProductName(product: Product) {
+    if (!product) return 'Unknown Product'
     const parts = [
       product.brand,
       product.variant,
       product.model,
       product.productName,
     ].filter(Boolean)
-    return parts.join(' › ')
+    return parts.length > 0 ? parts.join(' › ') : 'Unknown Product'
   }
 
   // Filter products based on search and category
@@ -93,7 +94,12 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
 
   // Initialize edit rows when modal opens or filters change
   useEffect(() => {
-    if (open && filteredProducts.length > 0) {
+    if (!open) {
+      setEditRows([])
+      return
+    }
+
+    if (filteredProducts.length > 0) {
       setEditRows(
         filteredProducts.map((p) => ({
           id: p._id,
@@ -104,7 +110,7 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
           barcode: p.barcode || '',
         }))
       )
-    } else if (open && filteredProducts.length === 0) {
+    } else {
       setEditRows([])
     }
   }, [open, filteredProducts])  // Add formatProductName to deps if it uses external state
