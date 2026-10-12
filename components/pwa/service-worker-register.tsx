@@ -8,6 +8,12 @@ export function ServiceWorkerRegister() {
   const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null)
 
   useEffect(() => {
+    // Skip service worker in development
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[PWA] Service worker disabled in development')
+      return
+    }
+
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker
         .register('/sw.js', { scope: '/' })

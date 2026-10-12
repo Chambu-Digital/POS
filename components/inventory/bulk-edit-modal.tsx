@@ -104,8 +104,10 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
           barcode: p.barcode || '',
         }))
       )
+    } else if (open && filteredProducts.length === 0) {
+      setEditRows([])
     }
-  }, [open, filteredProducts])
+  }, [open, filteredProducts])  // Add formatProductName to deps if it uses external state
 
   function handleFieldChange(id: string, field: keyof EditRow, value: string | number) {
     setEditRows((prev) =>

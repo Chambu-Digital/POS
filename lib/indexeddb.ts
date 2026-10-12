@@ -142,8 +142,13 @@ export async function cacheProducts(products: any[]) {
 }
 
 export async function clearCachedProducts() {
-  const database = await initDB()
-  await database.clear('products')
+  try {
+    const database = await initDB()
+    await database.clear('products')
+  } catch (error) {
+    // Ignore if DB is closing or unavailable
+    console.warn('[IndexedDB] Failed to clear cache:', error)
+  }
 }
 
 export async function getCachedProducts(): Promise<any[]> {
