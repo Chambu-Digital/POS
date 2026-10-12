@@ -22,6 +22,7 @@ interface Product {
   category: string
   brand?: string
   variant?: string
+  model?: string
   stock: number
 }
 
@@ -87,9 +88,13 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
   }
 
   function formatProductName(product: Product) {
-    const variant = product.variant ? ` ${product.variant}` : ''
-    const brand = product.brand ? ` ${product.brand}` : ''
-    return `${product.category} › ${brand}${variant} ${product.productName}`.trim()
+    const parts = [
+      product.brand,
+      product.variant,
+      product.model,
+      product.productName,
+    ].filter(Boolean)
+    return parts.join(' › ')
   }
 
   function updatePhysicalCount(productId: string, value: number) {

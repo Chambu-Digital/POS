@@ -40,6 +40,7 @@ interface Product {
   productName: string
   brand?: string
   variant?: string
+  model?: string
 }
 
 interface StockInItem {
@@ -138,9 +139,13 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
   }
 
   function formatProductName(product: Product) {
-    const variant = product.variant ? ` ${product.variant}` : ''
-    const brand = product.brand ? ` ${product.brand}` : ''
-    return `${product.category} › ${brand}${variant} ${product.productName}`.trim()
+    const parts = [
+      product.brand,
+      product.variant,
+      product.model,
+      product.productName,
+    ].filter(Boolean)
+    return parts.join(' › ')
   }
 
   function handleQuickAddSupplierSuccess(newSupplier: { _id: string; name: string }) {

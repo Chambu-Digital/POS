@@ -14,6 +14,7 @@ interface Product {
   category: string
   brand?: string
   variant?: string
+  model?: string
   buyingPrice: number
   sellingPrice: number
   wholeSale?: number
@@ -41,20 +42,62 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
   const [editRows, setEditRows] = useState<EditRow[]>([])
   const [showConfirm, setShowConfirm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState<string>('all')
+
+  // Extract unique categories
+  const categories = useMemo(() => {
+    const unique = Array.from(new Set(products.map(p => p.category).filter(Boolean)))
+    return ['all', ...unique.sort()]
+  }, [products])
 
   function formatProductName(product: Product) {
-    const variant = product.variant ? ` ${product.variant}` : ''
-    const brand = product.brand ? ` ${product.brand}` : ''
-    return `${product.category} › ${brand}${variant} ${product.productName}`.trim()
+    const parts = [
+      product.brand,
+      product.variant,
+      product.model,
+      product.productName,
+    ].filter(Boolean)
+    return parts.join(' › ')
   }
 
-  // Initialize edit rows when modal opens
+  // Filter products based on search and category
+  const filteredProducts = useMemo(() => {
+    return products.filter(product => {
+      // Category filter
+      if (selectedCategory !== 'all' && product.category !== selectedCategory) {
+        return false
+      }
+
+      // Search filter
+      if (searchQuery) {
+        const searchLower = searchQuery.toLowerCase()
+        const productName = product.productName?.toLowerCase() || ''
+        const brand = product.brand?.toLowerCase() || ''
+        const variant = product.variant?.toLowerCase() || ''
+        const model = product.model?.toLowerCase() || ''
+        const category = product.category?.toLowerCase() || ''
+
+        return (
+          productName.includes(searchLower) ||
+          brand.includes(searchLower) ||
+          variant.includes(searchLower) ||
+          model.includes(searchLower) ||
+          category.includes(searchLower)
+        )
+      }
+
+      return true
+    })
+  }, [products, searchQuery, selectedCategory])
+
+  // Initialize edit rows when modal opens (use filtered products)
   useMemo(() => {
-    if (open && products.length > 0) {
+    if (open && filteredProducts.length > 0) {
       setEditRows(
-        products.map((p) => ({
+        filteredProducts.map((p) => ({
           id: p._id,
-          productName: p.productName,
+          productName: formatProductName(p),
           buyingPrice: p.buyingPrice,
           sellingPrice: p.sellingPrice,
           wholeSale: p.wholeSale || 0,
@@ -62,7 +105,7 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
         }))
       )
     }
-  }, [open, products])
+  }, [open, filteredProducts])
 
   function handleFieldChange(id: string, field: keyof EditRow, value: string | number) {
     setEditRows((prev) =>
@@ -73,8 +116,8 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
   // Calculate what changed
   const changes = useMemo(() => {
     const changedItems = editRows
-      .map((edit, idx) => {
-        const original = products[idx]
+      .map((edit) => {
+        const original = filteredProducts.find(p => p._id === edit.id)
         if (!original) return null
 
         const changed: any = {}
@@ -90,7 +133,7 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
       .filter(Boolean)
 
     return changedItems
-  }, [editRows, products])
+  }, [editRows, filteredProducts])
 
   async function handleSubmit() {
     if (changes.length === 0) {
@@ -217,6 +260,32 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
             Edit prices and barcodes for multiple items. Click "Review & Save" when done.
           </DialogDescription>
         </DialogHeader>
+
+        {/* Search and Filter Bar */}
+        <div className="flex gap-3 pb-4">
+          <div className="flex-1">
+            <Input
+              placeholder="Search by name, brand, variant, model..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full"
+            />
+          </div>
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="px-3 py-2 border rounded-md bg-background"
+          >
+            {categories.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat === 'all' ? 'All Categories' : cat}
+              </option>
+            ))}
+          </select>
+          <div className="text-sm text-muted-foreground flex items-center whitespace-nowrap">
+            Showing {filteredProducts.length} of {products.length}
+          </div>
+        </div>
 
         <div className="flex-1 overflow-x-auto border rounded">
           <table className="w-full text-sm">

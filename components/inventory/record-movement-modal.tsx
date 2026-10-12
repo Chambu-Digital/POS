@@ -27,6 +27,7 @@ interface Product {
   productName: string
   brand?: string
   variant?: string
+  model?: string
   stock: number
 }
 
@@ -102,8 +103,13 @@ export function RecordMovementModal({ open, onOpenChange, onSuccess }: RecordMov
   }
 
   function formatProductName(product: Product) {
-    const name = [product.variant, product.brand, product.productName].filter(Boolean).join(' ')
-    return `${name} (Stock: ${product.stock})`
+    const parts = [
+      product.brand,
+      product.variant,
+      product.model,
+      product.productName,
+    ].filter(Boolean)
+    return `${parts.join(' › ')} (Stock: ${product.stock})`
   }
 
   function getSelectedProduct(): Product | undefined {
