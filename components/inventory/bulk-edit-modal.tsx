@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -91,8 +91,8 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
     })
   }, [products, searchQuery, selectedCategory])
 
-  // Initialize edit rows when modal opens (use filtered products)
-  useMemo(() => {
+  // Initialize edit rows when modal opens or filters change
+  useEffect(() => {
     if (open && filteredProducts.length > 0) {
       setEditRows(
         filteredProducts.map((p) => ({
@@ -299,8 +299,8 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
               </tr>
             </thead>
             <tbody>
-              {editRows.map((row, idx) => {
-                const original = products[idx]
+              {editRows.map((row) => {
+                const original = filteredProducts.find(p => p._id === row.id)
                 const isChanged =
                   row.buyingPrice !== original?.buyingPrice ||
                   row.sellingPrice !== original?.sellingPrice ||
@@ -309,7 +309,7 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
 
                 return (
                   <tr key={row.id} className={`border-t ${isChanged ? 'bg-yellow-50' : ''}`}>
-                    <td className="px-3 py-2 font-medium text-xs">{formatProductName(original || { productName: row.productName, category: '', brand: '', variant: '' })}</td>
+                    <td className="px-3 py-2 font-medium text-xs">{row.productName}</td>
                     <td className="px-3 py-2">
                       <Input
                         type="number"
