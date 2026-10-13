@@ -13,6 +13,7 @@ import {
   hospitalityServingMovementSchema, hospitalityProductionLogSchema, hospitalityOrderSchema,
   hospitalityCategorySchema,
   stockTransferSchema, notificationSchema, bankProviderSchema,
+  paymentMethodSchema,
 } from '@/lib/models/schemas'
 
 export function getModels(conn: mongoose.Connection) {
@@ -54,5 +55,6 @@ export function getModels(conn: mongoose.Connection) {
     StockTransfer:              conn.models.StockTransfer              || conn.model('StockTransfer',              stockTransferSchema),
     Notification:               conn.models.Notification               || conn.model('Notification',               notificationSchema),
     BankProvider:               conn.models.BankProvider               || conn.model('BankProvider',               bankProviderSchema),
+    PaymentMethod:              conn.models.PaymentMethod              || conn.model('PaymentMethod',              paymentMethodSchema),
   }
 }

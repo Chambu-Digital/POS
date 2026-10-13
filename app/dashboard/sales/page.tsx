@@ -22,7 +22,6 @@ import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { FloatingCartButton } from '@/components/sales/floating-cart-button'
 import { CartModal } from '@/components/sales/cart-modal'
-import { PaymentModal } from '@/components/sales/payment-modal'
 import { Receipt, ReceiptRef } from '@/components/sales/receipt'
 import { OrderCompletionDialog } from '@/components/sales/order-completion-dialog'
 import { useOffline } from '@/hooks/use-offline'
@@ -101,7 +100,6 @@ function SalesPageContent() {
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
   const [shopSettings, setShopSettings] = useState<any>(null)
   const [isCartModalOpen, setIsCartModalOpen] = useState(false)
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
   const [showCompletionDialog, setShowCompletionDialog] = useState(false)
   const [lastSale, setLastSale] = useState<any>(null)
   const isOffline = useOffline()
@@ -663,12 +661,18 @@ function SalesPageContent() {
       toast.error('Cart is empty')
       return
     }
-    setIsPaymentModalOpen(true)
+    // Save cart to session storage and navigate to payment page
+    sessionStorage.setItem('pendingSale', JSON.stringify({
+      cart,
+      cartDiscount,
+      saleEndpoint: '/api/sales',
+      returnUrl: '/dashboard/sales'
+    }))
+    router.push('/dashboard/sales/payment')
   }
 
   function handlePaymentComplete(saleData: any) {
     setLastSale(saleData)
-    setIsPaymentModalOpen(false)
     setShowCompletionDialog(true)
     // Clear cart
     setCart([])
@@ -1130,19 +1134,6 @@ function SalesPageContent() {
 
       {/* Scanner feedback overlay */}
       <ScannerFeedback state={scannerState} lastResult={lastResult} />
-
-      {/* Payment Modal */}
-      <PaymentModal
-        open={isPaymentModalOpen}
-        onOpenChange={setIsPaymentModalOpen}
-        cart={cart}
-        cartDiscount={cartDiscount}
-        subtotal={subtotal}
-        total={total}
-        onPaymentComplete={handlePaymentComplete}
-        userInfo={userInfo}
-        saleEndpoint="/api/sales"
-      />
 
       {/* Order Completion Dialog */}
       {lastSale && (

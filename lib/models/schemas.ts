@@ -81,13 +81,16 @@ export const saleSchema = new mongoose.Schema(
     
     // Multiple payments support
     payments: [{
-      method:          { type: String, enum: ['cash', 'card', 'mobile_money', 'bank', 'credit'], required: true },
-      amount:          { type: Number, required: true },
-      bankProviderId:  { type: mongoose.Schema.Types.ObjectId, ref: 'BankProvider' },
-      bankProviderName: { type: String, default: '' },
-      mpesaCode:       { type: String, default: '' },
-      mpesaPhone:      { type: String, default: '' },
-      timestamp:       { type: Date, default: Date.now },
+      method:            { type: String, enum: ['cash', 'card', 'mobile_money', 'bank', 'credit', 'custom'], required: true },
+      amount:            { type: Number, required: true },
+      bankProviderId:    { type: mongoose.Schema.Types.ObjectId, ref: 'BankProvider' },
+      bankProviderName:  { type: String, default: '' },
+      customMethodId:    { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentMethod' },
+      customMethodName:  { type: String, default: '' },
+      mpesaCode:         { type: String, default: '' },
+      mpesaPhone:        { type: String, default: '' },
+      mpesaType:         { type: String, enum: ['stk_push', 'manual'], default: 'manual' },
+      timestamp:         { type: Date, default: Date.now },
     }],
     
     // Legacy fields (kept for backward compatibility)
@@ -1214,3 +1217,19 @@ export const bankProviderSchema = new mongoose.Schema(
 )
 bankProviderSchema.index({ userId: 1, name: 1 }, { unique: true })
 bankProviderSchema.index({ userId: 1, isActive: 1 })
+
+// ── PaymentMethod ──────────────────────────────────────────────────────────────
+// Custom payment methods (Airtel Money, Vouchers, Bank Deposit, etc.)
+// For user-defined payment types beyond the built-in methods
+export const paymentMethodSchema = new mongoose.Schema(
+  {
+    userId:     { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    name:       { type: String, required: true, trim: true },
+    type:       { type: String, enum: ['mobile_money', 'bank', 'voucher', 'card', 'other'], default: 'other' },
+    isActive:   { type: Boolean, default: true },
+    createdAt:  { type: Date, default: Date.now },
+  },
+  { collection: 'payment_methods' }
+)
+paymentMethodSchema.index({ userId: 1, name: 1 }, { unique: true })
+paymentMethodSchema.index({ userId: 1, isActive: 1 })
