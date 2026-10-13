@@ -32,6 +32,9 @@ interface PaymentEntry {
   amount: number
   mpesaPhone?: string
   mpesaCode?: string
+  customMethodName?: string
+  mpesaType?: string
+  timestamp?: Date
 }
 
 interface ReceiptProps {
@@ -196,22 +199,40 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
     return { per_minute: '/min', hourly: '/hr', daily: '/day', weekly: '/wk' }[rateType] || `/${rateType}`
   }
 
-  const getPaymentMethodName = (method: string): string => {
+  const getPaymentMethodName = (payment: PaymentEntry): string => {
+    // If it's a custom method, use the custom name
+    if (payment.method === 'custom' && payment.customMethodName) {
+      return payment.customMethodName
+    }
+    
+    // Handle M-Pesa types
+    if (payment.method === 'mpesa_stk') return 'M-Pesa STK'
+    if (payment.method === 'mpesa_manual') return 'M-Pesa Manual'
+    
     const names: Record<string, string> = {
       'cash': 'Cash',
       'mobile_money': 'M-Pesa',
       'card': 'Card',
       'credit': 'Credit',
+      'bank': 'Bank Transfer',
     }
-    return names[method] || method.charAt(0).toUpperCase() + method.slice(1)
+    return names[payment.method] || payment.method.charAt(0).toUpperCase() + payment.method.slice(1)
   }
 
   const consolidatePayments = (paymentList: PaymentEntry[] | undefined) => {
     if (!paymentList || paymentList.length === 0) return {}
     
-    const consolidated: Record<string, number> = {}
+    const consolidated: Record<string, PaymentEntry> = {}
     paymentList.forEach(payment => {
-      consolidated[payment.method] = (consolidated[payment.method] || 0) + payment.amount
+      const key = payment.method === 'custom' && payment.customMethodName 
+        ? payment.customMethodName 
+        : payment.method
+      
+      if (consolidated[key]) {
+        consolidated[key].amount += payment.amount
+      } else {
+        consolidated[key] = { ...payment }
+      }
     })
     return consolidated
   }
@@ -371,10 +392,10 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
           {/* Show consolidated payment methods if available */}
           {payments && payments.length > 0 ? (
             <>
-              {Object.entries(consolidatePayments(payments)).map(([method, amount]) => (
-                <div key={method}>
-                  <div>Method: {getPaymentMethodName(method)}</div>
-                  <div>Amount: {amount.toFixed(2)}</div>
+              {Object.entries(consolidatePayments(payments)).map(([key, payment]) => (
+                <div key={key}>
+                  <div>{getPaymentMethodName(payment)}:</div>
+                  <div>KES {payment.amount.toFixed(2)}</div>
                 </div>
               ))}
               <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #ccc' }}>

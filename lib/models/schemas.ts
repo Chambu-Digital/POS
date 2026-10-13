@@ -95,7 +95,7 @@ export const saleSchema = new mongoose.Schema(
     
     // Legacy fields (kept for backward compatibility)
     amountPaid:    { type: Number, default: 0 },
-    paymentMethod: { type: String, enum: ['cash', 'card', 'mobile_money', 'bank', 'credit'], required: false },
+    paymentMethod: { type: String, required: false }, // Removed enum to support custom payment methods
     mpesaCode:     String,
     mpesaPhone:    String,
     creditApplied: { type: Number, default: 0 },
