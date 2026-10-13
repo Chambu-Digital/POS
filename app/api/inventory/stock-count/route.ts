@@ -53,14 +53,48 @@ export async function POST(request: NextRequest) {
       const product = await models.Product.findById(productObjId)
       if (!product) continue
 
-      // Update product stock to physical count
-      await models.Product.findByIdAndUpdate(
-        productObjId,
-        {
-          stock: count.physicalStock,
-          updatedAt: new Date(),
+      // Update stock: Multi-branch uses ProductInventory, legacy uses Product.stock
+      if (branchContext) {
+        // Update branch-specific inventory
+        const inventory = await models.ProductInventory.findOne({
+          userId: ownerId,
+          branchId: branchContext,
+          productId: productObjId,
+        })
+
+        if (inventory) {
+          inventory.stock = count.physicalStock
+          inventory.lastUpdated = new Date()
+          await inventory.save()
+        } else {
+          // Create inventory record if it doesn't exist
+          await models.ProductInventory.create({
+            userId: ownerId,
+            branchId: branchContext,
+            productId: productObjId,
+            stock: count.physicalStock,
+            lastUpdated: new Date(),
+          })
         }
-      )
+
+        // Also update Product.stock for backward compatibility
+        await models.Product.findByIdAndUpdate(
+          productObjId,
+          {
+            stock: count.physicalStock,
+            updatedAt: new Date(),
+          }
+        )
+      } else {
+        // Legacy single-branch: update Product.stock only
+        await models.Product.findByIdAndUpdate(
+          productObjId,
+          {
+            stock: count.physicalStock,
+            updatedAt: new Date(),
+          }
+        )
+      }
 
       // Create adjustment movement
       const movement = await (models as any).StockLedger.create({

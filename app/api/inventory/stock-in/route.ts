@@ -71,14 +71,49 @@ export async function POST(request: NextRequest) {
       const previousStock = product.stock || 0
       const newStock = previousStock + item.quantity
 
-      // Update product stock
-      await models.Product.findByIdAndUpdate(
-        productObjId,
-        {
-          stock: newStock,
-          updatedAt: new Date(),
+      // Update stock: Multi-branch uses ProductInventory, legacy uses Product.stock
+      if (branchContext) {
+        // Update branch-specific inventory
+        const inventory = await models.ProductInventory.findOne({
+          userId: ownerId,
+          branchId: branchContext,
+          productId: productObjId,
+        })
+
+        if (inventory) {
+          inventory.stock += item.quantity
+          inventory.lastUpdated = new Date()
+          await inventory.save()
+        } else {
+          // Create inventory record if it doesn't exist
+          await models.ProductInventory.create({
+            userId: ownerId,
+            branchId: branchContext,
+            productId: productObjId,
+            stock: item.quantity,
+            reserved: 0,
+            lastUpdated: new Date(),
+          })
         }
-      )
+
+        // Also update Product.stock for backward compatibility
+        await models.Product.findByIdAndUpdate(
+          productObjId,
+          {
+            stock: newStock,
+            updatedAt: new Date(),
+          }
+        )
+      } else {
+        // Legacy: update Product.stock only
+        await models.Product.findByIdAndUpdate(
+          productObjId,
+          {
+            stock: newStock,
+            updatedAt: new Date(),
+          }
+        )
+      }
 
       // Create stock ledger entry
       const movement = await (models as any).StockLedger.create({

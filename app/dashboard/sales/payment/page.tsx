@@ -252,9 +252,9 @@ function PaymentPageContent() {
     return sum + (p.status !== 'failed' ? amt : 0)
   }, 0)
   const remaining = Math.max(0, total - totalPaid)
-  const cashPayments = paymentEntries.filter(p => p.method === 'cash')
-  const totalCash = cashPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0)
-  const changeDue = totalCash > 0 ? Math.max(0, totalCash - total) : 0
+  
+  // Change is the overpayment (when total paid exceeds total)
+  const changeDue = Math.max(0, totalPaid - total)
 
   // Select payment method
   function selectPaymentMethod(method: string) {
@@ -763,10 +763,10 @@ function PaymentPageContent() {
                     />
                     {selectedMethod === 'cash' && parseFloat(paymentAmount) > 0 && (
                       <div className={`mt-1 flex justify-between px-2 py-1 rounded text-xs font-semibold ${
-                        (parseFloat(paymentAmount) - remaining) >= 0 ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-600'
+                        (totalPaid + parseFloat(paymentAmount)) > total ? 'bg-blue-50 text-blue-700' : 'bg-gray-50 text-gray-600'
                       }`}>
-                        <span>Change:</span>
-                        <span>KSh {Math.max(0, parseFloat(paymentAmount) - remaining).toFixed(2)}</span>
+                        <span>Preview Change:</span>
+                        <span>KSh {Math.max(0, (totalPaid + parseFloat(paymentAmount)) - total).toFixed(2)}</span>
                       </div>
                     )}
                     {selectedMethod === 'credit' && selectedCustomer && (

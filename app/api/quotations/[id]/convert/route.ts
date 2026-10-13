@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { getBranchContext } from '@/lib/branch-context'
+import { Types } from 'mongoose'
 
 // Convert quotation to sale
 export async function POST(
@@ -15,6 +17,7 @@ export async function POST(
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const branchContext = await getBranchContext(request)
 
     const quotation = await models.Quotation.findOne({ _id: params.id, userId: ownerId })
     if (!quotation) {
@@ -59,14 +62,25 @@ export async function POST(
     // Verify stock availability for each product
     const stockIssues = []
     for (const item of quotation.items) {
-      const product = await models.Product.findById(item.productId)
-      if (!product) {
-        stockIssues.push(`${item.productName} is no longer available`)
-        continue
+      const productId = new Types.ObjectId(item.productId)
+      let availableStock = 0
+
+      if (branchContext) {
+        // Multi-branch: check ProductInventory
+        const inventory = await models.ProductInventory.findOne({
+          userId: ownerId,
+          branchId: branchContext,
+          productId,
+        })
+        availableStock = inventory?.stock || 0
+      } else {
+        // Legacy: check Product.stock
+        const product = await models.Product.findById(productId)
+        availableStock = product?.stock || 0
       }
       
-      if (product.stock < item.quantity) {
-        stockIssues.push(`${item.productName}: only ${product.stock} in stock (need ${item.quantity})`)
+      if (availableStock < item.quantity) {
+        stockIssues.push(`${item.productName}: only ${availableStock} in stock (need ${item.quantity})`)
       }
     }
 
@@ -134,10 +148,34 @@ export async function POST(
 
     // Update product stock
     for (const item of quotation.items) {
-      await models.Product.findByIdAndUpdate(
-        item.productId,
-        { $inc: { stock: -item.quantity } }
-      )
+      const productId = new Types.ObjectId(item.productId)
+
+      if (branchContext) {
+        // Multi-branch: update ProductInventory
+        const inventory = await models.ProductInventory.findOne({
+          userId: ownerId,
+          branchId: branchContext,
+          productId,
+        })
+
+        if (inventory) {
+          inventory.stock -= item.quantity
+          inventory.lastUpdated = new Date()
+          await inventory.save()
+        }
+
+        // Also update Product.stock for backward compatibility
+        await models.Product.findByIdAndUpdate(
+          productId,
+          { $inc: { stock: -item.quantity }, updatedAt: new Date() }
+        )
+      } else {
+        // Legacy: update Product.stock only
+        await models.Product.findByIdAndUpdate(
+          productId,
+          { $inc: { stock: -item.quantity } }
+        )
+      }
     }
 
     // Update quotation status and link to sale

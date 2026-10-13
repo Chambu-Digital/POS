@@ -310,18 +310,41 @@ function SalesPageContent() {
 
   function filterProducts() {
     let filtered = products
+    
+    // Filter by category first
     if (categoryFilter !== 'all') {
       filtered = filtered.filter((p) => p.category === categoryFilter)
     }
+    
+    // Smart multi-word search
     if (search) {
-      filtered = filtered.filter(
-        (p) =>
-          p.productName.toLowerCase().includes(search.toLowerCase()) ||
-          p.brand?.toLowerCase().includes(search.toLowerCase()) ||
-          p.model?.toLowerCase().includes(search.toLowerCase()) ||
-          p.variant?.toLowerCase().includes(search.toLowerCase())
-      )
+      // Split search into individual words and clean them
+      const searchTerms = search
+        .toLowerCase()
+        .trim()
+        .split(/\s+/)  // Split by one or more spaces
+        .filter(term => term.length > 0)  // Remove empty strings
+      
+      if (searchTerms.length > 0) {
+        filtered = filtered.filter((p) => {
+          // Combine all searchable fields into one string
+          const combinedFields = [
+            p.productName,
+            p.brand,
+            p.model,
+            p.variant,
+            p.category,
+          ]
+            .filter(Boolean)  // Remove undefined/null
+            .join(' ')  // Join with space
+            .toLowerCase()
+          
+          // Check if ALL search terms exist somewhere in the combined string
+          return searchTerms.every(term => combinedFields.includes(term))
+        })
+      }
     }
+    
     setFilteredProducts(filtered)
   }
 
@@ -483,22 +506,20 @@ function SalesPageContent() {
 
       // P key - enter price override for selected item (works everywhere)
       if (e.key === 'p' || e.key === 'P') {
-        e.preventDefault()
-        if (isTypingInField) {
-          // Blur current input first
-          (target as HTMLInputElement).blur()
-        }
-        if (selectedItem) {
-          setOverrideItem(selectedItem.productId)
-          setOverridePrice(String(selectedItem.sellingPrice))
-          // Focus the price override input on next render
-          setTimeout(() => {
-            const input = priceOverrideInputRefs.current[selectedItem.productId]
-            if (input) {
-              input.focus()
-              input.select()
-            }
-          }, 0)
+        if (!isTypingInField) {
+          e.preventDefault()
+          if (selectedItem) {
+            setOverrideItem(selectedItem.productId)
+            setOverridePrice(String(selectedItem.sellingPrice))
+            // Focus the price override input on next render
+            setTimeout(() => {
+              const input = priceOverrideInputRefs.current[selectedItem.productId]
+              if (input) {
+                input.focus()
+                input.select()
+              }
+            }, 0)
+          }
         }
         return
       }

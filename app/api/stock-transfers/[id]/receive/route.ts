@@ -128,6 +128,19 @@ export async function PUT(
               reserved: 0,
             }], { session })
             inventory = inventory[0]
+
+            // Create ledger entry for the new inventory
+            await models.StockLedger.create([{
+              userId: ownerId,
+              branchId: branchContext ? new Types.ObjectId(branchContext) : null,
+              productId: transferItem.productId,
+              type: 'TRANSFER_IN',
+              quantity: quantityReceived,
+              previousStock: 0,
+              newStock: quantityReceived,
+              notes: `Transfer received from branch - ${transfer.transferNumber} (initial stock)`,
+              staffId: payload.type === 'staff' ? payload.userId : undefined,
+            }], { session })
           } else {
             // Update existing inventory
             const previousStock = inventory.stock

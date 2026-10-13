@@ -94,6 +94,7 @@ function StockMovementsPageContent() {
   const [selectedMovement, setSelectedMovement] = useState<StockMovement | null>(null)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
   const [isRecordMovementOpen, setIsRecordMovementOpen] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
   useEffect(() => {
     fetchMovements()
@@ -191,6 +192,130 @@ function StockMovementsPageContent() {
     setIsDetailOpen(true)
   }
 
+  async function handleSyncToInventory() {
+    if (selectedIds.length === 0) {
+      toast.error('Please select movements to sync')
+      return
+    }
+
+    try {
+      setSyncing(true)
+      const response = await fetch('/api/inventory/sync-movements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ movementIds: selectedIds }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast.success(data.message || 'Movements synced to inventory')
+        setSelectedIds([])
+        fetchMovements()
+      } else {
+        toast.error(data.error || 'Failed to sync movements')
+      }
+    } catch (error) {
+      toast.error('Failed to sync movements')
+      console.error(error)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  async function handleDeleteMovements() {
+    if (selectedIds.length === 0) {
+      toast.error('Please select movements to delete')
+      return
+    }
+
+    if (!confirm(`Delete ${selectedIds.length} movement(s)? This cannot be undone.`)) {
+      return
+    }
+
+    try {
+      setSyncing(true)
+      const response = await fetch(`/api/inventory/sync-movements?ids=${selectedIds.join(',')}`, {
+        method: 'DELETE',
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast.success(data.message || 'Movements deleted')
+        setSelectedIds([])
+        fetchMovements()
+      } else {
+        toast.error(data.error || 'Failed to delete movements')
+      }
+    } catch (error) {
+      toast.error('Failed to delete movements')
+      console.error(error)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  async function handleSyncToInventory() {
+    if (!confirm(`Sync ALL ${movements.length} adjustment movements to ProductInventory?\n\nThis will update your inventory based on these stock counts.`)) {
+      return
+    }
+
+    try {
+      setSyncing(true)
+      const adjustmentIds = movements.map(m => m._id)
+      
+      const response = await fetch('/api/inventory/sync-movements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ movementIds: adjustmentIds }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast.success(data.message || 'Movements synced to inventory')
+        fetchMovements()
+      } else {
+        toast.error(data.error || 'Failed to sync movements')
+      }
+    } catch (error) {
+      toast.error('Failed to sync movements')
+      console.error(error)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  async function handleDeleteMovements() {
+    if (!confirm(`Delete ALL ${movements.length} adjustment movements?\n\nThis cannot be undone. Only use this if you need to redo the stock count.`)) {
+      return
+    }
+
+    try {
+      setSyncing(true)
+      const adjustmentIds = movements.map(m => m._id)
+      
+      const response = await fetch(`/api/inventory/sync-movements?ids=${adjustmentIds.join(',')}`, {
+        method: 'DELETE',
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        toast.success(data.message || 'Movements deleted')
+        fetchMovements()
+      } else {
+        toast.error(data.error || 'Failed to delete movements')
+      }
+    } catch (error) {
+      toast.error('Failed to delete movements')
+      console.error(error)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   // Calculate stats
   const stockInCount = movements.filter(m => ['STOCK_IN', 'TRANSFER_IN'].includes(m.type)).length
   const stockOutCount = movements.filter(m => ['TRANSFER_OUT'].includes(m.type)).length
@@ -204,17 +329,39 @@ function StockMovementsPageContent() {
           <h1 className="text-3xl font-bold">Stock Movements</h1>
           <p className="text-muted-foreground mt-2">View complete stock movement history</p>
         </div>
-        <Button
-          onClick={() => setIsRecordMovementOpen(true)}
-          size="lg"
-        >
-          <Plus size={20} className="mr-2" />
-          Record Movement
-        </Button>
+        <div className="flex gap-2">
+          {activeType === 'ADJUSTMENT' && movements.length > 0 && (
+            <>
+              <Button
+                onClick={handleSyncToInventory}
+                disabled={syncing}
+                size="sm"
+                variant="outline"
+              >
+                {syncing ? 'Syncing...' : 'Sync to Inventory'}
+              </Button>
+              <Button
+                onClick={handleDeleteMovements}
+                disabled={syncing}
+                size="sm"
+                variant="destructive"
+              >
+                {syncing ? 'Deleting...' : 'Delete Adjustments'}
+              </Button>
+            </>
+          )}
+          <Button
+            onClick={() => setIsRecordMovementOpen(true)}
+            size="lg"
+          >
+            <Plus size={20} className="mr-2" />
+            Record Movement
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-medium">Total Movements</CardTitle>

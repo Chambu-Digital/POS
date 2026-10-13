@@ -16,7 +16,13 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     const product = await models.Product.findOne({ _id: new Types.ObjectId(id), userId: ownerId })
     if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
 
-    Object.assign(product, data)
+    // Clean empty strings for ObjectId fields (convert to undefined)
+    const cleanedData = { ...data }
+    if (cleanedData.supplierId === '') cleanedData.supplierId = undefined
+    if (cleanedData.categoryId === '') cleanedData.categoryId = undefined
+    if (cleanedData.branchId === '') cleanedData.branchId = undefined
+
+    Object.assign(product, cleanedData)
     product.updatedAt = new Date()
     await product.save()
     return NextResponse.json(product)

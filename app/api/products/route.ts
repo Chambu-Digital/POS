@@ -75,18 +75,34 @@ export async function POST(request: NextRequest) {
     const { models } = await getTenantDB(request)
     const data = await request.json()
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const branchContext = await getBranchContext(request)
+
+    // Clean empty strings for ObjectId fields (convert to undefined)
+    const cleanedData = { ...data }
+    if (cleanedData.supplierId === '') delete cleanedData.supplierId
+    if (cleanedData.categoryId === '') delete cleanedData.categoryId
+    if (cleanedData.branchId === '') delete cleanedData.branchId
 
     // Create product catalog entry (stock field is deprecated but kept for backward compatibility)
     const product = new models.Product({ 
-      ...data, 
+      ...cleanedData, 
       userId: ownerId,
-      stock: data.stock || 0,  // Keep for backward compatibility
+      stock: cleanedData.stock || 0,  // Keep for backward compatibility
     })
     await product.save()
 
-    // NOTE: ProductInventory records are NOT created automatically
-    // Branch managers must explicitly import products using the import endpoint
-    // This prevents automatic stock inheritance and allows optional per-branch setup
+    // If creating from a branch context, also create ProductInventory record
+    if (branchContext) {
+      await models.ProductInventory.create({
+        userId: ownerId,
+        branchId: branchContext,
+        productId: product._id,
+        stock: cleanedData.stock || 0,
+        reserved: 0,
+        lastUpdated: new Date(),
+      })
+      console.log(`[products] Created ProductInventory for product ${product._id} in branch ${branchContext}`)
+    }
 
     return NextResponse.json(product, { status: 201 })
   } catch (error) {

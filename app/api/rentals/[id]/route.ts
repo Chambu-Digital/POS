@@ -1,5 +1,6 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
@@ -28,6 +29,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const { models } = await getTenantDB(request)
     const { id } = await params
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const branchContext = await getBranchContext(request)
     const data = await request.json()
 
     const rental = await models.Rental.findOne({ _id: id, userId: new Types.ObjectId(ownerId) })
@@ -37,8 +39,33 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const endTime = new Date()
     const durationMinutes = Math.ceil((endTime.getTime() - new Date(rental.startTime).getTime()) / (1000 * 60))
 
+    // Restore stock for returned items
     for (const item of rental.items) {
-      await models.Product.findByIdAndUpdate(new Types.ObjectId(item.productId), { $inc: { stock: item.quantity } })
+      const productId = new Types.ObjectId(item.productId)
+
+      if (branchContext) {
+        // Multi-branch: update ProductInventory
+        const inventory = await models.ProductInventory.findOne({
+          userId: ownerId,
+          branchId: branchContext,
+          productId,
+        })
+
+        if (inventory) {
+          inventory.stock += item.quantity
+          inventory.lastUpdated = new Date()
+          await inventory.save()
+        }
+
+        // Also update Product.stock for backward compatibility
+        await models.Product.findByIdAndUpdate(
+          productId,
+          { $inc: { stock: item.quantity }, updatedAt: new Date() }
+        )
+      } else {
+        // Legacy: update Product.stock only
+        await models.Product.findByIdAndUpdate(productId, { $inc: { stock: item.quantity } })
+      }
     }
 
     rental.endTime = endTime
