@@ -161,6 +161,30 @@ function QuotationsContent() {
     setShowConvertDialog(true)
   }
 
+  function handleAddToCart(quotation: Quotation) {
+    // Store quotation items in sessionStorage
+    const cartItems = quotation.items.map(item => ({
+      productId: item.productId,
+      productName: item.productName,
+      sellingPrice: item.unitPrice,
+      quantity: item.quantity,
+      discount: 0,
+    }))
+    
+    sessionStorage.setItem('quotationCart', JSON.stringify(cartItems))
+    sessionStorage.setItem('quotationDiscount', String(quotation.discount))
+    sessionStorage.setItem('quotationCustomer', JSON.stringify({
+      name: quotation.customerName,
+      phone: quotation.customerPhone,
+      email: quotation.customerEmail,
+    }))
+    
+    toast.success('Quotation items added to cart')
+    
+    // Navigate to sales page
+    window.location.href = '/dashboard/sales?from=quotation'
+  }
+
   async function handleConvert() {
     if (!selectedQuotation) return
 
@@ -358,10 +382,10 @@ function QuotationsContent() {
                             <Button
                               variant="default"
                               size="sm"
-                              onClick={() => initiateConvert(quotation)}
+                              onClick={() => handleAddToCart(quotation)}
                               disabled={quotation.status === 'expired'}
                             >
-                              Convert to Sale
+                              Add to Cart
                             </Button>
                           )}
                         </div>

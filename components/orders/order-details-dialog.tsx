@@ -153,6 +153,11 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
   const orderNumber = `SALE-${order._id.slice(-8).toUpperCase()}`
   const profits = (order.subtotal || order.total) - order.discount
 
+  // Get staff name with proper firstName/lastName handling
+  const staffName = (order.staffId as any)?.firstName
+    ? `${(order.staffId as any).firstName} ${(order.staffId as any).lastName ?? ''}`.trim()
+    : (order.staffId as any)?.name || 'Unknown Staff'
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -198,7 +203,7 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
             <div>
               <span className="text-muted-foreground">Order by:</span>
               <span className="ml-2 font-semibold">
-                {order.staffId?.name || 'Sales'}
+                {staffName}
               </span>
             </div>
             <div className="col-span-2">

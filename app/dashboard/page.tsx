@@ -87,11 +87,23 @@ export default function DashboardPage() {
             <div className="flex flex-wrap gap-6 text-sm">
               <span className="text-gray-700">Orders: <strong>{stats.todayStats.totalOrders}</strong></span>
               <span className="text-gray-700">Revenue: <strong>KES {stats.todayStats.totalRevenue.toLocaleString()}</strong></span>
-              {Object.entries(stats.todayStats.byPayment as Record<string, number>).map(([method, amt]) => (
-                <span key={method} className="text-gray-500">
-                  {method === 'mobile_money' ? 'M-Pesa' : method.charAt(0).toUpperCase() + method.slice(1)}: <strong>KES {(amt as number).toLocaleString()}</strong>
-                </span>
-              ))}
+              {Object.entries(stats.todayStats.byPayment as Record<string, number>).map(([method, amt]) => {
+                // Map built-in methods to display names, keep custom names as-is
+                let displayName = method
+                if (method === 'mobile_money') displayName = 'M-Pesa'
+                else if (method === 'cash') displayName = 'Cash'
+                else if (method === 'card') displayName = 'Card'
+                else if (method === 'bank_transfer') displayName = 'Bank Transfer'
+                else if (method === 'credit') displayName = 'Credit'
+                // Custom methods already have proper names, so just capitalize first letter
+                else displayName = method.charAt(0).toUpperCase() + method.slice(1)
+                
+                return (
+                  <span key={method} className="text-gray-500">
+                    {displayName}: <strong>KES {(amt as number).toLocaleString()}</strong>
+                  </span>
+                )
+              })}
             </div>
           </div>
         )}
@@ -173,11 +185,23 @@ export default function DashboardPage() {
             {showHospitality  && stats.todayStats.bySource.hospitality > 0 && <span className="text-emerald-700">Hospitality: <strong>KES {stats.todayStats.bySource.hospitality.toLocaleString()}</strong></span>}
             {showKds          && stats.todayStats.bySource.kds > 0         && <span className="text-blue-700">Kitchen: <strong>KES {stats.todayStats.bySource.kds.toLocaleString()}</strong></span>}
             {showRentals      && stats.todayStats.bySource.rental > 0      && <span className="text-purple-700">Rentals: <strong>KES {stats.todayStats.bySource.rental.toLocaleString()}</strong></span>}
-            {Object.entries(stats.todayStats.byPayment as Record<string, number>).map(([method, amt]) => (
-              <span key={method} className="text-gray-500">
-                {method === 'mobile_money' ? 'M-Pesa' : method.charAt(0).toUpperCase() + method.slice(1)}: <strong>KES {amt.toLocaleString()}</strong>
-              </span>
-            ))}
+            {Object.entries(stats.todayStats.byPayment as Record<string, number>).map(([method, amt]) => {
+              // Map built-in methods to display names, keep custom names as-is
+              let displayName = method
+              if (method === 'mobile_money') displayName = 'M-Pesa'
+              else if (method === 'cash') displayName = 'Cash'
+              else if (method === 'card') displayName = 'Card'
+              else if (method === 'bank_transfer') displayName = 'Bank Transfer'
+              else if (method === 'credit') displayName = 'Credit'
+              // Custom methods already have proper names, so just capitalize first letter
+              else displayName = method.charAt(0).toUpperCase() + method.slice(1)
+              
+              return (
+                <span key={method} className="text-gray-500">
+                  {displayName}: <strong>KES {amt.toLocaleString()}</strong>
+                </span>
+              )
+            })}
           </div>
         </div>
       )}
@@ -325,15 +349,27 @@ export default function DashboardPage() {
             <CardHeader><CardTitle className="text-lg">Payment Methods</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {stats.charts.paymentMethods.map((method: any, i: number) => (
-                  <div key={i} className="flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                      <span className="text-sm capitalize">{method.method.replace('_', ' ')}</span>
+                {stats.charts.paymentMethods.map((method: any, i: number) => {
+                  // Map built-in methods to display names, keep custom names as-is
+                  let displayName = method.method
+                  if (method.method === 'mobile_money') displayName = 'M-Pesa'
+                  else if (method.method === 'cash') displayName = 'Cash'
+                  else if (method.method === 'card') displayName = 'Card'
+                  else if (method.method === 'bank_transfer') displayName = 'Bank Transfer'
+                  else if (method.method === 'credit') displayName = 'Credit'
+                  // Custom methods - capitalize first letter
+                  else displayName = method.method.charAt(0).toUpperCase() + method.method.slice(1)
+                  
+                  return (
+                    <div key={i} className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                        <span className="text-sm">{displayName}</span>
+                      </div>
+                      <span className="text-sm font-semibold">{method.count}</span>
                     </div>
-                    <span className="text-sm font-semibold">{method.count}</span>
-                  </div>
-                ))}
+                  )
+                })}
                 {stats.charts.paymentMethods.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No data</p>}
               </div>
             </CardContent>

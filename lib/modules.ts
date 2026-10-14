@@ -121,7 +121,7 @@ export const CORE_MODULE: ModuleDefinition = {
       description: 'Field sales operations with temporary sellers',
       href: '/dashboard/mobile-shops',
       adminOnly: false,
-      defaultOn: true,
+      defaultOn: false,
     },
     {
       key: 'core.settings',

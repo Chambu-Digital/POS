@@ -1061,7 +1061,12 @@ function PaymentPageContent() {
           open={showCompletionDialog}
           onOpenChange={(open) => {
             setShowCompletionDialog(open)
-            if (!open) { sessionStorage.removeItem('pendingSale'); router.push(returnUrl) }
+            if (!open) { 
+              sessionStorage.removeItem('pendingSale')
+              sessionStorage.removeItem('activeCart')
+              sessionStorage.removeItem('activeCartDiscount')
+              router.push(returnUrl)
+            }
           }}
           orderNumber={lastSale.receiptNumber}
           totalAmount={lastSale.total}
@@ -1072,7 +1077,12 @@ function PaymentPageContent() {
           subtotal={lastSale.subtotal}
           discount={lastSale.discount}
           onPrintReceipt={() => receiptRef.current?.print()}
-          onMakeNewSale={() => { sessionStorage.removeItem('pendingSale'); router.push(returnUrl) }}
+          onMakeNewSale={() => { 
+            sessionStorage.removeItem('pendingSale')
+            sessionStorage.removeItem('activeCart')
+            sessionStorage.removeItem('activeCartDiscount')
+            router.push(returnUrl)
+          }}
         />
       )}
 

@@ -59,8 +59,18 @@ export async function GET(request: NextRequest) {
         hospitality:  todayHospitalitySales.reduce((sum: number, s: any) => sum + s.total, 0),
       },
       byPayment: [...todaySales, ...todayHospitalitySales].reduce((acc: Record<string, number>, s: any) => {
-        const m = s.paymentMethod || 'cash'
-        acc[m] = (acc[m] || 0) + s.total
+        // Use new payments array if available for better custom method tracking
+        if (s.payments && Array.isArray(s.payments) && s.payments.length > 0) {
+          s.payments.forEach((p: any) => {
+            // Use customMethodName if available, otherwise use method
+            const methodName = p.customMethodName || p.method || 'cash'
+            acc[methodName] = (acc[methodName] || 0) + (p.amount || 0)
+          })
+        } else {
+          // Fallback to legacy paymentMethod field
+          const m = s.paymentMethod || 'cash'
+          acc[m] = (acc[m] || 0) + s.total
+        }
         return acc
       }, {}),
     }
@@ -250,10 +260,21 @@ export async function GET(request: NextRequest) {
 
     const paymentMethods: Record<string, { method: string; count: number; total: number }> = {}
     ;[...recentSales, ...recentHospitalitySales].forEach((sale: any) => {
-      const method = sale.paymentMethod || 'cash'
-      if (!paymentMethods[method]) paymentMethods[method] = { method, count: 0, total: 0 }
-      paymentMethods[method].count += 1
-      paymentMethods[method].total += sale.total
+      // Use payments array if available for better custom method tracking
+      if (sale.payments && Array.isArray(sale.payments) && sale.payments.length > 0) {
+        sale.payments.forEach((p: any) => {
+          const methodName = p.customMethodName || p.method || 'cash'
+          if (!paymentMethods[methodName]) paymentMethods[methodName] = { method: methodName, count: 0, total: 0 }
+          paymentMethods[methodName].count += 1
+          paymentMethods[methodName].total += (p.amount || 0)
+        })
+      } else {
+        // Fallback to legacy paymentMethod
+        const method = sale.paymentMethod || 'cash'
+        if (!paymentMethods[method]) paymentMethods[method] = { method, count: 0, total: 0 }
+        paymentMethods[method].count += 1
+        paymentMethods[method].total += sale.total
+      }
     })
 
     // Combine recent orders from both sources

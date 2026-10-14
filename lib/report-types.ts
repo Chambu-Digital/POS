@@ -46,6 +46,12 @@ export const REPORT_TYPES: ReportTypeDefinition[] = [
     description: 'Rental bookings and revenue',
     requiredFeature: 'rentals.bookings',
   },
+  {
+    value: 'pharmacy',
+    label: 'Pharmacy Sales Report',
+    description: 'Pharmacy sales and prescriptions',
+    requiredFeature: 'pharmacy.pos',
+  },
 ]
 
 /**

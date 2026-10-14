@@ -180,24 +180,46 @@ function ReportsPageContent() {
 
     // Summary
     csv += 'SUMMARY\n'
-    Object.entries(report.data.summary).forEach(([key, value]) => {
-      const label = key.replace(/([A-Z])/g, ' $1').trim()
-      const isMonetary = ['revenue','profit','cost','value','discount'].some(k => key.toLowerCase().includes(k))
-      const formatted = typeof value === 'number'
-        ? isMonetary ? `KES ${(value as number).toLocaleString()}` : (value as number).toLocaleString()
-        : String(value)
-      csv += `${label},${formatted}\n`
-    })
+    Object.entries(report.data.summary)
+      .filter(([key]) => {
+        // Filter out module-specific revenue if module not enabled
+        if (key === 'barRevenue' && !enabledFeatures['bar.tabs']) return false
+        if (key === 'kdsRevenue' && !enabledFeatures['kds.chef']) return false
+        if (key === 'rentalRevenue' && !enabledFeatures['rentals.bookings']) return false
+        return true
+      })
+      .forEach(([key, value]) => {
+        const label = key.replace(/([A-Z])/g, ' $1').trim()
+        const isMonetary = ['revenue','profit','cost','value','discount'].some(k => key.toLowerCase().includes(k))
+        const formatted = typeof value === 'number'
+          ? isMonetary ? `KES ${(value as number).toLocaleString()}` : (value as number).toLocaleString()
+          : String(value)
+        csv += `${label},${formatted}\n`
+      })
 
     // Source breakdown if present
     const sb = (report.data as any).sourceBreakdown
     if (sb) {
       csv += '\nSOURCE BREAKDOWN\n'
       csv += 'Source,Orders,Revenue\n'
-      ;[['POS', sb.pos], ['Bar', sb.bar], ['KDS', sb.kds], ['Rentals', sb.rental]].forEach(([label, d]: any) => {
-        if (!d) return
-        csv += `${label},${d.count},KES ${d.revenue.toLocaleString()}\n`
-      })
+      
+      // Filter sources based on enabled features
+      const sources: [string, any, string][] = [
+        ['POS', sb.pos, 'pos.sales'],
+        ['Bar', sb.bar, 'bar.tabs'],
+        ['KDS', sb.kds, 'kds.chef'],
+        ['Rentals', sb.rental, 'rentals.bookings'],
+      ]
+      
+      sources
+        .filter(([_, data, feature]) => {
+          // Always show POS, filter others by feature
+          if (feature === 'pos.sales') return data && data.count > 0
+          return data && data.count > 0 && enabledFeatures[feature]
+        })
+        .forEach(([label, d]) => {
+          csv += `${label},${d.count},KES ${d.revenue.toLocaleString()}\n`
+        })
     }
 
     // Detailed rows

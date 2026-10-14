@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/jwt'
 import { getTenantDB } from '@/lib/tenant/get-db'
+import { getHistoricalInventorySnapshot, getStockMovements, getHistoricalCost } from '@/lib/historical-stock-service'
 
 export async function GET(request: NextRequest) {
   try {
@@ -38,11 +39,12 @@ export async function POST(request: NextRequest) {
 
     let reportData: any = {}
     if (reportType === 'sales')     reportData = await generateSalesReport(models, ownerId, new Date(startDate), new Date(endDate))
-    else if (reportType === 'inventory') reportData = await generateInventoryReport(models, ownerId)
+    else if (reportType === 'inventory') reportData = await generateInventoryReport(models, ownerId, new Date(startDate), new Date(endDate))
     else if (reportType === 'profit')    reportData = await generateProfitReport(models, ownerId, new Date(startDate), new Date(endDate))
     else if (reportType === 'kitchen')   reportData = await generateKitchenReport(models, ownerId, new Date(startDate), new Date(endDate))
     else if (reportType === 'bar')       reportData = await generateBarReport(models, ownerId, new Date(startDate), new Date(endDate))
     else if (reportType === 'rental')    reportData = await generateRentalReport(models, ownerId, new Date(startDate), new Date(endDate))
+    else if (reportType === 'stock-movements') reportData = await generateStockMovementReport(models, ownerId, new Date(startDate), new Date(endDate))
 
     const report = await models.Report.create({
       userId: ownerId, reportType, title: reportData.title, description: reportData.description,
@@ -144,7 +146,13 @@ async function generateSalesReport(models: any, userId: string, startDate: Date,
   }
 }
 
-async function generateInventoryReport(models: any, userId: string) {
+async function generateInventoryReport(models: any, userId: string, startDate?: Date, endDate?: Date) {
+  // If date provided, use historical calculation
+  if (endDate) {
+    return await generateHistoricalInventoryReport(models, userId, endDate)
+  }
+
+  // Otherwise, use current stock
   const products = await models.Product.find({ userId }).lean() as any[]
 
   const totalProducts = products.length
@@ -195,10 +203,54 @@ async function generateInventoryReport(models: any, userId: string) {
   }
 }
 
+async function generateHistoricalInventoryReport(models: any, userId: string, asOfDate: Date) {
+  const snapshot = await getHistoricalInventorySnapshot(models, userId, asOfDate)
+
+  // Group by category
+  const byCategory = snapshot.products.reduce((acc: any, product) => {
+    const cat = product.category || 'Uncategorized'
+    if (!acc[cat]) {
+      acc[cat] = { category: cat, count: 0, value: 0, valueAtCost: 0 }
+    }
+    acc[cat].count += 1
+    acc[cat].value += product.valueAtRetail
+    acc[cat].valueAtCost += product.valueAtCost
+    return acc
+  }, {})
+
+  const dateStr = snapshot.metadata.asOfDate.toLocaleDateString()
+  let description = `Inventory snapshot as of ${dateStr}`
+  
+  if (snapshot.metadata.dataCompleteness === 'partial') {
+    description += ` (${snapshot.metadata.productsWithoutHistory} products have limited history)`
+  } else if (snapshot.metadata.dataCompleteness === 'unavailable') {
+    description += ' (No historical data available, showing current stock)'
+  }
+
+  return {
+    title: `Historical Inventory Report - ${dateStr}`,
+    description,
+    data: {
+      summary: snapshot.summary,
+      details: snapshot.products,
+      charts: {
+        byCategory: Object.values(byCategory),
+      },
+      metadata: snapshot.metadata
+    },
+  }
+}
+
 async function generateProfitReport(models: any, userId: string, startDate: Date, endDate: Date) {
+  const adjustedStartDate = new Date(startDate)
+  adjustedStartDate.setHours(0, 0, 0, 0)
+  
+  const adjustedEndDate = new Date(endDate)
+  adjustedEndDate.setHours(23, 59, 59, 999)
+
   const sales = await models.Sale.find({
     userId,
-    createdAt: { $gte: startDate, $lte: endDate },
+    createdAt: { $gte: adjustedStartDate, $lte: adjustedEndDate },
   })
     .populate('items.productId')
     .lean() as any[]
@@ -206,14 +258,25 @@ async function generateProfitReport(models: any, userId: string, startDate: Date
   let totalRevenue = 0
   let totalCost = 0
 
-  // Calculate profit from sales
+  // Calculate profit using historical costs from StockLedger
   for (const sale of sales) {
     totalRevenue += sale.total
-    // Calculate cost based on items
+    
+    // Calculate cost based on sale items
     for (const item of sale.items) {
-      if (item.productId && item.productId.buyingPrice) {
-        totalCost += item.productId.buyingPrice * item.quantity
-      }
+      if (!item.productId) continue
+
+      // Try to find the StockLedger entry for this sale to get historical cost
+      const ledgerEntry = await models.StockLedger.findOne({
+        userId,
+        saleId: sale._id,
+        productId: item.productId._id || item.productId,
+        type: 'SALE'
+      }).lean()
+
+      // Use historical cost from ledger, or fallback to current buying price
+      const costPerUnit = ledgerEntry?.unitCost || item.productId.buyingPrice || 0
+      totalCost += costPerUnit * item.quantity
     }
   }
 
@@ -230,7 +293,7 @@ async function generateProfitReport(models: any, userId: string, startDate: Date
 
   return {
     title: 'Profit Report',
-    description: `Profit analysis from ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`,
+    description: `Profit analysis from ${adjustedStartDate.toLocaleDateString()} to ${adjustedEndDate.toLocaleDateString()}`,
     data: {
       summary: {
         totalRevenue,
@@ -414,3 +477,59 @@ async function generateRentalReport(models: any, userId: string, startDate: Date
   }
 }
 
+
+async function generateStockMovementReport(models: any, userId: string, startDate: Date, endDate: Date) {
+  const movementData = await getStockMovements(models, userId, startDate, endDate)
+
+  const start = new Date(startDate)
+  start.setHours(0, 0, 0, 0)
+  const end = new Date(endDate)
+  end.setHours(23, 59, 59, 999)
+
+  // Calculate totals by type
+  const typeStats = Object.entries(movementData.summary.byType).map(([type, data]: [string, any]) => ({
+    type,
+    count: data.count,
+    quantity: data.quantity
+  }))
+
+  // Group by product
+  const byProduct: Record<string, any> = {}
+  movementData.movements.forEach((m: any) => {
+    const productId = m.productId?._id?.toString() || 'unknown'
+    const productName = m.productId?.productName || 'Unknown Product'
+    
+    if (!byProduct[productId]) {
+      byProduct[productId] = {
+        productName,
+        category: m.productId?.category || '',
+        movements: [],
+        totalIn: 0,
+        totalOut: 0
+      }
+    }
+    
+    byProduct[productId].movements.push(m)
+    if (m.quantity > 0) {
+      byProduct[productId].totalIn += m.quantity
+    } else {
+      byProduct[productId].totalOut += Math.abs(m.quantity)
+    }
+  })
+
+  return {
+    title: 'Stock Movement Report',
+    description: `Stock movements from ${start.toLocaleDateString()} to ${end.toLocaleDateString()}`,
+    data: {
+      summary: {
+        totalMovements: movementData.summary.totalMovements,
+        typeBreakdown: typeStats,
+      },
+      details: movementData.movements,
+      charts: {
+        byType: typeStats,
+        byProduct: Object.values(byProduct).slice(0, 20) // Top 20 products
+      },
+    },
+  }
+}

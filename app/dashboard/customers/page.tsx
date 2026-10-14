@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Search, Plus, X, ChevronDown, ChevronUp, CreditCard } from 'lucide-react'
+import { Search, Plus, X, ChevronDown, ChevronUp, CreditCard, Mail, Phone, User, Calendar, MessageCircle } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
@@ -68,7 +68,11 @@ function CustomersContent() {
   const [editCreditLimit, setEditCreditLimit] = useState('')
   const [editing, setEditing] = useState(false)
 
-  useEffect(() => { load() }, [])
+  // WhatsApp invoice sharing
+  const [invoiceCustomer, setInvoiceCustomer] = useState<Customer | null>(null)
+  const [shopSettings, setShopSettings] = useState<any>(null)
+
+  useEffect(() => { load(); fetchSettings() }, [])
 
   async function load() {
     setLoading(true)
@@ -86,6 +90,18 @@ function CustomersContent() {
     }
     
     setLoading(false)
+  }
+
+  async function fetchSettings() {
+    try {
+      const res = await fetch('/api/settings')
+      if (res.ok) {
+        const data = await res.json()
+        setShopSettings(data.settings || {})
+      }
+    } catch (error) {
+      console.error('Failed to fetch settings:', error)
+    }
   }
 
   useEffect(() => {
@@ -183,6 +199,60 @@ function CustomersContent() {
     } catch { toast.error('Failed to delete') }
   }
 
+  function formatPhone(phone: string): string {
+    // Format Kenyan phone numbers for WhatsApp
+    if (!phone) return ''
+    let cleaned = phone.replace(/\D/g, '')
+    
+    // If starts with 0, replace with 254
+    if (cleaned.startsWith('0')) {
+      cleaned = '254' + cleaned.slice(1)
+    }
+    // If doesn't start with country code, add 254
+    else if (!cleaned.startsWith('254')) {
+      cleaned = '254' + cleaned
+    }
+    
+    return cleaned
+  }
+
+  function shareInvoiceViaWhatsApp(customer: Customer) {
+    if (!customer.phone) {
+      toast.error('No phone number registered for this customer')
+      return
+    }
+
+    const businessName = shopSettings?.general?.shopName || shopSettings?.shopName || 'Our Business'
+    const phone = formatPhone(customer.phone)
+    
+    if (phone.length < 12) {
+      toast.error('Invalid phone number format')
+      return
+    }
+
+    // Create invoice message
+    const message = `Hello ${customer.name},
+
+Thank you for your business with ${businessName}!
+
+${customer.creditBalance > 0 
+  ? `Current Balance: KES ${customer.creditBalance.toLocaleString()}
+${customer.creditLimit > 0 ? `Credit Limit: KES ${customer.creditLimit.toLocaleString()}` : ''}
+
+Please contact us to settle your outstanding balance.`
+  : 'Your account is in good standing. Thank you for your prompt payments!'}
+
+For any inquiries, please contact us.
+
+Thank you for choosing ${businessName}!`
+
+    const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
+    
+    // Open WhatsApp in new window
+    window.open(whatsappUrl, '_blank')
+    toast.success('Opening WhatsApp...')
+  }
+
   const totalDebt = customers.reduce((s, c) => s + c.creditBalance, 0)
 
   return (
@@ -214,136 +284,122 @@ function CustomersContent() {
         />
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <LoadingOrOffline
-          isLoading={loading}
-          isOffline={isOffline}
-          onRetry={load}
-          loadingText="Loading customers..."
-          offlineMessage="Unable to load customers. Please check your connection."
-        >
-          {customers.length === 0 ? (
-            <div className="py-16 text-center text-gray-400 text-sm">
-              {search ? 'No customers match your search.' : 'No customers yet. Add your first one.'}
-            </div>
-          ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">Name</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">Phone</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">ID Number</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">Credit Balance</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">Limit</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-500">Since</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {customers.map(c => (
-                <>
-                  <tr key={c._id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-gray-900">
-                      <button
-                        onClick={() => setExpanded(expanded === c._id ? null : c._id)}
-                        className="flex items-center gap-1.5 hover:text-green-700"
-                      >
-                        {expanded === c._id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                        {c.name}
-                      </button>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{c.phone || '—'}</td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {c.idNumber ? (
-                        <span className="font-medium">{c.idNumber}</span>
-                      ) : (
-                        <span className="text-gray-400 text-xs">No ID</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {c.creditBalance > 0 ? (
-                        <span className="text-red-600 font-semibold">KES {c.creditBalance.toLocaleString()}</span>
-                      ) : (
-                        <span className="text-green-600 text-xs">No debt</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {c.creditLimit > 0 ? (
-                        <span className="text-blue-600">KES {c.creditLimit.toLocaleString()}</span>
-                      ) : (
-                        <span className="text-gray-400 text-xs">No limit</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-400 text-xs">
-                      {new Date(c.createdAt).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2 justify-end">
-                        <button
-                          onClick={() => openEditCustomer(c)}
-                          className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                        >
-                          Edit
-                        </button>
-                        {c.creditBalance > 0 && (
-                          <button
-                            onClick={() => { setPayCustomer(c); setPayAmount(String(c.creditBalance)) }}
-                            className="flex items-center gap-1 text-xs text-green-600 hover:text-green-700 font-medium"
-                          >
-                            <CreditCard size={13} /> Pay
-                          </button>
-                        )}
-                        <button
-                          onClick={() => deleteCustomer(c._id, c.name)}
-                          className="text-xs text-red-400 hover:text-red-600"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+      {/* Customer Cards Grid */}
+      <LoadingOrOffline
+        isLoading={loading}
+        isOffline={isOffline}
+        onRetry={load}
+        loadingText="Loading customers..."
+        offlineMessage="Unable to load customers. Please check your connection."
+      >
+        {customers.length === 0 ? (
+          <div className="py-16 text-center text-gray-400 text-sm">
+            {search ? 'No customers match your search.' : 'No customers yet. Add your first one.'}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+            {customers.map(c => (
+              <div key={c._id} className="bg-white rounded-lg border border-gray-200 overflow-hidden hover:shadow-sm transition-shadow">
+                {/* Card Content */}
+                <div className="p-2.5">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-sm text-gray-900 truncate">{c.name}</h3>
+                      {c.phone && <p className="text-xs text-gray-500 truncate">{c.phone}</p>}
+                    </div>
+                    <button
+                      onClick={() => setExpanded(expanded === c._id ? null : c._id)}
+                      className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+                    >
+                      {expanded === c._id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </button>
+                  </div>
 
-                  {/* Ledger expansion */}
-                  {expanded === c._id && (
-                    <tr key={`${c._id}-ledger`}>
-                      <td colSpan={7} className="px-4 pb-4 bg-gray-50">
-                        <div className="mt-2">
-                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Transaction History</p>
-                          {c.ledger.length === 0 ? (
-                            <p className="text-xs text-gray-400">No transactions yet</p>
-                          ) : (
-                            <div className="space-y-1 max-h-48 overflow-y-auto">
-                              {[...c.ledger].reverse().map((entry, i) => (
-                                <div key={i} className="flex items-center justify-between text-xs py-1 border-b border-gray-100 last:border-0">
-                                  <div>
-                                    <span className={`font-medium ${entry.type === 'payment' ? 'text-green-600' : 'text-gray-700'}`}>
-                                      {entry.type === 'payment' ? 'Payment' : entry.type === 'purchase' ? 'Purchase' : 'Adjustment'}
-                                    </span>
-                                    {entry.note && <span className="text-gray-400 ml-2">{entry.note}</span>}
-                                  </div>
-                                  <div className="flex items-center gap-4">
-                                    <span className={entry.amount < 0 ? 'text-green-600' : 'text-red-500'}>
-                                      {entry.amount < 0 ? '-' : '+'}KES {Math.abs(entry.amount).toLocaleString()}
-                                    </span>
-                                    <span className="text-gray-400 w-24 text-right">Bal: {entry.balance.toLocaleString()}</span>
-                                    <span className="text-gray-300 w-20 text-right">{new Date(entry.date).toLocaleDateString()}</span>
-                                  </div>
-                                </div>
-                              ))}
+                  {/* Credit Info */}
+                  <div className="flex items-center justify-between text-xs mb-2">
+                    <div>
+                      {c.creditBalance > 0 ? (
+                        <span className="text-red-600 font-semibold">-KES {c.creditBalance.toLocaleString()}</span>
+                      ) : (
+                        <span className="text-green-600 font-medium">Clear</span>
+                      )}
+                    </div>
+                    <div className="text-gray-400">
+                      {c.creditLimit > 0 ? `Limit: ${c.creditLimit.toLocaleString()}` : 'No limit'}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => openEditCustomer(c)}
+                      className="flex-1 px-2 py-1 text-xs font-medium text-blue-600 border border-blue-200 rounded hover:bg-blue-50 transition-colors"
+                    >
+                      Edit
+                    </button>
+                    {c.creditBalance > 0 ? (
+                      <button
+                        onClick={() => { setPayCustomer(c); setPayAmount(String(c.creditBalance)) }}
+                        className="flex-1 px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition-colors"
+                      >
+                        Pay
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => shareInvoiceViaWhatsApp(c)}
+                        disabled={!c.phone}
+                        className="flex-1 px-2 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition-colors disabled:opacity-40"
+                      >
+                        <MessageCircle size={11} className="inline" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Expanded Ledger */}
+                {expanded === c._id && (
+                  <div className="px-2.5 pb-2.5 bg-gray-50 border-t border-gray-200">
+                    <div className="mt-2">
+                      {c.idNumber && (
+                        <p className="text-xs text-gray-500 mb-1">ID: {c.idNumber}</p>
+                      )}
+                      {c.email && (
+                        <p className="text-xs text-gray-500 mb-2 truncate">{c.email}</p>
+                      )}
+                      <p className="text-xs font-medium text-gray-700 mb-1">History</p>
+                      {c.ledger.length === 0 ? (
+                        <p className="text-xs text-gray-400 py-1">No transactions</p>
+                      ) : (
+                        <div className="space-y-0.5 max-h-32 overflow-y-auto">
+                          {[...c.ledger].reverse().slice(0, 5).map((entry, i) => (
+                            <div key={i} className="flex items-center justify-between text-xs py-1 border-b border-gray-100 last:border-0">
+                              <span className={entry.type === 'payment' ? 'text-green-600' : 'text-gray-600'}>
+                                {entry.type === 'payment' ? 'Payment' : entry.type === 'purchase' ? 'Purchase' : 'Adj'}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className={entry.amount < 0 ? 'text-green-600' : 'text-red-500'}>
+                                  {entry.amount < 0 ? '-' : '+'}KES {Math.abs(entry.amount).toLocaleString()}
+                                </span>
+                                <span className="text-gray-300 text-xs">{new Date(entry.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+                              </div>
                             </div>
-                          )}
+                          ))}
                         </div>
-                      </td>
-                    </tr>
-                  )}
-                </>
-              ))}
-            </tbody>
-          </table>
-          )}
-        </LoadingOrOffline>
-      </div>
+                      )}
+                      <button
+                        onClick={() => deleteCustomer(c._id, c.name)}
+                        className="w-full mt-2 px-2 py-1 text-xs text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </LoadingOrOffline>
 
       {/* Add Customer Dialog */}
       <Dialog open={showAdd} onOpenChange={setShowAdd}>

@@ -81,6 +81,15 @@ function SalesPageContent() {
   const [cart, setCart] = useState<CartItem[]>(() => {
     if (typeof window === 'undefined') return []
     try {
+      // Check if coming from quotation first
+      const quotationCart = sessionStorage.getItem('quotationCart')
+      if (quotationCart) {
+        const items = JSON.parse(quotationCart)
+        sessionStorage.removeItem('quotationCart') // Clear after loading
+        return items
+      }
+      
+      // Otherwise load active cart
       const saved = sessionStorage.getItem('activeCart')
       return saved ? JSON.parse(saved) : []
     } catch { return [] }
@@ -91,6 +100,15 @@ function SalesPageContent() {
   const [cartDiscount, setCartDiscount] = useState<number>(() => {
     if (typeof window === 'undefined') return 0
     try {
+      // Check if coming from quotation first
+      const quotationDiscount = sessionStorage.getItem('quotationDiscount')
+      if (quotationDiscount) {
+        const discount = parseFloat(quotationDiscount)
+        sessionStorage.removeItem('quotationDiscount') // Clear after loading
+        return discount
+      }
+      
+      // Otherwise load active discount
       const saved = sessionStorage.getItem('activeCartDiscount')
       return saved ? parseFloat(saved) : 0
     } catch { return 0 }
@@ -152,6 +170,16 @@ function SalesPageContent() {
     fetchProducts()
     fetchUserInfo()
     initAutoSync()
+    
+    // Check if coming from quotation
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('from') === 'quotation') {
+        toast.success('Quotation items loaded! Review and proceed to payment.')
+        // Clean up URL
+        window.history.replaceState({}, '', '/dashboard/sales')
+      }
+    }
   }, [])
 
   // Re-fetch products when the tab regains focus so stock counts are fresh
