@@ -132,16 +132,38 @@ function InventoryPageContent() {
     }
   }
 
-  function handleDownloadTemplate() {
-    const headers = ['productName', 'category', 'brand', 'model', 'unit', 'buyingPrice', 'sellingPrice', 'stock', 'description']
-    const csv = headers.join(',') + '\n'
+  function handleDownloadStock() {
+    const headers = ['productName', 'category', 'brand', 'model', 'variant', 'unit', 'buyingPrice', 'sellingPrice', 'wholeSale', 'stock', 'description', 'barcode']
+    let csv = headers.join(',') + '\n'
+    
+    // Add actual product data
+    products.forEach((product) => {
+      const row = [
+        `"${(product.productName || '').replace(/"/g, '""')}"`,
+        `"${(product.category || '').replace(/"/g, '""')}"`,
+        `"${((product as any).brand || '').replace(/"/g, '""')}"`,
+        `"${((product as any).model || '').replace(/"/g, '""')}"`,
+        `"${((product as any).variant || '').replace(/"/g, '""')}"`,
+        `"${((product as any).unit || 'pieces').replace(/"/g, '""')}"`,
+        product.buyingPrice || 0,
+        product.sellingPrice || 0,
+        (product as any).wholeSale || 0,
+        product.stock || 0,
+        `"${(product.description || '').replace(/"/g, '""')}"`,
+        `"${((product as any).barcode || '').replace(/"/g, '""')}"`,
+      ]
+      csv += row.join(',') + '\n'
+    })
+    
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'product_import_template.csv'
+    const dateStr = new Date().toISOString().split('T')[0]
+    a.download = `stock_export_${dateStr}.csv`
     a.click()
     window.URL.revokeObjectURL(url)
+    toast.success(`Exported ${products.length} products`)
   }
 
   const totalStock = products.reduce((sum, p) => sum + p.stock, 0)
@@ -252,12 +274,12 @@ function InventoryPageContent() {
             Import Items
           </Button>
           <Button
-            onClick={handleDownloadTemplate}
+            onClick={handleDownloadStock}
             variant="outline"
             size="sm"
           >
             <Download size={16} className="mr-2" />
-            Download Template
+            Download Stock
           </Button>
           <Button
             onClick={() => setIsCategoryManagerOpen(true)}

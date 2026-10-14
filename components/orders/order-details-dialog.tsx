@@ -93,7 +93,9 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
       fetch('/api/settings').then(r => r.ok ? r.json() : null),
       fetch('/api/auth/me').then(r => r.ok ? r.json() : null),
     ]).then(([settingsData, userData]) => {
-      if (settingsData) setSettings(settingsData)
+      if (settingsData?.settings) {
+        setSettings(settingsData.settings)
+      }
       if (userData) setUserInfo(userData)
     }).catch(err => console.error('Failed to fetch data:', err))
   }, [])
@@ -587,7 +589,7 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
         {settings && userInfo && (
           <Receipt
             ref={receiptRef}
-            shopName={settings.general?.shopName || 'Shop'}
+            shopName={settings.general?.shopName || userInfo.user?.shopName || 'My Shop'}
             shopLogo={settings.general?.logo}
             cashierName={staffName}
             items={order.items.map((item: any) => ({
