@@ -67,7 +67,11 @@ export async function GET(request: NextRequest) {
 
       return NextResponse.json({
         user: {
-          id: staff._id, email: staff.email, name: staff.name,
+          id: staff._id, 
+          email: staff.email, 
+          name: staff.firstName && staff.lastName 
+            ? `${staff.firstName} ${staff.lastName}`.trim()
+            : staff.name || staff.email || 'Staff',
           shopName: adminUser?.shopName || 'Shop',
           role: staff.role, type: 'staff',
           permissions: normalisePermissions(staff.permissions || {}),

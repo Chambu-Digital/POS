@@ -283,7 +283,7 @@ export async function GET(request: NextRequest) {
       ...branchFilter,
     })
       .sort({ createdAt: -1 }).limit(10)
-      .populate('items.productId').populate('staffId', 'name').lean()
+      .populate('staffId', 'name firstName lastName').lean()
     
     const recentHospitalityOrdersList = models.HospitalityOrder ? await models.HospitalityOrder.find({ 
       tenantId,

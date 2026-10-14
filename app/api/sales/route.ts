@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { models } = await getTenantDB(request)
+    const { models, conn } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
     const branchContext = await getBranchContext(request)
 
@@ -27,7 +27,59 @@ export async function GET(request: NextRequest) {
       .sort({ createdAt: -1 })
       .lean()
 
-    return NextResponse.json({ sales })
+    // Fetch owner info for sales without staffId
+    const owner = await conn.db.collection('users').findOne({ _id: new Types.ObjectId(ownerId) }) as any
+    const ownerName = owner?.firstName && owner?.lastName
+      ? `${owner.firstName} ${owner.lastName}`.trim()
+      : owner?.shopName || owner?.name || owner?.email || 'Owner'
+
+    const ownerInfo = {
+      _id: owner?._id,
+      name: ownerName,
+      firstName: owner?.firstName,
+      lastName: owner?.lastName,
+      email: owner?.email,
+      isOwner: true,
+    }
+
+    // Manually populate staffId for each sale with proper name handling
+    const staffIds = [...new Set(sales.map((s: any) => s.staffId).filter(Boolean))]
+    const staffMap = new Map()
+
+    if (staffIds.length > 0) {
+      const staff = await conn.db.collection('staff')
+        .find({ _id: { $in: staffIds } })
+        .toArray()
+
+      staff.forEach((s: any) => {
+        const name = s.firstName && s.lastName 
+          ? `${s.firstName} ${s.lastName}`.trim()
+          : s.name || s.email || 'Unknown Staff'
+        staffMap.set(s._id.toString(), {
+          _id: s._id,
+          name,
+          firstName: s.firstName,
+          lastName: s.lastName,
+          email: s.email,
+        })
+      })
+    }
+
+    // Attach staff info to sales
+    const salesWithStaff = sales.map((sale: any) => {
+      if (sale.staffId) {
+        const staffInfo = staffMap.get(sale.staffId.toString())
+        if (staffInfo) {
+          sale.staffId = staffInfo
+        }
+      } else {
+        // No staffId = owner made the sale
+        sale.staffId = ownerInfo
+      }
+      return sale
+    })
+
+    return NextResponse.json({ sales: salesWithStaff })
   } catch (error) {
     console.error('[sales] GET error:', error)
     return NextResponse.json({ error: 'Failed to fetch sales' }, { status: 500 })
