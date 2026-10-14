@@ -158,11 +158,9 @@ export function Sidebar() {
       if (e.key === 'settings_updated') loadFeatures()
     })
 
-    const interval = setInterval(loadFeatures, 5000)
     return () => {
       window.removeEventListener('focus', onFocus)
       window.removeEventListener('settings_updated', loadFeatures)
-      clearInterval(interval)
     }
   }, [isLoggingOut, router])
 

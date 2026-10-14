@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -19,6 +19,7 @@ import {
 import { CheckCircle2, ChevronDown, Printer, Edit, Package, ArrowRightLeft } from 'lucide-react'
 import { ReturnModal } from '@/components/sales/return-modal'
 import { ExchangeModal } from '@/components/sales/exchange-modal'
+import { Receipt, ReceiptRef } from '@/components/sales/receipt'
 
 interface PaymentEntry {
   method: string
@@ -82,6 +83,20 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
   const [isExchangeModalOpen, setIsExchangeModalOpen] = useState(false)
   const [order, setOrder] = useState(initialOrder)
   const [refreshing, setRefreshing] = useState(false)
+  const [settings, setSettings] = useState<any>(null)
+  const [userInfo, setUserInfo] = useState<any>(null)
+  const receiptRef = useRef<ReceiptRef>(null)
+
+  // Fetch settings and user info
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/settings').then(r => r.ok ? r.json() : null),
+      fetch('/api/auth/me').then(r => r.ok ? r.json() : null),
+    ]).then(([settingsData, userData]) => {
+      if (settingsData) setSettings(settingsData)
+      if (userData) setUserInfo(userData)
+    }).catch(err => console.error('Failed to fetch data:', err))
+  }, [])
 
   // Sync order with prop changes
   React.useEffect(() => {
@@ -245,7 +260,7 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
           <div className="flex gap-3">
             <Button 
               className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
-              onClick={() => window.print()}
+              onClick={() => receiptRef.current?.print()}
             >
               <Printer className="h-4 w-4 mr-2" />
               Print Receipt
@@ -567,6 +582,44 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
             refreshOrder()
           }}
         />
+
+        {/* Hidden Receipt for Printing */}
+        {settings && userInfo && (
+          <Receipt
+            ref={receiptRef}
+            shopName={settings.general?.shopName || 'Shop'}
+            shopLogo={settings.general?.logo}
+            cashierName={staffName}
+            items={order.items.map((item: any) => ({
+              productName: typeof item.productId === 'object' && item.productId?.productName
+                ? item.productId.productName
+                : item.productName || 'Unknown Item',
+              quantity: item.quantity,
+              price: item.price,
+              discount: item.discount,
+              total: item.price * item.quantity - item.discount,
+              quantityReturned: item.quantityReturned,
+              returnCondition: item.returnCondition,
+            }))}
+            subtotal={order.subtotal || order.total}
+            discount={order.discount}
+            total={order.total}
+            paymentMethod={order.paymentMethod}
+            date={new Date(order.createdAt)}
+            receiptNumber={orderNumber}
+            shopPhone={settings.general?.phone}
+            shopEmail={settings.general?.email}
+            shopAddress={settings.general?.address}
+            mpesaPaybill={settings.payment?.mpesaPaybill}
+            mpesaAccountNumber={settings.payment?.mpesaAccountNumber}
+            paperSize={settings.receipt?.paperSize || '80mm'}
+            returns={order.returns}
+            totalReturned={order.totalReturned}
+            isPartiallyReturned={order.isPartiallyReturned}
+            isFullyReturned={order.isFullyReturned}
+            payments={order.payments}
+          />
+        )}
       </DialogContent>
     </Dialog>
   )

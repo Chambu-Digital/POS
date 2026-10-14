@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Search, Plus, X, ChevronDown, ChevronUp, CreditCard, Mail, Phone, User, Calendar, MessageCircle } from 'lucide-react'
+import { Search, Plus, X, ChevronDown, ChevronUp, CreditCard, Mail, Phone, User, Calendar, MessageCircle, FileText } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { apiGet, apiPost, apiPut, apiPatch, handleApiError } from '@/lib/api-client'
 import { LoadingOrOffline } from '@/components/offline-indicator'
+import { CustomerInvoiceDialog } from '@/components/customers/customer-invoice-dialog'
 
 interface LedgerEntry {
   date: string
@@ -68,10 +69,11 @@ function CustomersContent() {
   const [editCreditLimit, setEditCreditLimit] = useState('')
   const [editing, setEditing] = useState(false)
 
-  // WhatsApp invoice sharing
+  // Invoice dialog
   const [invoiceCustomer, setInvoiceCustomer] = useState<Customer | null>(null)
   const [shopSettings, setShopSettings] = useState<any>(null)
 
+  // WhatsApp invoice sharing (legacy - keeping for compatibility)
   useEffect(() => { load(); fetchSettings() }, [])
 
   async function load() {
@@ -386,12 +388,23 @@ Thank you for choosing ${businessName}!`
                           ))}
                         </div>
                       )}
-                      <button
-                        onClick={() => deleteCustomer(c._id, c.name)}
-                        className="w-full mt-2 px-2 py-1 text-xs text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                      >
-                        Delete
-                      </button>
+                      {c.creditBalance > 0 ? (
+                        <button
+                          onClick={() => setInvoiceCustomer(c)}
+                          disabled={!c.phone}
+                          className="w-full mt-2 px-2 py-1 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-medium flex items-center justify-center gap-1"
+                        >
+                          <FileText size={12} />
+                          Send Invoice
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => deleteCustomer(c._id, c.name)}
+                          className="w-full mt-2 px-2 py-1 text-xs text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                        >
+                          Delete
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -552,6 +565,14 @@ Thank you for choosing ${businessName}!`
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Customer Invoice Dialog */}
+      <CustomerInvoiceDialog
+        open={!!invoiceCustomer}
+        onOpenChange={(open) => !open && setInvoiceCustomer(null)}
+        customer={invoiceCustomer}
+        shopName={shopSettings?.general?.shopName || 'Our Shop'}
+      />
     </div>
   )
 }

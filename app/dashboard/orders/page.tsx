@@ -29,6 +29,8 @@ interface PaymentEntry {
   amount: number
   mpesaPhone?: string
   mpesaCode?: string
+  bankProviderName?: string
+  customMethodName?: string
 }
 
 interface Sale {
@@ -210,8 +212,32 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'rental' }) {
     if (start) return `From ${fmt(start)}`
     return `Until ${fmt(end)}`
   }
-  function payLabel(method: string) {
+  function payLabel(sale: Sale): string {
+    const method = sale.paymentMethod
+    
+    // Check for custom payment method name
+    if (method === 'custom' && sale.payments && sale.payments.length > 0) {
+      const customPayment = sale.payments.find(p => p.method === 'custom')
+      if (customPayment?.customMethodName) {
+        return customPayment.customMethodName
+      }
+    }
+    
+    // Check for bank provider name
+    if (method === 'bank' && sale.payments && sale.payments.length > 0) {
+      const bankPayment = sale.payments.find(p => p.method === 'bank')
+      if (bankPayment?.bankProviderName) {
+        return bankPayment.bankProviderName
+      }
+    }
+    
+    // Standard method labels
     if (method === 'mobile_money') return 'M-Pesa'
+    if (method === 'cash') return 'Cash'
+    if (method === 'card') return 'Card'
+    if (method === 'credit') return 'Credit'
+    
+    // Fallback: capitalize first letter
     return method.charAt(0).toUpperCase() + method.slice(1)
   }
 
@@ -225,7 +251,7 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'rental' }) {
         fmtOrderDate(s.createdAt),
         fmtOrderTime(s.createdAt),
         s.total.toFixed(2),
-        payLabel(s.paymentMethod),
+        payLabel(s),
         s.status || 'completed',
         `"${customer}"`,
         `"${(s.notes || '').replace(/"/g, '""')}"`,
@@ -240,11 +266,15 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'rental' }) {
     URL.revokeObjectURL(url)
   }
 
-  // Summary totals for filtered view
-  const summaryTotal   = filteredSales.reduce((s, x) => s + x.total, 0)
-  const summaryByCash  = filteredSales.filter(s => s.paymentMethod === 'cash').reduce((s, x) => s + x.total, 0)
-  const summaryByMpesa = filteredSales.filter(s => s.paymentMethod === 'mobile_money').reduce((s, x) => s + x.total, 0)
-  const summaryByCard  = filteredSales.filter(s => s.paymentMethod === 'card').reduce((s, x) => s + x.total, 0)
+  // Summary totals for filtered view - dynamically calculate for all payment methods
+  const summaryTotal = filteredSales.reduce((s, x) => s + x.total, 0)
+  
+  // Group sales by payment method for dynamic summary
+  const paymentMethodTotals = filteredSales.reduce((acc, sale) => {
+    const label = payLabel(sale)
+    acc[label] = (acc[label] || 0) + sale.total
+    return acc
+  }, {} as Record<string, number>)
 
   const paginated  = filteredSales.slice((currentPage - 1) * PER_PAGE, currentPage * PER_PAGE)
   const totalPages = Math.ceil(filteredSales.length / PER_PAGE)
@@ -289,13 +319,26 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'rental' }) {
         <div className="flex flex-wrap gap-4 bg-green-50 border border-green-200 rounded px-4 py-2 text-sm">
           <span className="text-gray-700">Orders: <strong>{filteredSales.length}</strong></span>
           <span className="text-gray-900">Total: <strong>KES {summaryTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong></span>
-          {summaryByCash  > 0 && <span className="text-gray-600">Cash: <strong>KES {summaryByCash.toLocaleString()}</strong></span>}
-          {summaryByMpesa > 0 && <span className="text-blue-700">M-Pesa: <strong>KES {summaryByMpesa.toLocaleString()}</strong></span>}
-          {summaryByCard  > 0 && <span className="text-purple-700">Card: <strong>KES {summaryByCard.toLocaleString()}</strong></span>}
+          {Object.entries(paymentMethodTotals)
+            .sort(([, a], [, b]) => b - a) // Sort by amount descending
+            .map(([method, total]) => {
+              const colorClass = 
+                method === 'Cash' ? 'text-gray-600' :
+                method === 'M-Pesa' ? 'text-blue-700' :
+                method === 'Card' ? 'text-purple-700' :
+                method === 'Credit' ? 'text-orange-700' :
+                'text-green-700'
+              
+              return (
+                <span key={method} className={colorClass}>
+                  {method}: <strong>KES {total.toLocaleString()}</strong>
+                </span>
+              )
+            })}
         </div>
       )}
 
-      {/* ── Table — flat, no card wrapper ── */}
+      {/* ── Table/Cards ── */}
       <LoadingOrOffline
         isLoading={loading}
         isOffline={isOffline}
@@ -303,65 +346,106 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'rental' }) {
         loadingText="Loading orders..."
         offlineMessage="Unable to load orders. Please check your connection."
       >
-        <div className="bg-white">
-          {/* Column headers */}
-          <div className="grid grid-cols-[36px_1fr_150px_130px_80px] border-b border-gray-200 px-3 py-2">
-            <span className="text-xs font-semibold text-gray-500">#</span>
-            <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">↕ Order</span>
-            <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">↕ Time</span>
-            <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">↕ Amount</span>
-            <span className="text-xs font-semibold text-gray-500">Mode</span>
-          </div>
-
-          {filteredSales.length === 0 ? (
-            <div className="py-16 text-center text-sm text-gray-400">No orders found</div>
-          ) : (
-          paginated.map((sale) => {
-            const orderNum  = (sale as any).orderNumber || `ORD-${sale._id.slice(-5).toUpperCase()}`
-            const staffName = (sale.staffId as any)?.firstName
-              ? `${(sale.staffId as any).firstName} ${(sale.staffId as any).lastName ?? ''}`.trim()
-              : (sale.staffId as any)?.name || null
-            return (
-              <div key={sale._id}
-                onClick={() => { setSelectedOrder(sale); setDialogOpen(true) }}
-                className="grid grid-cols-[36px_1fr_150px_130px_80px] px-3 py-2 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors last:border-0 items-center">
-                {/* # */}
-                <div className="flex items-center">
-                  <StatusDot status={sale.status ?? 'completed'} />
-                </div>
-                {/* Order — number + staff on one line */}
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-sm text-gray-900 truncate">{orderNum}</span>
-                  {staffName && (
-                    <span className="text-xs text-gray-400 shrink-0">{staffName}</span>
-                  )}
-                  {sale.rentalMeta?.customerName && (
-                    <span className="text-xs text-blue-500 shrink-0">{sale.rentalMeta.customerName}</span>
-                  )}
-                </div>
-                {/* Time */}
-                <div className="text-sm text-gray-600 tabular-nums">
-                  {fmtOrderTime(sale.createdAt)} · {fmtOrderDate(sale.createdAt)}
-                </div>
-                {/* Amount */}
-                <div className="text-sm text-gray-900 tabular-nums">
-                  KES {sale.total.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                </div>
-                {/* Mode */}
-                <div>
-                  <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${
-                    sale.paymentMethod === 'cash'         ? 'bg-gray-100 text-gray-700 border-gray-300' :
-                    sale.paymentMethod === 'mobile_money' ? 'bg-blue-50 text-blue-700 border-blue-200'  :
-                                                            'bg-gray-50 text-gray-600 border-gray-200'
-                  }`}>
-                    {payLabel(sale.paymentMethod)}
-                  </span>
-                </div>
+        {filteredSales.length === 0 ? (
+          <div className="py-16 text-center text-sm text-gray-400 bg-white rounded-lg">No orders found</div>
+        ) : (
+          <>
+            {/* Desktop Table */}
+            <div className="hidden md:block bg-white">
+              {/* Column headers */}
+              <div className="grid grid-cols-[36px_1fr_150px_130px_80px] border-b border-gray-200 px-3 py-2">
+                <span className="text-xs font-semibold text-gray-500">#</span>
+                <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">↕ Order</span>
+                <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">↕ Time</span>
+                <span className="text-xs font-semibold text-gray-500 flex items-center gap-1">↕ Amount</span>
+                <span className="text-xs font-semibold text-gray-500">Mode</span>
               </div>
-            )
-          })
+
+              {paginated.map((sale) => {
+                const orderNum  = (sale as any).orderNumber || `ORD-${sale._id.slice(-5).toUpperCase()}`
+                const staffName = (sale.staffId as any)?.firstName
+                  ? `${(sale.staffId as any).firstName} ${(sale.staffId as any).lastName ?? ''}`.trim()
+                  : (sale.staffId as any)?.name || null
+                return (
+                  <div key={sale._id}
+                    onClick={() => { setSelectedOrder(sale); setDialogOpen(true) }}
+                    className="grid grid-cols-[36px_1fr_150px_130px_80px] px-3 py-2 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors last:border-0 items-center">
+                    {/* # */}
+                    <div className="flex items-center">
+                      <StatusDot status={sale.status ?? 'completed'} />
+                    </div>
+                    {/* Order — number + staff on one line */}
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm text-gray-900 truncate">{orderNum}</span>
+                      {staffName && (
+                        <span className="text-xs text-gray-400 shrink-0">{staffName}</span>
+                      )}
+                      {sale.rentalMeta?.customerName && (
+                        <span className="text-xs text-blue-500 shrink-0">{sale.rentalMeta.customerName}</span>
+                      )}
+                    </div>
+                    {/* Time */}
+                    <div className="text-sm text-gray-600 tabular-nums">
+                      {fmtOrderTime(sale.createdAt)} · {fmtOrderDate(sale.createdAt)}
+                    </div>
+                    {/* Amount */}
+                    <div className="text-sm text-gray-900 tabular-nums">
+                      KES {sale.total.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </div>
+                    {/* Mode */}
+                    <div>
+                      <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${
+                        sale.paymentMethod === 'cash'         ? 'bg-gray-100 text-gray-700 border-gray-300' :
+                        sale.paymentMethod === 'mobile_money' ? 'bg-blue-50 text-blue-700 border-blue-200'  :
+                                                                'bg-gray-50 text-gray-600 border-gray-200'
+                      }`}>
+                        {payLabel(sale)}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Mobile Cards */}
+            <div className="md:hidden space-y-2">
+              {paginated.map((sale) => {
+                const orderNum  = (sale as any).orderNumber || `ORD-${sale._id.slice(-5).toUpperCase()}`
+                const staffName = (sale.staffId as any)?.firstName
+                  ? `${(sale.staffId as any).firstName} ${(sale.staffId as any).lastName ?? ''}`.trim()
+                  : (sale.staffId as any)?.name || null
+                return (
+                  <div key={sale._id}
+                    onClick={() => { setSelectedOrder(sale); setDialogOpen(true) }}
+                    className="bg-white rounded-lg border border-gray-200 p-2.5 hover:shadow-sm cursor-pointer transition-shadow">
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <StatusDot status={sale.status ?? 'completed'} />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold text-gray-900">{orderNum}</div>
+                          {staffName && (
+                            <div className="text-xs text-gray-500">{staffName}</div>
+                          )}
+                        </div>
+                      </div>
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-semibold border shrink-0 ${
+                        sale.paymentMethod === 'cash'         ? 'bg-gray-100 text-gray-700 border-gray-300' :
+                        sale.paymentMethod === 'mobile_money' ? 'bg-blue-50 text-blue-700 border-blue-200'  :
+                                                                'bg-gray-50 text-gray-600 border-gray-200'
+                      }`}>
+                        {payLabel(sale)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-500">{fmtOrderTime(sale.createdAt)} · {fmtOrderDate(sale.createdAt)}</span>
+                      <span className="font-semibold text-gray-900 tabular-nums">KES {sale.total.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </>
         )}
-        </div>
       </LoadingOrOffline>
 
       {/* ── Pagination ── */}

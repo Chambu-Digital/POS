@@ -69,6 +69,34 @@ function ReportsPageContent() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
 
+  // Helper function to get payment method label with custom method names
+  function payLabel(sale: any): string {
+    const method = sale.paymentMethod || 'cash'
+    
+    // Check for custom payment method name
+    if (method === 'custom' && sale.payments && sale.payments.length > 0) {
+      const customPayment = sale.payments.find((p: any) => p.method === 'custom')
+      if (customPayment?.customMethodName) {
+        return customPayment.customMethodName
+      }
+    }
+    
+    // Check for bank provider name
+    if (method === 'card' && sale.payments && sale.payments.length > 0) {
+      const cardPayment = sale.payments.find((p: any) => p.method === 'card')
+      if (cardPayment?.bankProviderName) {
+        return cardPayment.bankProviderName
+      }
+    }
+    
+    // Standard method labels
+    if (method === 'mobile_money') return 'M-Pesa'
+    if (method === 'cash') return 'Cash'
+    if (method === 'card') return 'Card'
+    if (method === 'credit') return 'Credit'
+    return method.charAt(0).toUpperCase() + method.slice(1)
+  }
+
   useEffect(() => {
     fetchReports()
     fetchReportTypes()
@@ -405,6 +433,42 @@ function ReportsPageContent() {
                     )
                   })}
                 </div>
+
+                {/* Payment method breakdown for sales reports */}
+                {selectedReport.data.details && Array.isArray(selectedReport.data.details) && selectedReport.data.details.length > 0 && (
+                  (() => {
+                    // Calculate payment method totals dynamically
+                    const paymentMethodTotals = selectedReport.data.details.reduce((acc: Record<string, number>, sale: any) => {
+                      const label = payLabel(sale)
+                      acc[label] = (acc[label] || 0) + (sale.total || 0)
+                      return acc
+                    }, {})
+                    
+                    return Object.keys(paymentMethodTotals).length > 0 ? (
+                      <div>
+                        <p className="text-sm font-semibold text-gray-700 mb-2">Payment Methods</p>
+                        <div className="flex flex-wrap gap-3 bg-blue-50 border border-blue-200 rounded px-4 py-2 text-sm">
+                          {Object.entries(paymentMethodTotals)
+                            .sort(([, a], [, b]) => b - a)
+                            .map(([method, total]) => {
+                              const colorClass = 
+                                method === 'Cash' ? 'text-gray-700' :
+                                method === 'M-Pesa' ? 'text-blue-700' :
+                                method === 'Card' ? 'text-purple-700' :
+                                method === 'Credit' ? 'text-orange-700' :
+                                'text-green-700'
+                              
+                              return (
+                                <span key={method} className={colorClass}>
+                                  {method}: <strong>KES {total.toLocaleString()}</strong>
+                                </span>
+                              )
+                            })}
+                        </div>
+                      </div>
+                    ) : null
+                  })()
+                )}
 
                 {/* Source breakdown */}
                 {(selectedReport.data as any).sourceBreakdown && (

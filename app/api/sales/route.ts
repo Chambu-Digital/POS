@@ -17,10 +17,26 @@ export async function GET(request: NextRequest) {
     const { models, conn } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
     const branchContext = await getBranchContext(request)
+    
+    // Get query parameters
+    const url = new URL(request.url)
+    const customerId = url.searchParams.get('customerId')
+    const paymentStatusParam = url.searchParams.get('paymentStatus')
 
     const query: any = { userId: ownerId }
     if (branchContext) {
       query.branchId = branchContext
+    }
+    
+    // Filter by customerId if provided
+    if (customerId) {
+      query.customerId = new Types.ObjectId(customerId)
+    }
+    
+    // Filter by paymentStatus if provided (supports comma-separated values)
+    if (paymentStatusParam) {
+      const statuses = paymentStatusParam.split(',').map(s => s.trim())
+      query.paymentStatus = { $in: statuses }
     }
 
     const sales = await models.Sale.find(query)
