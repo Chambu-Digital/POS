@@ -28,6 +28,7 @@ import { CreateProductTransferModal } from '@/components/stock-transfers/create-
 import { ImportProductsModal } from '@/components/products/import-products-modal'
 import { BulkEditModal } from '@/components/inventory/bulk-edit-modal'
 import { ProductImage } from '@/components/ui/product-image'
+import { formatCurrency } from '@/lib/currency'
 
 interface Product {
   _id: string
@@ -64,9 +65,11 @@ function InventoryPageContent() {
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false)
   const [isImportProductsOpen, setIsImportProductsOpen] = useState(false)
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false)
+  const [currency, setCurrency] = useState('KSh')
 
   useEffect(() => {
     fetchProducts()
+    fetchCurrency()
   }, [])
 
   useEffect(() => {
@@ -112,6 +115,19 @@ function InventoryPageContent() {
       console.error(error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function fetchCurrency() {
+    try {
+      const response = await fetch('/api/settings')
+      if (response.ok) {
+        const data = await response.json()
+        setCurrency(data.settings?.general?.currency || data.settings?.currency || 'KSh')
+      }
+    } catch (error) {
+      // Silently fail and use default
+      console.error('Failed to load currency settings:', error)
     }
   }
 
@@ -190,7 +206,7 @@ function InventoryPageContent() {
             </div>
             <div>
               <CardTitle className="text-sm font-medium">Estimated Profit</CardTitle>
-              <div className="text-2xl font-bold text-green-600 mt-2">KSh {estimatedProfit.toLocaleString()}</div>
+              <div className="text-2xl font-bold text-green-600 mt-2">{formatCurrency(estimatedProfit, currency, false)}</div>
             </div>
           </CardContent>
         </Card>
@@ -205,7 +221,7 @@ function InventoryPageContent() {
             </div>
             <div>
               <CardTitle className="text-sm font-medium">Stock Value At Cost</CardTitle>
-              <div className="text-2xl font-bold text-primary mt-2">KSh {stockValueAtCost.toLocaleString()}</div>
+              <div className="text-2xl font-bold text-primary mt-2">{formatCurrency(stockValueAtCost, currency, false)}</div>
             </div>
           </CardContent>
         </Card>
@@ -313,86 +329,105 @@ function InventoryPageContent() {
               No products found. Create your first product to get started.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Image</TableHead>
-                    <TableHead>Item</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Variant</TableHead>
-                    <TableHead>Brand</TableHead>
-                    <TableHead>Model</TableHead>
-                    <TableHead>Stock</TableHead>
-                    <TableHead>Units</TableHead>
-                    <TableHead>Buying Price</TableHead>
-                    <TableHead>Selling Price</TableHead>
-                    <TableHead>W/Sale</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Value</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredProducts.map((product) => (
-                    <TableRow 
-                      key={product._id}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => {
-                        setSelectedProduct(product)
-                        setIsViewOpen(true)
-                      }}
-                    >
-                      <TableCell>
-                        <ProductImage
-                          src={product.images?.[0]}
-                          alt={product.productName}
-                          size="sm"
-                        />
-                      </TableCell>
-                      <TableCell className="font-medium">{product.productName}</TableCell>
-                      <TableCell>{product.category}</TableCell>
-                      <TableCell>{(product as any).variant || '-'}</TableCell>
-                      <TableCell>{(product as any).brand || '-'}</TableCell>
-                      <TableCell>{(product as any).model || '-'}</TableCell>
-                      <TableCell className="text-green-600 font-semibold">{product.stock}</TableCell>
-                      <TableCell>{(product as any).unit || 'pieces'}</TableCell>
-                      <TableCell>KSh {(product.buyingPrice || 0).toLocaleString()}</TableCell>
-                      <TableCell>KSh {(product.sellingPrice || 0).toLocaleString()}</TableCell>
-                      <TableCell>KSh {((product as any).wholeSale || 0).toLocaleString()}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{product.description || '-'}</TableCell>
-                      <TableCell className="text-primary font-semibold">
-                        KSh {((product.stock || 0) * (product.sellingPrice || 0)).toLocaleString()}
-                      </TableCell>
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setSelectedProduct(product)
-                              setIsEditOpen(true)
-                            }}
-                          >
-                            <Edit2 size={16} />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleDeleteProduct(product._id)
-                            }}
-                          >
-                            <Trash2 size={16} className="text-red-500" />
-                          </Button>
+            <div className="space-y-2">
+              {filteredProducts.map((product) => {
+                const stockLevel = product.stock
+                const stockColor = stockLevel === 0 ? 'text-red-600' : stockLevel < 10 ? 'text-yellow-600' : 'text-green-600'
+                const stockBg = stockLevel === 0 ? 'bg-red-50' : stockLevel < 10 ? 'bg-yellow-50' : 'bg-green-50'
+                
+                return (
+                  <div
+                    key={product._id}
+                    onClick={() => {
+                      setSelectedProduct(product)
+                      setIsViewOpen(true)
+                    }}
+                    className="flex flex-wrap items-center gap-3 p-3 border border-gray-200 rounded-lg hover:bg-muted/50 hover:border-gray-300 transition-all cursor-pointer"
+                  >
+                    {/* Image */}
+                    <div className="flex-shrink-0">
+                      <ProductImage
+                        src={product.images?.[0]}
+                        alt={product.productName}
+                        size="sm"
+                      />
+                    </div>
+
+                    {/* Product Info */}
+                    <div className="flex-1 min-w-[200px]">
+                      <div className="font-semibold text-sm">{product.productName}</div>
+                      <div className="text-xs text-muted-foreground flex flex-wrap gap-1 mt-0.5">
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">{product.category}</span>
+                        {(product as any).brand && <span>• {(product as any).brand}</span>}
+                        {(product as any).model && <span>• {(product as any).model}</span>}
+                        {(product as any).variant && <span>• {(product as any).variant}</span>}
+                      </div>
+                    </div>
+
+                    {/* Stock Badge */}
+                    <div className={`flex-shrink-0 px-3 py-1.5 rounded-lg ${stockBg} min-w-[80px]`}>
+                      <div className="text-xs text-muted-foreground">Stock</div>
+                      <div className={`font-bold ${stockColor}`}>
+                        {product.stock} <span className="text-xs font-normal">{(product as any).unit || 'pcs'}</span>
+                      </div>
+                    </div>
+
+                    {/* Prices */}
+                    <div className="flex gap-4 flex-wrap text-sm">
+                      <div className="min-w-[90px]">
+                        <div className="text-xs text-muted-foreground">Buy</div>
+                        <div className="font-semibold">{formatCurrency(product.buyingPrice || 0, currency)}</div>
+                      </div>
+                      <div className="min-w-[90px]">
+                        <div className="text-xs text-muted-foreground">Sell</div>
+                        <div className="font-semibold text-primary">{formatCurrency(product.sellingPrice || 0, currency)}</div>
+                      </div>
+                      {(product as any).wholeSale > 0 && (
+                        <div className="min-w-[90px]">
+                          <div className="text-xs text-muted-foreground">W/Sale</div>
+                          <div className="font-semibold">{formatCurrency((product as any).wholeSale || 0, currency)}</div>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                      )}
+                    </div>
+
+                    {/* Value - Hidden on mobile */}
+                    <div className="hidden lg:block min-w-[100px]">
+                      <div className="text-xs text-muted-foreground">Value</div>
+                      <div className="font-bold text-primary">{formatCurrency((product.stock || 0) * (product.sellingPrice || 0), currency, false)}</div>
+                    </div>
+
+                    {/* Actions */}
+                    <div 
+                      className="flex gap-1.5 ml-auto"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 px-2"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedProduct(product)
+                          setIsEditOpen(true)
+                        }}
+                      >
+                        <Edit2 size={14} />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 px-2 hover:bg-red-50"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDeleteProduct(product._id)
+                        }}
+                      >
+                        <Trash2 size={14} className="text-red-500" />
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </CardContent>
@@ -510,25 +545,25 @@ function InventoryPageContent() {
                 <div>
                   <Label className="text-muted-foreground">Stock Value</Label>
                   <p className="text-lg font-semibold text-primary">
-                    KSh {(selectedProduct.stock * selectedProduct.sellingPrice).toLocaleString()}
+                    {formatCurrency(selectedProduct.stock * selectedProduct.sellingPrice, currency, false)}
                   </p>
                 </div>
                 <div>
                   <Label className="text-muted-foreground">Buying Price</Label>
-                  <p className="text-lg font-semibold">KSh {selectedProduct.buyingPrice.toLocaleString()}</p>
+                  <p className="text-lg font-semibold">{formatCurrency(selectedProduct.buyingPrice, currency)}</p>
                 </div>
                 <div>
                   <Label className="text-muted-foreground">Selling Price</Label>
-                  <p className="text-lg font-semibold">KSh {selectedProduct.sellingPrice.toLocaleString()}</p>
+                  <p className="text-lg font-semibold">{formatCurrency(selectedProduct.sellingPrice, currency)}</p>
                 </div>
                 <div>
                   <Label className="text-muted-foreground">Wholesale Price</Label>
-                  <p className="text-lg font-semibold">KSh {((selectedProduct as any).wholeSale || 0).toLocaleString()}</p>
+                  <p className="text-lg font-semibold">{formatCurrency((selectedProduct as any).wholeSale || 0, currency)}</p>
                 </div>
                 <div>
                   <Label className="text-muted-foreground">Profit Margin</Label>
                   <p className="text-lg font-semibold text-green-600">
-                    KSh {(selectedProduct.sellingPrice - selectedProduct.buyingPrice).toLocaleString()}
+                    {formatCurrency(selectedProduct.sellingPrice - selectedProduct.buyingPrice, currency)}
                   </p>
                 </div>
               </div>

@@ -505,6 +505,28 @@ function PaymentPageContent() {
           date: new Date(),
           receiptNumber: orderNumber,
           creditBalance: selectedCustomer?.creditBalance,
+          payments: completedPayments.map(p => ({
+            method: p.method === 'mpesa_stk' || p.method === 'mpesa_manual' ? 'mobile_money' : 
+                    p.method === 'custom' ? 'custom' : 
+                    p.method === 'credit' ? 'credit' : p.method,
+            amount: parseFloat(p.amount),
+            mpesaType: p.method === 'mpesa_stk' ? 'stk_push' : p.method === 'mpesa_manual' ? 'manual' : undefined,
+            mpesaPhone: p.mpesaPhone || '',
+            mpesaCode: p.mpesaCode || '',
+            customMethodName: p.customMethodName || '',
+            timestamp: new Date(),
+          })),
+          cashPaid: totalPaid < total ? totalPaid : undefined,
+          debtCreated: debt > 0 ? debt : undefined,
+        })
+
+        console.log('LastSale created:', {
+          hasPayments: !!completedPayments.length,
+          paymentsCount: completedPayments.length,
+          totalPaid,
+          total,
+          debt,
+          payments: completedPayments
         })
 
         toast.success('Payment completed successfully')
@@ -533,6 +555,18 @@ function PaymentPageContent() {
           paymentMethod: 'offline',
           customerName: selectedCustomer?.name || 'Cash Sale',
           date: new Date(), receiptNumber: `OFFLINE-${Date.now()}`,
+          payments: completedPayments.map(p => ({
+            method: p.method === 'mpesa_stk' || p.method === 'mpesa_manual' ? 'mobile_money' : 
+                    p.method === 'custom' ? 'custom' : 
+                    p.method === 'credit' ? 'credit' : p.method,
+            amount: parseFloat(p.amount),
+            mpesaPhone: p.mpesaPhone || '',
+            mpesaCode: p.mpesaCode || '',
+            customMethodName: p.customMethodName || '',
+            timestamp: new Date(),
+          })),
+          cashPaid: totalPaid < total ? totalPaid : undefined,
+          debtCreated: debt > 0 ? debt : undefined,
         })
         toast.success('Sale saved offline - will sync when online')
         setShowCompletionDialog(true)
@@ -1107,6 +1141,9 @@ function PaymentPageContent() {
           mpesaPaybill={shopSettings?.payment?.mpesaPaybill}
           mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}
           paperSize={shopSettings?.receipt?.paperSize || '58mm'}
+          payments={lastSale.payments}
+          cashPaid={lastSale.cashPaid}
+          debtCreated={lastSale.debtCreated}
         />
       )}
     </div>

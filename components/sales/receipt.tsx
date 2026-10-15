@@ -186,6 +186,10 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
         `)
         printWindow.document.close()
         printWindow.focus()
+        
+        // Auto-close window after printing
+        printWindow.onafterprint = () => printWindow.close()
+        
         setTimeout(() => { printWindow.print() }, 250)
         if (onPrintComplete) onPrintComplete()
       }

@@ -388,7 +388,7 @@ Thank you for choosing ${businessName}!`
                           ))}
                         </div>
                       )}
-                      {c.creditBalance > 0 ? (
+                      {c.creditBalance > 0 && (
                         <button
                           onClick={() => setInvoiceCustomer(c)}
                           disabled={!c.phone}
@@ -396,13 +396,6 @@ Thank you for choosing ${businessName}!`
                         >
                           <FileText size={12} />
                           Send Invoice
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => deleteCustomer(c._id, c.name)}
-                          className="w-full mt-2 px-2 py-1 text-xs text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                        >
-                          Delete
                         </button>
                       )}
                     </div>

@@ -222,185 +222,188 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <ClipboardCheck size={20} />
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-5xl h-[calc(100vh-2rem)] sm:h-auto sm:max-h-[90vh] flex flex-col p-0">
+        <DialogHeader className="px-4 pt-4 pb-2 sm:px-6 sm:pt-6 sm:pb-4 shrink-0">
+          <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
+            <ClipboardCheck size={18} className="sm:w-5 sm:h-5" />
             Stock Count
           </DialogTitle>
-          <DialogDescription>
-            Compare system stock with physical count and create automatic adjustments
+          <DialogDescription className="text-xs sm:text-sm">
+            Compare system stock with physical count
           </DialogDescription>
         </DialogHeader>
 
         {loading ? (
           <div className="text-center py-8">Loading products...</div>
         ) : (
-          <div className="space-y-6">
-            {/* Summary Cards */}
-            <div className="grid grid-cols-3 gap-4">
-              <div className="border rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Products</span>
-                  <CheckCircle2 size={16} className="text-muted-foreground" />
+          <div className="flex-1 overflow-y-auto px-4 pb-4 sm:px-6 sm:pb-6">
+            <div className="space-y-4">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-3 gap-2 sm:gap-4">
+                <div className="border rounded-lg p-2 sm:p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs sm:text-sm text-muted-foreground">Products</span>
+                    <CheckCircle2 size={14} className="text-muted-foreground sm:w-4 sm:h-4" />
+                  </div>
+                  <p className="text-lg sm:text-2xl font-bold mt-1">{counts.length}</p>
                 </div>
-                <p className="text-2xl font-bold mt-1">{counts.length}</p>
-              </div>
-              <div className="border rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Adjustments</span>
-                  <AlertTriangle size={16} className={adjustmentCount > 0 ? 'text-orange-600' : 'text-muted-foreground'} />
+                <div className="border rounded-lg p-2 sm:p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs sm:text-sm text-muted-foreground">Adjustments</span>
+                    <AlertTriangle size={14} className={`sm:w-4 sm:h-4 ${adjustmentCount > 0 ? 'text-orange-600' : 'text-muted-foreground'}`} />
+                  </div>
+                  <p className={`text-lg sm:text-2xl font-bold mt-1 ${adjustmentCount > 0 ? 'text-orange-600' : ''}`}>
+                    {adjustmentCount}
+                  </p>
                 </div>
-                <p className={`text-2xl font-bold mt-1 ${adjustmentCount > 0 ? 'text-orange-600' : ''}`}>
-                  {adjustmentCount}
-                </p>
-              </div>
-              <div className="border rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Total Difference</span>
+                <div className="border rounded-lg p-2 sm:p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs sm:text-sm text-muted-foreground">Total Diff</span>
+                  </div>
+                  <p className={`text-lg sm:text-2xl font-bold mt-1 ${totalDifference > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    {totalDifference}
+                  </p>
                 </div>
-                <p className={`text-2xl font-bold mt-1 ${totalDifference > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                  {totalDifference}
-                </p>
               </div>
-            </div>
 
-            {/* Search and Category Filter */}
-            <div className="flex gap-3 items-end">
-              <div className="flex-1">
-                <Label htmlFor="search" className="text-xs font-medium mb-1 block">
-                  Search
-                </Label>
-                <Input
-                  id="search"
-                  placeholder="Search by name, brand, variant, category..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-8 text-sm"
-                />
+              {/* Search and Category Filter */}
+              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                <div className="flex-1">
+                  <Label htmlFor="search" className="text-xs font-medium mb-1 block">
+                    Search
+                  </Label>
+                  <Input
+                    id="search"
+                    placeholder="Search products..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="h-9 text-sm"
+                  />
+                </div>
+                <div className="w-full sm:w-48">
+                  <Label htmlFor="category" className="text-xs font-medium mb-1 block">
+                    Category
+                  </Label>
+                  <select
+                    id="category"
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    className="h-9 w-full px-3 border border-input rounded-md text-sm bg-background"
+                  >
+                    <option value="all">All ({products.length})</option>
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat} ({products.filter(p => p.category === cat).length})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <div className="w-48">
-                <Label htmlFor="category" className="text-xs font-medium mb-1 block">
-                  Category
-                </Label>
-                <select
-                  id="category"
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="h-8 w-full px-3 border border-input rounded-md text-sm bg-background"
-                >
-                  <option value="all">All Categories ({products.length})</option>
-                  {categories.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat} ({products.filter(p => p.category === cat).length})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
 
-            {/* Count Table */}
-            <div className="border rounded-lg overflow-hidden">
-              <div className="overflow-x-auto max-h-[400px]">
-                <table className="w-full">
-                  <thead className="bg-muted sticky top-0">
-                    <tr>
-                      <th className="text-left p-3 font-medium text-sm">Product</th>
-                      <th className="text-right p-3 font-medium text-sm">System</th>
-                      <th className="text-right p-3 font-medium text-sm">Physical</th>
-                      <th className="text-right p-3 font-medium text-sm">Difference</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredCounts.map((count) => {
-                      const difference = getDifference(count)
-                      return (
-                        <tr key={count.productId} className="border-t hover:bg-muted/50">
-                          <td className="p-3 font-medium">{count.productName}</td>
-                          <td className="p-3 text-right text-muted-foreground">{count.systemStock}</td>
-                          <td className="p-3 text-right">
-                            <Input
-                              type="number"
-                              min="0"
-                              value={count.physicalStock}
-                              onChange={(e) => updatePhysicalCount(count.productId, parseInt(e.target.value) || 0)}
-                              className="w-24 ml-auto text-right"
-                            />
-                          </td>
-                          <td className="p-3 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <span className={`font-semibold ${getDifferenceColor(difference)}`}>
+              {/* Count Table */}
+              <div className="border rounded-lg overflow-hidden">
+                <div className="overflow-x-auto" style={{ maxHeight: 'calc(100vh - 480px)', minHeight: '200px' }}>
+                  <table className="w-full">
+                    <thead className="bg-muted sticky top-0 z-10">
+                      <tr>
+                        <th className="text-left p-2 font-medium text-xs sm:text-sm whitespace-nowrap">Product</th>
+                        <th className="text-right p-2 font-medium text-xs sm:text-sm whitespace-nowrap">System</th>
+                        <th className="text-right p-2 font-medium text-xs sm:text-sm whitespace-nowrap">Physical</th>
+                        <th className="text-right p-2 font-medium text-xs sm:text-sm whitespace-nowrap">Diff</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredCounts.map((count) => {
+                        const difference = getDifference(count)
+                        return (
+                          <tr key={count.productId} className="border-t hover:bg-muted/50">
+                            <td className="p-2 font-medium text-xs sm:text-sm">
+                              <div className="max-w-[120px] sm:max-w-none truncate">{count.productName}</div>
+                            </td>
+                            <td className="p-2 text-right text-muted-foreground text-xs sm:text-sm whitespace-nowrap">{count.systemStock}</td>
+                            <td className="p-2 text-right">
+                              <Input
+                                type="number"
+                                min="0"
+                                value={count.physicalStock}
+                                onChange={(e) => updatePhysicalCount(count.productId, parseInt(e.target.value) || 0)}
+                                className="w-16 sm:w-20 ml-auto text-right text-sm h-8"
+                              />
+                            </td>
+                            <td className="p-2 text-right whitespace-nowrap">
+                              <span className={`font-semibold text-xs sm:text-sm ${getDifferenceColor(difference)}`}>
                                 {difference > 0 ? '+' : ''}{difference}
                               </span>
-                              {getDifferenceBadge(difference)}
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Reason and Notes */}
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="reason">Reason *</Label>
-                <Input
-                  id="reason"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="e.g., Weekly stock count, Monthly audit"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Additional observations or comments..."
-                  rows={3}
-                />
-              </div>
-            </div>
-
-            {/* Warning if there are differences */}
-            {adjustmentCount > 0 && (
-              <div className="border border-orange-200 bg-orange-50 rounded-lg p-4 flex items-start gap-3">
-                <AlertTriangle size={20} className="text-orange-600 shrink-0 mt-0.5" />
-                <div className="text-sm">
-                  <p className="font-semibold text-orange-900">
-                    {adjustmentCount} product{adjustmentCount !== 1 ? 's' : ''} will be adjusted
-                  </p>
-                  <p className="text-orange-700 mt-1">
-                    Stock levels will be updated to match physical counts. Adjustment movements will be recorded in the stock ledger.
-                  </p>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
-            )}
 
-            {/* Actions */}
-            <div className="flex gap-3 pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                className="flex-1"
-                disabled={submitting}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                onClick={handleSubmit}
-                className="flex-1"
-                disabled={submitting}
-              >
-                {submitting ? 'Processing...' : 'Submit Count'}
-              </Button>
+              {/* Reason and Notes */}
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="reason" className="text-xs sm:text-sm">Reason *</Label>
+                  <Input
+                    id="reason"
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder="e.g., Weekly stock count"
+                    className="text-sm h-9 mt-1"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="notes" className="text-xs sm:text-sm">Notes</Label>
+                  <Textarea
+                    id="notes"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Additional observations..."
+                    rows={2}
+                    className="text-sm mt-1"
+                  />
+                </div>
+              </div>
+
+              {/* Warning */}
+              {adjustmentCount > 0 && (
+                <div className="border border-orange-200 bg-orange-50 rounded-lg p-3 flex items-start gap-2">
+                  <AlertTriangle size={16} className="text-orange-600 shrink-0 mt-0.5" />
+                  <div className="text-xs sm:text-sm">
+                    <p className="font-semibold text-orange-900">
+                      {adjustmentCount} product{adjustmentCount !== 1 ? 's' : ''} will be adjusted
+                    </p>
+                    <p className="text-orange-700 mt-1 hidden sm:block">
+                      Stock levels will be updated to match physical counts.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => onOpenChange(false)}
+                  className="flex-1 text-sm h-9"
+                  disabled={submitting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleSubmit}
+                  className="flex-1 text-sm h-9"
+                  disabled={submitting}
+                >
+                  {submitting ? 'Processing...' : 'Submit'}
+                </Button>
+              </div>
             </div>
           </div>
         )}
