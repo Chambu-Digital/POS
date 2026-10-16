@@ -26,6 +26,12 @@ interface Props {
     shopName?: string
     isActive?: boolean
     features?: Record<string, boolean>
+    paymentNotification?: {
+      enabled?: boolean
+      paymentUrl?: string
+      message?: string
+      daysOverdue?: number
+    }
   }
   ownerEmail?: string
 }
@@ -127,6 +133,16 @@ export default function TenantForm({ initial, ownerEmail: initialOwnerEmail }: P
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
 
+  // Payment notification state
+  const [paymentNotificationEnabled, setPaymentNotificationEnabled] = useState(
+    initial?.paymentNotification?.enabled ?? false
+  )
+  const [paymentUrl, setPaymentUrl] = useState(initial?.paymentNotification?.paymentUrl || '')
+  const [paymentMessage, setPaymentMessage] = useState(
+    initial?.paymentNotification?.message || ''
+  )
+  const [daysOverdue, setDaysOverdue] = useState(initial?.paymentNotification?.daysOverdue || 0)
+
   // ── Feature flags — the source of truth for what the tenant can access ────────
   // Initialise from stored features (or defaults for new tenants).
   const [features, setFeatures] = useState<Record<string, boolean>>(() =>
@@ -173,7 +189,17 @@ export default function TenantForm({ initial, ownerEmail: initialOwnerEmail }: P
 
     // Send the full feature flags record directly — no module-level abstraction
     const body = isEdit
-      ? { shopName, isActive, features }
+      ? { 
+          shopName, 
+          isActive, 
+          features,
+          paymentNotification: {
+            enabled: paymentNotificationEnabled,
+            paymentUrl,
+            message: paymentMessage,
+            daysOverdue,
+          }
+        }
       : { subdomain: slug, clusterId, shopName, features }
 
     const res = await fetch(url, {
@@ -423,15 +449,101 @@ export default function TenantForm({ initial, ownerEmail: initialOwnerEmail }: P
 
       {/* Active toggle — edit only */}
       {isEdit && (
-        <label className="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={isActive}
-            onChange={e => setIsActive(e.target.checked)}
-            className="w-4 h-4 rounded text-green-600 focus:ring-green-500"
-          />
-          <span className="text-sm text-gray-700">Active (tenant can log in)</span>
-        </label>
+        <>
+          {/* Payment Notification Section */}
+          <div className="border-2 border-red-200 rounded-xl p-5 bg-red-50/40 space-y-4">
+            <div>
+              <p className="text-sm font-semibold text-red-800 mb-1">💳 Payment Overdue Notification</p>
+              <p className="text-xs text-red-600">
+                When enabled, a full-screen overlay blocks all tenant access until payment is made.
+              </p>
+            </div>
+
+            {/* Enable toggle */}
+            <label className="flex items-center gap-3 cursor-pointer">
+              <div className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={paymentNotificationEnabled}
+                  onChange={e => setPaymentNotificationEnabled(e.target.checked)}
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-red-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+              </div>
+              <span className="text-sm font-medium text-gray-700">
+                Show payment overdue notification to tenant
+              </span>
+            </label>
+
+            {paymentNotificationEnabled && (
+              <div className="space-y-4 pl-3 border-l-2 border-red-300">
+                {/* Payment URL */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Payment URL <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={paymentUrl}
+                    onChange={e => setPaymentUrl(e.target.value)}
+                    placeholder="https://payment.example.com/pay/tenant-123"
+                    required={paymentNotificationEnabled}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    The payment link that will be shown to the tenant
+                  </p>
+                </div>
+
+                {/* Days Overdue */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Days Overdue
+                  </label>
+                  <input
+                    type="number"
+                    value={daysOverdue}
+                    onChange={e => setDaysOverdue(parseInt(e.target.value) || 0)}
+                    min="0"
+                    placeholder="14"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Displayed in the notification message (for reference only)
+                  </p>
+                </div>
+
+                {/* Custom Message */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Custom Message (Optional)
+                  </label>
+                  <textarea
+                    value={paymentMessage}
+                    onChange={e => setPaymentMessage(e.target.value)}
+                    rows={3}
+                    placeholder="Leave blank to use default message"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Optional custom message to show instead of the default text
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Active toggle */}
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isActive}
+              onChange={e => setIsActive(e.target.checked)}
+              className="w-4 h-4 rounded text-green-600 focus:ring-green-500"
+            />
+            <span className="text-sm text-gray-700">Active (tenant can log in)</span>
+          </label>
+        </>
       )}
 
       {error && <p className="text-sm text-red-500">{error}</p>}

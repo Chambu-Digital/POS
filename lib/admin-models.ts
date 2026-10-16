@@ -9,6 +9,12 @@ const tenantSchema = new mongoose.Schema(
     shopName:  { type: String, default: '' },
     isActive:  { type: Boolean, default: true },
     features:  { type: mongoose.Schema.Types.Mixed, default: () => ({ ...DEFAULT_FEATURES }) },
+    paymentNotification: {
+      enabled: { type: Boolean, default: false },
+      paymentUrl: { type: String, default: '' },
+      message: { type: String, default: '' },
+      daysOverdue: { type: Number, default: 0 },
+    },
     createdAt: { type: Date, default: Date.now },
   },
   { collection: 'tenants' }
