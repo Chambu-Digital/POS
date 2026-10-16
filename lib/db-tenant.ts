@@ -7,12 +7,19 @@ declare global {
   // eslint-disable-next-line no-var
   var _tenantConnections: Map<string, mongoose.Connection> | undefined
   // eslint-disable-next-line no-var
+  var _tenantConnectionPromises: Map<string, Promise<mongoose.Connection>> | undefined
+  // eslint-disable-next-line no-var
   var _tenantConnectionStats: Map<string, { hits: number; misses: number; lastUsed: number }> | undefined
 }
 
 function getPool(): Map<string, mongoose.Connection> {
   if (!global._tenantConnections) global._tenantConnections = new Map()
   return global._tenantConnections
+}
+
+function getPromisePool(): Map<string, Promise<mongoose.Connection>> {
+  if (!global._tenantConnectionPromises) global._tenantConnectionPromises = new Map()
+  return global._tenantConnectionPromises
 }
 
 function getStats(): Map<string, { hits: number; misses: number; lastUsed: number }> {
@@ -26,8 +33,10 @@ const MAX_CACHED_TENANTS = 10
 export async function connectTenantDB(uri: string): Promise<mongoose.Connection> {
   const startTime = Date.now()
   const pool = getPool()
+  const promisePool = getPromisePool()
   const stats = getStats()
 
+  // Check for existing completed connection
   const existing = pool.get(uri)
   if (existing?.readyState === 1) {
     // Cache hit
@@ -41,7 +50,23 @@ export async function connectTenantDB(uri: string): Promise<mongoose.Connection>
     return existing
   }
 
-  // Cache miss
+  // Check for in-flight connection promise (prevents race condition)
+  const inFlightPromise = promisePool.get(uri)
+  if (inFlightPromise) {
+    console.log(`[db-tenant] ⏳ Waiting for in-flight connection to ${uri.substring(0, 50)}...`)
+    const conn = await inFlightPromise
+    const duration = Date.now() - startTime
+    console.log(`[db-tenant] ✓ In-flight connection ready (${duration}ms)`)
+    
+    const stat = stats.get(uri) || { hits: 0, misses: 0, lastUsed: 0 }
+    stat.hits++
+    stat.lastUsed = Date.now()
+    stats.set(uri, stat)
+    
+    return conn
+  }
+
+  // Cache miss - need to establish new connection
   const stat = stats.get(uri) || { hits: 0, misses: 0, lastUsed: 0 }
   stat.misses++
   stat.lastUsed = Date.now()
@@ -51,35 +76,57 @@ export async function connectTenantDB(uri: string): Promise<mongoose.Connection>
   if (existing) {
     console.log(`[db-tenant] Removing stale connection for ${uri.substring(0, 50)}...`)
     pool.delete(uri)
+    promisePool.delete(uri)
   }
 
   // Evict oldest entry if pool is full to avoid connection leak
   if (pool.size >= MAX_CACHED_TENANTS) {
-    const oldest = pool.keys().next().value
-    if (oldest) {
-      console.log(`[db-tenant] ⚠️  Pool full (${pool.size}/${MAX_CACHED_TENANTS}), evicting: ${oldest.substring(0, 50)}...`)
-      try { await pool.get(oldest)?.close() } catch {}
-      pool.delete(oldest)
+    const oldestUri = pool.keys().next().value
+    if (oldestUri) {
+      console.log(`[db-tenant] ⚠️  Pool full (${pool.size}/${MAX_CACHED_TENANTS}), evicting: ${oldestUri.substring(0, 50)}...`)
+      try { 
+        await pool.get(oldestUri)?.close() 
+      } catch (err) {
+        console.error(`[db-tenant] Error closing evicted connection:`, err)
+      }
+      pool.delete(oldestUri)
+      promisePool.delete(oldestUri)
+      stats.delete(oldestUri)
     }
   }
 
   console.log(`[db-tenant] ✗ Cache MISS, establishing new connection to ${uri.substring(0, 50)}...`)
   const connStartTime = Date.now()
   
-  const conn = await mongoose.createConnection(uri, {
+  // Create connection promise and cache it immediately to prevent race conditions
+  const connectionPromise = mongoose.createConnection(uri, {
     family: 4,
     serverSelectionTimeoutMS: 10000,
     socketTimeoutMS: 45000,
-    maxPoolSize: 3,  // small pool per tenant
+    maxPoolSize: 2,  // Reduced from 3 to lower total connections
     minPoolSize: 1,
   }).asPromise()
 
-  const connDuration = Date.now() - connStartTime
-  const totalDuration = Date.now() - startTime
-  console.log(`[db-tenant] ✓ Connection established in ${connDuration}ms (total: ${totalDuration}ms)`)
+  // Cache the promise immediately so concurrent requests can reuse it
+  promisePool.set(uri, connectionPromise)
 
-  pool.set(uri, conn)
-  return conn
+  try {
+    const conn = await connectionPromise
+
+    const connDuration = Date.now() - connStartTime
+    const totalDuration = Date.now() - startTime
+    console.log(`[db-tenant] ✓ Connection established in ${connDuration}ms (total: ${totalDuration}ms)`)
+
+    // Cache the completed connection
+    pool.set(uri, conn)
+    
+    return conn
+  } catch (error) {
+    // Remove failed promise from cache
+    promisePool.delete(uri)
+    console.error(`[db-tenant] ✗ Connection failed for ${uri.substring(0, 50)}:`, error)
+    throw error
+  }
 }
 
 export function getTenantConnectionStats() {

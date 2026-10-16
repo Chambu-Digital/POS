@@ -18,7 +18,8 @@
     "test:complete": "tsx scripts/test-complete-bar-system.ts",
     "diagnose:bar": "tsx scripts/diagnose-bar-simple.ts",
     "test:login": "tsx scripts/test-login-performance.ts",
-    "diagnose:auth": "curl http://localhost:3000/api/debug/auth-diagnostics"
+    "diagnose:auth": "curl http://localhost:3000/api/debug/auth-diagnostics",
+    "test:race": "tsx scripts/test-connection-race.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
