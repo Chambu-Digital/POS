@@ -728,7 +728,7 @@ function PaymentPageContent() {
                 </button>
 
                 {/* Custom Payment Methods */}
-                {customMethods.slice(0, 3).map(method => (
+                {customMethods.map(method => (
                   <button
                     key={method._id}
                     onClick={() => {
