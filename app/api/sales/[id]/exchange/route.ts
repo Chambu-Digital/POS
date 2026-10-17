@@ -21,7 +21,15 @@ interface ExchangeRequest {
   
   reason: string
   notes?: string
-  paymentMethod?: 'cash' | 'credit'  // how price difference is handled
+  
+  // Dynamic payment tracking
+  paymentMethod?: string
+  bankProviderId?: string
+  bankProviderName?: string
+  customMethodId?: string
+  customMethodName?: string
+  mpesaCode?: string
+  mpesaPhone?: string
 }
 
 export async function POST(
@@ -58,6 +66,12 @@ export async function POST(
       reason,
       notes,
       paymentMethod,
+      bankProviderId,
+      bankProviderName,
+      customMethodId,
+      customMethodName,
+      mpesaCode,
+      mpesaPhone,
     } = body
 
     // Validate inputs
@@ -115,119 +129,18 @@ export async function POST(
       )
     }
 
-    // ── PROCESS EXCHANGE ─────────────────────────────────────────────────────
-
     // Calculate price difference (positive = customer pays extra, negative = customer gets credit)
     const totalReturnedValue = quantityReturned * returnedPrice
     const totalNewValue = quantityReceived * newPrice
     const priceDifference = totalNewValue - totalReturnedValue
 
-    // Update stock for returned product (add back to inventory)
-    const returnedPrevStock = returnedProduct.stock || 0
-    const returnedNewStock = returnedPrevStock + quantityReturned
-
-    await models.Product.findByIdAndUpdate(
-      returnedProductObjId,
-      {
-        stock: returnedNewStock,
-        updatedAt: new Date(),
-      }
-    )
-
-    // Update stock for new product (remove from inventory)
-    const newPrevStock = newProductCurrentStock
-    const newNewStock = newPrevStock - quantityReceived
-
-    await models.Product.findByIdAndUpdate(
-      newProductObjId,
-      {
-        stock: newNewStock,
-        updatedAt: new Date(),
-      }
-    )
-
-    // ── CREATE STOCK LEDGER ENTRIES ──────────────────────────────────────────
-
-    // EXCHANGE_IN: returned product back into stock
-    await (models as any).StockLedger.create({
-      userId: ownerId,
-      branchId: branchContext ? new Types.ObjectId(branchContext) : null,
-      productId: returnedProductObjId,
-      saleId: saleId,
-      staffId: staffId ? new Types.ObjectId(staffId) : null,
-      type: 'EXCHANGE_IN',
-      quantity: quantityReturned,
-      previousStock: returnedPrevStock,
-      newStock: returnedNewStock,
-      orderNumber: sale.orderNumber,
-      reason: reason.trim(),
-      notes: notes?.trim() || `Exchanged for ${newProductName}`,
-      timestamp: new Date(),
-    })
-
-    // EXCHANGE_OUT: new product sold out
-    await (models as any).StockLedger.create({
-      userId: ownerId,
-      branchId: branchContext ? new Types.ObjectId(branchContext) : null,
-      productId: newProductObjId,
-      saleId: saleId,
-      staffId: staffId ? new Types.ObjectId(staffId) : null,
-      type: 'EXCHANGE_OUT',
-      quantity: -quantityReceived,
-      previousStock: newPrevStock,
-      newStock: newNewStock,
-      orderNumber: sale.orderNumber,
-      reason: reason.trim(),
-      notes: notes?.trim() || `Exchanged from ${returnedProductName}`,
-      timestamp: new Date(),
-    })
-
-    // ── HANDLE CUSTOMER DEBT/PAYMENT ─────────────────────────────────────────
-
-    if (sale.customerId && priceDifference !== 0) {
-      const customer = await models.Customer.findById(sale.customerId)
-
-      if (customer) {
-        if (priceDifference > 0) {
-          // Customer pays extra (or if using credit, add to their debt)
-          if (paymentMethod === 'credit') {
-            customer.creditBalance = (customer.creditBalance || 0) + priceDifference
-            customer.ledger.push({
-              date: new Date(),
-              type: 'purchase',
-              amount: priceDifference,
-              balance: customer.creditBalance,
-              saleId: saleId,
-              note: `Exchange surcharge: ${returnedProductName} → ${newProductName}`,
-            })
-          }
-          // If paymentMethod is 'cash', staff handles collection at UI level
-        } else {
-          // Customer receives credit (negative difference)
-          const creditAmount = Math.abs(priceDifference)
-          customer.creditBalance = (customer.creditBalance || 0) - creditAmount
-          customer.ledger.push({
-            date: new Date(),
-            type: 'payment',
-            amount: -creditAmount,
-            balance: customer.creditBalance,
-            saleId: saleId,
-            note: `Exchange credit: ${returnedProductName} → ${newProductName}`,
-          })
-        }
-
-        await customer.save()
-      }
-    }
-
-    // ── UPDATE SALE DOCUMENT ─────────────────────────────────────────────────
-
+    // CREATE EXCHANGE AS PENDING (no stock changes or customer ledger updates yet)
     const exchangeEntry = {
-      returnedProductId: returnedProductObjId,
+      returnedProductId: new Types.ObjectId(returnedProductId),
       returnedProductName,
       quantityReturned,
       returnedPrice,
-      newProductId: newProductObjId,
+      newProductId: new Types.ObjectId(newProductId),
       newProductName,
       quantityReceived,
       newPrice,
@@ -236,15 +149,18 @@ export async function POST(
       notes: notes?.trim() || '',
       processedBy: staffId ? new Types.ObjectId(staffId) : null,
       processedAt: new Date(),
+      status: 'pending', // Awaiting approval
+      paymentMethod: paymentMethod || '',
+      bankProviderId: bankProviderId || null,
+      bankProviderName: bankProviderName || '',
+      customMethodId: customMethodId || null,
+      customMethodName: customMethodName || '',
+      mpesaCode: mpesaCode || '',
+      mpesaPhone: mpesaPhone || '',
     }
 
     const updateData: any = {
       $push: { exchanges: exchangeEntry },
-      $inc: { totalExchanged: priceDifference },
-      $set: {
-        status: 'exchanged',
-        updatedAt: new Date(),
-      },
     }
 
     await models.Sale.findByIdAndUpdate(saleId, updateData)
@@ -252,11 +168,12 @@ export async function POST(
     return NextResponse.json({
       success: true,
       saleNumber: sale.orderNumber,
+      message: 'Exchange request submitted - awaiting approval',
       exchange: {
         returnedProduct: returnedProductName,
         newProduct: newProductName,
         priceDifference,
-        priceDifferenceLabel: priceDifference > 0 ? `+${priceDifference}` : `${priceDifference}`,
+        status: 'pending',
       },
     }, { status: 200 })
 

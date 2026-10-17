@@ -211,6 +211,31 @@ function PaymentPageContent() {
     }
   }
 
+  async function deleteCustomPaymentMethod(methodId: string) {
+    if (!confirm('Delete this payment method?')) return
+    
+    try {
+      const res = await fetch(`/api/payment-methods?id=${methodId}`, {
+        method: 'DELETE',
+      })
+      
+      if (res.ok) {
+        setCustomMethods(customMethods.filter(m => m._id !== methodId))
+        // Clear selection if deleted method was selected
+        if (selectedCustomMethodId === methodId) {
+          setSelectedCustomMethodId('')
+          setSelectedMethod('')
+        }
+        toast.success('Payment method deleted')
+      } else {
+        const error = await res.json()
+        toast.error(error.error || 'Failed to delete payment method')
+      }
+    } catch {
+      toast.error('Failed to delete payment method')
+    }
+  }
+
   async function searchCustomers(q: string) {
     setCustomerSearchLoading(true)
     try {

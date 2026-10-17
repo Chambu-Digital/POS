@@ -133,6 +133,21 @@ export const saleSchema = new mongoose.Schema(
       notes:         String,
       returnedBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
       returnedAt:    { type: Date, default: Date.now },
+      
+      // Approval workflow
+      status:        { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+      approvedBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      approvedAt:    Date,
+      
+      // Refund payment tracking
+      refundAmount:      { type: Number, default: 0 },
+      refundMethod:      { type: String, default: '' }, // cash, mobile_money, bank, custom, etc.
+      bankProviderId:    { type: mongoose.Schema.Types.ObjectId, ref: 'BankProvider' },
+      bankProviderName:  { type: String, default: '' },
+      customMethodId:    { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentMethod' },
+      customMethodName:  { type: String, default: '' },
+      mpesaCode:         { type: String, default: '' },
+      mpesaPhone:        { type: String, default: '' },
     }],
     totalReturned:        { type: Number, default: 0 },
     isPartiallyReturned:  { type: Boolean, default: false },
@@ -155,6 +170,20 @@ export const saleSchema = new mongoose.Schema(
       notes:               String,
       processedBy:         { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
       processedAt:         { type: Date, default: Date.now },
+      
+      // Approval workflow
+      status:              { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+      approvedBy:          { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      approvedAt:          Date,
+      
+      // Dynamic payment tracking (for price difference)
+      paymentMethod:       { type: String, default: '' }, // cash, mobile_money, bank, custom, credit, etc.
+      bankProviderId:      { type: mongoose.Schema.Types.ObjectId, ref: 'BankProvider' },
+      bankProviderName:    { type: String, default: '' },
+      customMethodId:      { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentMethod' },
+      customMethodName:    { type: String, default: '' },
+      mpesaCode:           { type: String, default: '' },
+      mpesaPhone:          { type: String, default: '' },
     }],
     totalExchanged:       { type: Number, default: 0 },  // sum of price differences for all exchanges
     

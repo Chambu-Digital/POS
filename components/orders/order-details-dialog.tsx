@@ -43,6 +43,7 @@ interface OrderItem {
 }
 
 interface ReturnItem {
+  _id?: string
   productId?: string
   productName: string
   quantity: number
@@ -55,6 +56,31 @@ interface ReturnItem {
     name: string
   }
   returnedAt: string
+  status?: 'pending' | 'approved' | 'rejected'
+  approvedBy?: string
+  approvedAt?: string
+  refundAmount?: number
+  refundMethod?: string
+  customMethodName?: string
+  bankProviderName?: string
+}
+
+interface ExchangeItem {
+  _id?: string
+  returnedProductName: string
+  newProductName: string
+  quantityReturned: number
+  quantityReceived: number
+  priceDifference: number
+  reason: string
+  notes?: string
+  processedAt: string
+  status?: 'pending' | 'approved' | 'rejected'
+  approvedBy?: string
+  approvedAt?: string
+  paymentMethod?: string
+  customMethodName?: string
+  bankProviderName?: string
 }
 
 interface OrderDetailsDialogProps {
@@ -74,6 +100,7 @@ interface OrderDetailsDialogProps {
     }
     status?: string
     returns?: ReturnItem[]
+    exchanges?: ExchangeItem[]
     totalReturned?: number
     isPartiallyReturned?: boolean
     isFullyReturned?: boolean
@@ -89,6 +116,8 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
   const [refreshing, setRefreshing] = useState(false)
   const [settings, setSettings] = useState<any>(null)
   const [userInfo, setUserInfo] = useState<any>(null)
+  const [userType, setUserType] = useState<'user' | 'staff' | null>(null)
+  const [processingApproval, setProcessingApproval] = useState<string | null>(null)
   const receiptRef = useRef<ReceiptRef>(null)
 
   // Fetch settings and user info
@@ -100,7 +129,10 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
       if (settingsData?.settings) {
         setSettings(settingsData.settings)
       }
-      if (userData) setUserInfo(userData)
+      if (userData) {
+        setUserInfo(userData)
+        setUserType(userData.user?.type)
+      }
     }).catch(err => console.error('Failed to fetch data:', err))
   }, [])
 
@@ -124,6 +156,72 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
       console.error('Failed to refresh order:', error)
     } finally {
       setRefreshing(false)
+    }
+  }
+
+  // Approve/reject return
+  async function handleReturnApproval(returnId: string, status: 'approved' | 'rejected') {
+    if (!order?._id) return
+
+    const confirmed = window.confirm(
+      `${status === 'approved' ? 'Approve' : 'Reject'} this return?\n\n` +
+      `This action cannot be undone.`
+    )
+
+    if (!confirmed) return
+
+    setProcessingApproval(returnId)
+    try {
+      const response = await fetch(`/api/sales/${order._id}/returns/${returnId}/approve`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+
+      if (response.ok) {
+        await refreshOrder()
+      } else {
+        const error = await response.json()
+        alert(error.error || 'Failed to process approval')
+      }
+    } catch (error) {
+      console.error('Failed to process return approval:', error)
+      alert('Failed to process approval. Please try again.')
+    } finally {
+      setProcessingApproval(null)
+    }
+  }
+
+  // Approve/reject exchange
+  async function handleExchangeApproval(exchangeId: string, status: 'approved' | 'rejected') {
+    if (!order?._id) return
+
+    const confirmed = window.confirm(
+      `${status === 'approved' ? 'Approve' : 'Reject'} this exchange?\n\n` +
+      `This action cannot be undone.`
+    )
+
+    if (!confirmed) return
+
+    setProcessingApproval(exchangeId)
+    try {
+      const response = await fetch(`/api/sales/${order._id}/exchanges/${exchangeId}/approve`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+
+      if (response.ok) {
+        await refreshOrder()
+      } else {
+        const error = await response.json()
+        alert(error.error || 'Failed to process approval')
+      }
+    } catch (error) {
+      console.error('Failed to process exchange approval:', error)
+      alert('Failed to process approval. Please try again.')
+    } finally {
+      setProcessingApproval(null)
     }
   }
 
@@ -310,7 +408,6 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuItem>View Receipt</DropdownMenuItem>
                 <DropdownMenuItem>Assign To Customer</DropdownMenuItem>
-                <DropdownMenuItem className="text-red-600">Delete Order</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -329,10 +426,11 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
                     <thead className="bg-red-100/50">
                       <tr>
                         <th className="text-left p-3 font-medium">Item</th>
-                        <th className="text-right p-3 font-medium">Qty Returned</th>
-                        <th className="text-right p-3 font-medium">Value</th>
-                        <th className="text-left p-3 font-medium">Condition</th>
+                        <th className="text-right p-3 font-medium">Qty</th>
+                        <th className="text-right p-3 font-medium">Refund</th>
+                        <th className="text-left p-3 font-medium">Status</th>
                         <th className="text-left p-3 font-medium">Date</th>
+                        {userType === 'user' && <th className="text-center p-3 font-medium">Actions</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -346,15 +444,31 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
                                   Reason: {returnItem.reason}
                                 </p>
                               )}
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Condition: {returnItem.condition === 'resellable' ? '✓ Resellable' : '✗ Damaged'}
+                              </p>
                             </div>
                           </td>
                           <td className="p-3 text-right">{returnItem.quantity}</td>
                           <td className="p-3 text-right">
-                            {formatCurrency(returnItem.price * returnItem.quantity)}
+                            <div>
+                              <p>{formatCurrency(returnItem.refundAmount || (returnItem.price * returnItem.quantity))}</p>
+                              {returnItem.refundMethod && (
+                                <p className="text-xs text-muted-foreground">
+                                  via {returnItem.customMethodName || returnItem.bankProviderName || returnItem.refundMethod}
+                                </p>
+                              )}
+                            </div>
                           </td>
                           <td className="p-3">
-                            <Badge variant={returnItem.condition === 'resellable' ? 'default' : 'destructive'} className="text-xs">
-                              {returnItem.condition === 'resellable' ? '✓ Restocked' : '✗ Damaged'}
+                            <Badge variant={
+                              returnItem.status === 'approved' ? 'default' :
+                              returnItem.status === 'rejected' ? 'destructive' :
+                              'secondary'
+                            } className="text-xs">
+                              {returnItem.status === 'approved' ? '✓ Approved' :
+                               returnItem.status === 'rejected' ? '✗ Rejected' :
+                               '⏳ Pending'}
                             </Badge>
                           </td>
                           <td className="p-3 text-sm">
@@ -365,6 +479,35 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
                               minute: '2-digit'
                             })}
                           </td>
+                          {userType === 'user' && returnItem.status === 'pending' && (
+                            <td className="p-3">
+                              <div className="flex gap-2 justify-center">
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  onClick={() => handleReturnApproval(returnItem._id!, 'approved')}
+                                  disabled={processingApproval === returnItem._id}
+                                  className="bg-green-600 hover:bg-green-700 text-xs"
+                                >
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => handleReturnApproval(returnItem._id!, 'rejected')}
+                                  disabled={processingApproval === returnItem._id}
+                                  className="text-xs"
+                                >
+                                  Reject
+                                </Button>
+                              </div>
+                            </td>
+                          )}
+                          {userType === 'user' && returnItem.status !== 'pending' && (
+                            <td className="p-3 text-center text-xs text-muted-foreground">
+                              {returnItem.status === 'approved' ? 'Processed' : 'Rejected'}
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -425,6 +568,178 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
             </>
           )}
 
+          {/* Exchanges Section */}
+          {order.exchanges && order.exchanges.length > 0 && (
+            <>
+              <div>
+                <h3 className="font-semibold text-lg mb-4 text-blue-600">Exchanged Items</h3>
+                
+                {/* Desktop Table */}
+                <div className="hidden md:block border border-blue-200 rounded-lg overflow-hidden bg-blue-50/30">
+                  <table className="w-full">
+                    <thead className="bg-blue-100/50">
+                      <tr>
+                        <th className="text-left p-3 font-medium">Exchange</th>
+                        <th className="text-right p-3 font-medium">Qty</th>
+                        <th className="text-right p-3 font-medium">Difference</th>
+                        <th className="text-left p-3 font-medium">Status</th>
+                        <th className="text-left p-3 font-medium">Date</th>
+                        {userType === 'user' && <th className="text-center p-3 font-medium">Actions</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {order.exchanges.map((exchange, index) => (
+                        <tr key={index} className="border-t border-blue-200">
+                          <td className="p-3">
+                            <div>
+                              <p className="text-xs text-muted-foreground">Returned:</p>
+                              <p className="font-medium">{exchange.returnedProductName}</p>
+                              <p className="text-xs text-muted-foreground mt-1">Received:</p>
+                              <p className="font-medium text-green-600">{exchange.newProductName}</p>
+                              {exchange.reason && (
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Reason: {exchange.reason}
+                                </p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3 text-right">
+                            <div>
+                              <p className="text-red-600">-{exchange.quantityReturned}</p>
+                              <p className="text-green-600">+{exchange.quantityReceived}</p>
+                            </div>
+                          </td>
+                          <td className="p-3 text-right">
+                            <div>
+                              <p className={exchange.priceDifference >= 0 ? 'text-red-600 font-semibold' : 'text-green-600 font-semibold'}>
+                                {exchange.priceDifference >= 0 ? '+' : ''}{formatCurrency(Math.abs(exchange.priceDifference))}
+                              </p>
+                              {exchange.paymentMethod && exchange.priceDifference > 0 && (
+                                <p className="text-xs text-muted-foreground">
+                                  via {exchange.customMethodName || exchange.bankProviderName || exchange.paymentMethod}
+                                </p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <Badge variant={
+                              exchange.status === 'approved' ? 'default' :
+                              exchange.status === 'rejected' ? 'destructive' :
+                              'secondary'
+                            } className="text-xs">
+                              {exchange.status === 'approved' ? '✓ Approved' :
+                               exchange.status === 'rejected' ? '✗ Rejected' :
+                               '⏳ Pending'}
+                            </Badge>
+                          </td>
+                          <td className="p-3 text-sm">
+                            {new Date(exchange.processedAt).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </td>
+                          {userType === 'user' && exchange.status === 'pending' && (
+                            <td className="p-3">
+                              <div className="flex gap-2 justify-center">
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  onClick={() => handleExchangeApproval(exchange._id!, 'approved')}
+                                  disabled={processingApproval === exchange._id}
+                                  className="bg-green-600 hover:bg-green-700 text-xs"
+                                >
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => handleExchangeApproval(exchange._id!, 'rejected')}
+                                  disabled={processingApproval === exchange._id}
+                                  className="text-xs"
+                                >
+                                  Reject
+                                </Button>
+                              </div>
+                            </td>
+                          )}
+                          {userType === 'user' && exchange.status !== 'pending' && (
+                            <td className="p-3 text-center text-xs text-muted-foreground">
+                              {exchange.status === 'approved' ? 'Processed' : 'Rejected'}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Card Layout */}
+                <div className="md:hidden space-y-3">
+                  {order.exchanges.map((exchange, index) => (
+                    <div key={index} className="border border-blue-200 rounded-lg p-4 space-y-3 bg-blue-50/30">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Returned:</p>
+                        <p className="font-semibold text-sm">{exchange.returnedProductName}</p>
+                        <p className="text-xs text-muted-foreground mt-2">Received:</p>
+                        <p className="font-semibold text-sm text-green-600">{exchange.newProductName}</p>
+                        {exchange.reason && (
+                          <p className="text-xs text-muted-foreground mt-2">
+                            Reason: {exchange.reason}
+                          </p>
+                        )}
+                      </div>
+                      
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Price Difference</p>
+                          <p className={`font-bold ${exchange.priceDifference >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            {exchange.priceDifference >= 0 ? '+' : ''}{formatCurrency(Math.abs(exchange.priceDifference))}
+                          </p>
+                        </div>
+                        <Badge variant={
+                          exchange.status === 'approved' ? 'default' :
+                          exchange.status === 'rejected' ? 'destructive' :
+                          'secondary'
+                        } className="text-xs">
+                          {exchange.status === 'approved' ? 'Approved' :
+                           exchange.status === 'rejected' ? 'Rejected' :
+                           'Pending'}
+                        </Badge>
+                      </div>
+
+                      {userType === 'user' && exchange.status === 'pending' && (
+                        <div className="flex gap-2 pt-2">
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => handleExchangeApproval(exchange._id!, 'approved')}
+                            disabled={processingApproval === exchange._id}
+                            className="flex-1 bg-green-600 hover:bg-green-700"
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleExchangeApproval(exchange._id!, 'rejected')}
+                            disabled={processingApproval === exchange._id}
+                            className="flex-1"
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <Separator />
+            </>
+          )}
+
           {/* Product Order List */}
           <div>
             <h3 className="font-semibold text-lg mb-4">Product order list</h3>
@@ -444,8 +759,8 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
                 </thead>
                 <tbody>
                   {order.items.map((item, index) => {
-                    const itemName = typeof item.productId === 'object' && item.productId?.productName
-                      ? item.productId.productName
+                    const itemName = typeof item.productId === 'object' && item.productId?.name
+                      ? item.productId.name
                       : (item as any).productName || 'Unknown Item'
                     
                     const itemDetails = [item.brand, item.model, item.variant].filter(Boolean).join(' - ')
@@ -481,8 +796,8 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
             {/* Mobile Card Layout */}
             <div className="md:hidden space-y-3">
               {order.items.map((item, index) => {
-                const itemName = typeof item.productId === 'object' && item.productId?.productName
-                  ? item.productId.productName
+                const itemName = typeof item.productId === 'object' && item.productId?.name
+                  ? item.productId.name
                   : (item as any).productName || 'Unknown Item'
                 
                 const itemDetails = [item.brand, item.model, item.variant].filter(Boolean).join(' - ')

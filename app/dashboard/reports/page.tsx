@@ -23,7 +23,6 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import Link from 'next/link'
 
@@ -312,24 +311,18 @@ function ReportsPageContent() {
 
       {/* End-of-Day Report Quick Access */}
       <Link href="/dashboard/reports/end-of-day">
-        <Card className="border-green-200 bg-gradient-to-r from-green-50 to-emerald-50 hover:shadow-md transition-shadow cursor-pointer">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="bg-green-600 text-white p-3 rounded-lg">
-                  <CalendarClock className="h-6 w-6" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-green-900">End-of-Day Report</h3>
-                  <p className="text-sm text-green-700">
-                    Complete daily summary with payment breakdown by employee, credit tracking, and expenses
-                  </p>
-                </div>
+        <div className="border border-green-200 bg-green-50/50 hover:bg-green-50 hover:border-green-300 transition-colors cursor-pointer rounded-lg p-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <CalendarClock className="h-5 w-5 text-green-600" />
+              <div>
+                <h3 className="text-sm font-semibold text-green-900">End-of-Day Report</h3>
+                <p className="text-xs text-green-700">Daily summary with payments & expenses</p>
               </div>
-              <ArrowRight className="h-5 w-5 text-green-600" />
             </div>
-          </CardContent>
-        </Card>
+            <ArrowRight className="h-4 w-4 text-green-600" />
+          </div>
+        </div>
       </Link>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -416,7 +409,7 @@ function ReportsPageContent() {
             {selectedReport ? (
               <div className="space-y-6">
                 {/* Summary Stats */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {Object.entries(selectedReport.data.summary)
                     .filter(([key]) => {
                       // Filter out module-specific revenue if module not enabled
@@ -449,12 +442,10 @@ function ReportsPageContent() {
                         : (value as number).toLocaleString()
                       : String(value)
                     return (
-                      <Card key={key}>
-                        <CardContent className="pt-6">
-                          <div className="text-2xl font-bold">{formatted}</div>
-                          <p className="text-xs text-muted-foreground mt-1">{label}</p>
-                        </CardContent>
-                      </Card>
+                      <div key={key} className="border rounded p-3">
+                        <p className="text-lg font-bold">{formatted}</p>
+                        <p className="text-xs text-muted-foreground">{label}</p>
+                      </div>
                     )
                   })}
                 </div>
@@ -470,9 +461,9 @@ function ReportsPageContent() {
                     }, {})
                     
                     return Object.keys(paymentMethodTotals).length > 0 ? (
-                      <div>
-                        <p className="text-sm font-semibold text-gray-700 mb-2">Payment Methods</p>
-                        <div className="flex flex-wrap gap-3 bg-blue-50 border border-blue-200 rounded px-4 py-2 text-sm">
+                      <div className="border rounded p-3 bg-blue-50/50">
+                        <p className="text-xs font-semibold text-gray-700 mb-2">Payment Methods</p>
+                        <div className="flex flex-wrap gap-2 text-sm">
                           {Object.entries(paymentMethodTotals)
                             .sort(([, a], [, b]) => b - a)
                             .map(([method, total]) => {
@@ -498,8 +489,8 @@ function ReportsPageContent() {
                 {/* Source breakdown */}
                 {(selectedReport.data as any).sourceBreakdown && (
                   <div>
-                    <p className="text-sm font-semibold text-gray-700 mb-2">Revenue by Source</p>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <p className="text-xs font-semibold text-gray-700 mb-2">Revenue by Source</p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                       {[
                         { key: 'pos',    label: 'POS',     color: 'text-gray-800',   feature: 'pos.sales' },
                         { key: 'bar',    label: 'Bar',     color: 'text-green-700',  feature: 'bar.tabs' },
@@ -511,12 +502,10 @@ function ReportsPageContent() {
                           const d = (selectedReport.data as any).sourceBreakdown[key]
                           if (!d) return null
                           return (
-                            <Card key={key}>
-                              <CardContent className="pt-4 pb-4">
-                                <p className={`text-lg font-bold ${color}`}>KES {d.revenue.toLocaleString()}</p>
-                                <p className="text-xs text-muted-foreground">{label} · {d.count} orders</p>
-                              </CardContent>
-                            </Card>
+                            <div key={key} className="border rounded p-2">
+                              <p className={`text-base font-bold ${color}`}>KES {d.revenue.toLocaleString()}</p>
+                              <p className="text-xs text-muted-foreground">{label} · {d.count}</p>
+                            </div>
                           )
                         })}
                     </div>
@@ -562,52 +551,45 @@ function ReportsPageContent() {
         </CardHeader>
         <CardContent>
           {reports.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Date Range</TableHead>
-                  <TableHead>Generated</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {reports.map((report) => (
-                  <TableRow key={report._id}>
-                    <TableCell>
-                      <Badge variant="outline">{report.reportType}</Badge>
-                    </TableCell>
-                    <TableCell>{report.title}</TableCell>
-                    <TableCell className="text-sm">
-                      {new Date(report.dateRange.startDate).toLocaleDateString()} -{' '}
-                      {new Date(report.dateRange.endDate).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {new Date(report.generatedAt).toLocaleString()}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setSelectedReport(report)}
-                        >
-                          View
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => downloadReport(report)}
-                        >
-                          <Download className="h-4 w-4" />
-                        </Button>
+            <div className="space-y-2">
+              {reports.map((report) => (
+                <div key={report._id} className="border rounded-lg p-3 hover:bg-accent transition-colors">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Badge variant="outline" className="text-xs">{report.reportType}</Badge>
+                        <span className="font-medium text-sm truncate">{report.title}</span>
                       </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                        <span>
+                          {new Date(report.dateRange.startDate).toLocaleDateString()} - {new Date(report.dateRange.endDate).toLocaleDateString()}
+                        </span>
+                        <span>•</span>
+                        <span>{new Date(report.generatedAt).toLocaleString()}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 flex-shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setSelectedReport(report)}
+                        className="h-8"
+                      >
+                        View
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => downloadReport(report)}
+                        className="h-8 w-8 p-0"
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <FileText className="mx-auto h-12 w-12 mb-4 opacity-50" />

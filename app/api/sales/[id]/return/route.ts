@@ -14,6 +14,14 @@ interface ReturnItem {
   quantity: number
   price: number
   condition: 'resellable' | 'damaged'
+  refundAmount?: number
+  refundMethod?: string
+  bankProviderId?: string
+  bankProviderName?: string
+  customMethodId?: string
+  customMethodName?: string
+  mpesaCode?: string
+  mpesaPhone?: string
 }
 
 export async function POST(
@@ -67,7 +75,7 @@ export async function POST(
       return NextResponse.json({ error: 'Sale not found' }, { status: 404 })
     }
 
-    // Process returns
+    // Process returns - CREATE AS PENDING (no stock changes yet)
     const processedItems: any[] = []
     const returnEntries: any[] = []
     
@@ -75,59 +83,8 @@ export async function POST(
       if (!returnItem.productId || returnItem.quantity <= 0) continue
 
       const productObjId = new Types.ObjectId(returnItem.productId)
-      
-      // Get current product stock
-      const product = await models.Product.findOne({
-        _id: productObjId,
-        userId: ownerId,
-      })
 
-      if (!product) {
-        console.warn(`[return] Product ${returnItem.productId} not found, skipping`)
-        continue
-      }
-
-      const previousStock = product.stock || 0
-      let newStock = previousStock
-      let movementType = ''
-
-      if (returnItem.condition === 'resellable') {
-        // Return to inventory
-        newStock = previousStock + returnItem.quantity
-        movementType = 'RETURN'
-        
-        // Update product stock
-        await models.Product.findByIdAndUpdate(
-          productObjId,
-          {
-            stock: newStock,
-            updatedAt: new Date(),
-          }
-        )
-      } else if (returnItem.condition === 'damaged') {
-        // Do not restock - record as damage
-        newStock = previousStock // no change
-        movementType = 'DAMAGE'
-      }
-
-      // Create movement entry
-      await (models as any).StockLedger.create({
-        userId: ownerId,
-        branchId: branchContext ? new Types.ObjectId(branchContext) : null,
-        productId: productObjId,
-        saleId: saleId,
-        staffId: staffId ? new Types.ObjectId(staffId) : null,
-        type: movementType,
-        quantity: returnItem.condition === 'resellable' ? returnItem.quantity : -returnItem.quantity,
-        previousStock,
-        newStock,
-        orderNumber: sale.orderNumber,
-        reason: reason.trim(),
-        notes: notes?.trim() || `Returned from ${sale.orderNumber}`,
-        timestamp: new Date(),
-      })
-
-      // Build return entry for sale document
+      // Build return entry for sale document - NO STOCK CHANGES YET
       returnEntries.push({
         productId: productObjId,
         productName: returnItem.productName,
@@ -138,36 +95,33 @@ export async function POST(
         notes: notes?.trim() || '',
         returnedBy: staffId ? new Types.ObjectId(staffId) : null,
         returnedAt: new Date(),
+        status: 'pending', // Awaiting approval
+        refundAmount: returnItem.refundAmount || (returnItem.quantity * returnItem.price),
+        refundMethod: returnItem.refundMethod || '',
+        bankProviderId: returnItem.bankProviderId || null,
+        bankProviderName: returnItem.bankProviderName || '',
+        customMethodId: returnItem.customMethodId || null,
+        customMethodName: returnItem.customMethodName || '',
+        mpesaCode: returnItem.mpesaCode || '',
+        mpesaPhone: returnItem.mpesaPhone || '',
       })
 
       processedItems.push({
         productName: returnItem.productName,
         quantity: returnItem.quantity,
         condition: returnItem.condition,
-        restocked: returnItem.condition === 'resellable',
+        status: 'pending',
       })
     }
 
     // Calculate total returned value
     const totalReturnedValue = returnEntries.reduce((sum, entry) => {
-      return sum + (entry.quantity * entry.price)
+      return sum + (entry.refundAmount || 0)
     }, 0)
 
-    // Determine if this is a full or partial return
-    const totalOriginalQuantity = sale.items.reduce((sum: number, item: any) => sum + item.quantity, 0)
-    const totalReturnedQuantity = returnEntries.reduce((sum, entry) => sum + entry.quantity, 0)
-    const isFullyReturned = totalReturnedQuantity >= totalOriginalQuantity
-
-    // Append returns to sale and update status
+    // Do NOT change sale status - returns are pending approval
     const updateData: any = {
       $push: { returns: { $each: returnEntries } },
-      $inc: { totalReturned: totalReturnedValue },
-      $set: {
-        isPartiallyReturned: !isFullyReturned,
-        isFullyReturned: isFullyReturned,
-        status: isFullyReturned ? 'refunded' : 'partially_refunded',
-        updatedAt: new Date(),
-      },
     }
 
     await models.Sale.findByIdAndUpdate(saleId, updateData)
@@ -177,6 +131,7 @@ export async function POST(
       saleNumber: sale.orderNumber,
       itemsReturned: processedItems.length,
       items: processedItems,
+      message: 'Return request submitted - awaiting approval',
     }, { status: 200 })
 
   } catch (error) {
