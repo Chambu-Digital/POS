@@ -95,6 +95,48 @@ export async function GET(request: NextRequest) {
       return sale
     })
 
+    // ── Backfill missing brand/model/variant for old orders ──────────────────
+    // Collect all unique productIds from items that are missing these fields
+    const productIdsToLookup = new Set<string>()
+    salesWithStaff.forEach((sale: any) => {
+      sale.items?.forEach((item: any) => {
+        if (item.productId && (!item.brand && !item.model && !item.variant)) {
+          productIdsToLookup.add(item.productId.toString())
+        }
+      })
+    })
+
+    // Fetch product details if needed
+    let productMap = new Map()
+    if (productIdsToLookup.size > 0) {
+      const products = await conn.db.collection('products')
+        .find({ _id: { $in: Array.from(productIdsToLookup).map(id => new Types.ObjectId(id)) } })
+        .project({ _id: 1, brand: 1, model: 1, variant: 1 })
+        .toArray()
+
+      products.forEach((p: any) => {
+        productMap.set(p._id.toString(), {
+          brand: p.brand || '',
+          model: p.model || '',
+          variant: p.variant || '',
+        })
+      })
+    }
+
+    // Enrich items with missing brand/model/variant
+    salesWithStaff.forEach((sale: any) => {
+      sale.items?.forEach((item: any) => {
+        if (item.productId && (!item.brand && !item.model && !item.variant)) {
+          const productInfo = productMap.get(item.productId.toString())
+          if (productInfo) {
+            item.brand = productInfo.brand
+            item.model = productInfo.model
+            item.variant = productInfo.variant
+          }
+        }
+      })
+    })
+
     return NextResponse.json({ sales: salesWithStaff })
   } catch (error) {
     console.error('[sales] GET error:', error)

@@ -10,22 +10,50 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const { models } = await getTenantDB(request)
     const { id } = await params
-    const { amount, note } = await request.json()
+    const { amount, note, paymentMethod, mpesaCode, mpesaPhone, bankProviderId, bankProviderName, customMethodId, customMethodName } = await request.json()
 
     if (!amount || amount <= 0) return NextResponse.json({ error: 'Invalid amount' }, { status: 400 })
+    
+    // Require payment method
+    if (!paymentMethod) {
+      return NextResponse.json({ error: 'Payment method is required' }, { status: 400 })
+    }
 
     const customer = await models.Customer.findById(id)
     if (!customer) return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
 
     const payment = Math.min(amount, customer.creditBalance)
     customer.creditBalance -= payment
+    
+    // Build note with payment method
+    let paymentNote = note || 'Credit payment'
+    if (paymentMethod === 'mobile_money' && mpesaCode) {
+      paymentNote += ` (M-Pesa: ${mpesaCode})`
+    } else if (paymentMethod === 'bank' && bankProviderName) {
+      paymentNote += ` (${bankProviderName})`
+    } else if (paymentMethod === 'custom' && customMethodName) {
+      paymentNote += ` (${customMethodName})`
+    } else if (paymentMethod === 'cash') {
+      paymentNote += ' (Cash)'
+    } else if (paymentMethod === 'card') {
+      paymentNote += ' (Card)'
+    }
+    
     customer.ledger.push({
       date: new Date(),
       type: 'payment',
       amount: -payment,
       balance: customer.creditBalance,
-      note: note || 'Credit payment',
-    })
+      note: paymentNote,
+      // Store payment method details for reporting
+      paymentMethod,
+      mpesaCode: mpesaCode || undefined,
+      mpesaPhone: mpesaPhone || undefined,
+      bankProviderId: bankProviderId || undefined,
+      bankProviderName: bankProviderName || undefined,
+      customMethodId: customMethodId || undefined,
+      customMethodName: customMethodName || undefined,
+    } as any)
     await customer.save()
 
     return NextResponse.json({ customer, paid: payment })

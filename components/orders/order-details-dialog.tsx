@@ -33,6 +33,10 @@ interface OrderItem {
     _id: string
     name: string
   }
+  productName?: string
+  brand?: string
+  model?: string
+  variant?: string
   quantity: number
   price: number
   discount: number
@@ -439,64 +443,82 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
                   </tr>
                 </thead>
                 <tbody>
-                  {order.items.map((item, index) => (
-                    <tr key={index} className="border-t">
-                      <td className="p-3">{index + 1}</td>
-                      <td className="p-3">
-                        {typeof item.productId === 'object' && item.productId?.productName
-                          ? item.productId.productName
-                          : (item as any).productName || 'Unknown Item'}
-                      </td>
-                      <td className="p-3 text-right">{item.quantity}</td>
-                      <td className="p-3 text-right">
-                        {formatCurrency(item.price)}
-                      </td>
-                      <td className="p-3 text-right">
-                        {formatCurrency(item.discount)}
-                      </td>
-                      <td className="p-3 text-right">
-                        {formatCurrency(item.price * item.quantity - item.discount)}
-                      </td>
-                    </tr>
-                  ))}
+                  {order.items.map((item, index) => {
+                    const itemName = typeof item.productId === 'object' && item.productId?.productName
+                      ? item.productId.productName
+                      : (item as any).productName || 'Unknown Item'
+                    
+                    const itemDetails = [item.brand, item.model, item.variant].filter(Boolean).join(' - ')
+                    
+                    return (
+                      <tr key={index} className="border-t">
+                        <td className="p-3">{index + 1}</td>
+                        <td className="p-3">
+                          <div>
+                            <div>{itemName}</div>
+                            {itemDetails && (
+                              <div className="text-xs text-muted-foreground mt-0.5">{itemDetails}</div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-3 text-right">{item.quantity}</td>
+                        <td className="p-3 text-right">
+                          {formatCurrency(item.price)}
+                        </td>
+                        <td className="p-3 text-right">
+                          {formatCurrency(item.discount)}
+                        </td>
+                        <td className="p-3 text-right">
+                          {formatCurrency(item.price * item.quantity - item.discount)}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
 
             {/* Mobile Card Layout */}
             <div className="md:hidden space-y-3">
-              {order.items.map((item, index) => (
-                <div key={index} className="border rounded-lg p-4 space-y-2">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <p className="font-semibold text-sm">
-                        {typeof item.productId === 'object' && item.productId?.productName
-                          ? item.productId.productName
-                          : (item as any).productName || 'Unknown Item'}
+              {order.items.map((item, index) => {
+                const itemName = typeof item.productId === 'object' && item.productId?.productName
+                  ? item.productId.productName
+                  : (item as any).productName || 'Unknown Item'
+                
+                const itemDetails = [item.brand, item.model, item.variant].filter(Boolean).join(' - ')
+                
+                return (
+                  <div key={index} className="border rounded-lg p-4 space-y-2">
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <p className="font-semibold text-sm">{itemName}</p>
+                        {itemDetails && (
+                          <p className="text-xs text-muted-foreground mt-0.5">{itemDetails}</p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-1">Item #{index + 1}</p>
+                      </div>
+                      <p className="font-bold text-sm">
+                        {formatCurrency(item.price * item.quantity - item.discount)}
                       </p>
-                      <p className="text-xs text-muted-foreground mt-1">Item #{index + 1}</p>
                     </div>
-                    <p className="font-bold text-sm">
-                      {formatCurrency(item.price * item.quantity - item.discount)}
-                    </p>
-                  </div>
-                  
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <div>
-                      <p className="text-muted-foreground">Qty</p>
-                      <p className="font-semibold">{item.quantity}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Price</p>
-                      <p className="font-semibold">{formatCurrency(item.price)}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Discount</p>
-                      <p className="font-semibold text-orange-600">{formatCurrency(item.discount)}</p>
+                    
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div>
+                        <p className="text-muted-foreground">Qty</p>
+                        <p className="font-semibold">{item.quantity}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Price</p>
+                        <p className="font-semibold">{formatCurrency(item.price)}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Discount</p>
+                        <p className="font-semibold text-orange-600">{formatCurrency(item.discount)}</p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
 
@@ -596,6 +618,9 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
               productName: typeof item.productId === 'object' && item.productId?.productName
                 ? item.productId.productName
                 : item.productName || 'Unknown Item',
+              brand: item.brand,
+              model: item.model,
+              variant: item.variant,
               quantity: item.quantity,
               price: item.price,
               discount: item.discount,

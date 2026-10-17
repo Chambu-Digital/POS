@@ -4,6 +4,7 @@ import { getModels } from '@/lib/tenant/get-models'
 import { getAdminModels } from '@/lib/admin-models'
 import { verifyAdminSession } from '../../../auth/route'
 import { checkEmailExistsAcrossTenants } from '@/lib/auth/check-email-exists'
+import { upsertEmailIndex } from '@/lib/email-index'
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!await verifyAdminSession(request)) {
@@ -41,6 +42,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       role: 'admin',
     })
     await user.save()
+
+    // Update email index for fast login
+    await upsertEmailIndex({
+      email,
+      tenantId: id,
+      userType: 'user',
+      userId: user._id.toString(),
+      isActive: true
+    })
 
     return NextResponse.json({ ok: true, userId: user._id })
   } catch (error: any) {

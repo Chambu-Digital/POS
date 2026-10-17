@@ -71,6 +71,9 @@ export const saleSchema = new mongoose.Schema(
     items: [{
       productId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: false },
       productName: { type: String, required: true },
+      brand:       { type: String, default: '' },
+      model:       { type: String, default: '' },
+      variant:     { type: String, default: '' },
       quantity:    { type: Number, required: true },
       price:       { type: Number, required: true },
       discount:    { type: Number, default: 0 },
@@ -176,12 +179,20 @@ export const customerSchema = new mongoose.Schema(
     creditBalance: { type: Number, default: 0 }, // positive = owes us, negative = we owe them
     creditLimit:   { type: Number, default: 0 }, // maximum credit allowed (0 = no credit)
     ledger: [{
-      date:        { type: Date, default: Date.now },
-      type:        { type: String, enum: ['purchase', 'payment', 'adjustment'] },
-      amount:      Number,   // positive = debt added, negative = debt reduced
-      balance:     Number,   // running balance after this entry
-      saleId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' },
-      note:        String,
+      date:             { type: Date, default: Date.now },
+      type:             { type: String, enum: ['purchase', 'payment', 'adjustment'] },
+      amount:           Number,   // positive = debt added, negative = debt reduced
+      balance:          Number,   // running balance after this entry
+      saleId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' },
+      note:             String,
+      // Payment method tracking (for 'payment' type entries)
+      paymentMethod:    { type: String, enum: ['cash', 'card', 'mobile_money', 'bank', 'custom'], default: undefined },
+      mpesaCode:        { type: String, default: '' },
+      mpesaPhone:       { type: String, default: '' },
+      bankProviderId:   { type: mongoose.Schema.Types.ObjectId, ref: 'BankProvider' },
+      bankProviderName: { type: String, default: '' },
+      customMethodId:   { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentMethod' },
+      customMethodName: { type: String, default: '' },
     }],
     createdAt:     { type: Date, default: Date.now },
   },
@@ -469,21 +480,37 @@ expenseCategorySchema.index({ userId: 1, name: 1 }, { unique: true })
 
 export const expenseSchema = new mongoose.Schema(
   {
-    userId:     { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    staffId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
-    title:      { type: String, required: true, trim: true },
-    category:   { type: String, required: true },
-    notes:      { type: String, default: '' },
-    amount:     { type: Number, required: true },
-    date:       { type: Date, default: Date.now },
-    status:     { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
-    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    approvedAt: Date,
-    createdAt:  { type: Date, default: Date.now },
+    userId:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' }, // Branch where expense occurred
+    staffId:       { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },  // Who logged the expense
+    paidBy:        { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },  // Who paid the expense (null = owner)
+    title:         { type: String, required: true, trim: true },
+    category:      { type: String, default: '' }, // Optional category
+    notes:         { type: String, default: '' },
+    amount:        { type: Number, required: true },
+    date:          { type: Date, default: Date.now },  // When expense was incurred
+    paymentMethod: { type: String, enum: ['cash', 'card', 'mobile_money', 'bank', 'custom', ''], default: '' }, // How it was paid
+    paymentDate:   { type: Date },  // When it was actually paid (may differ from approval date)
+    receiptNumber: { type: String, default: '', trim: true },  // Receipt/reference number
+    
+    // Payment method details (matching Sale schema pattern)
+    bankProviderId:    { type: mongoose.Schema.Types.ObjectId, ref: 'BankProvider' },
+    bankProviderName:  { type: String, default: '' },
+    customMethodId:    { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentMethod' },
+    customMethodName:  { type: String, default: '' },
+    mpesaCode:         { type: String, default: '' },
+    mpesaPhone:        { type: String, default: '' },
+    
+    status:        { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    approvedBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    approvedAt:    Date,
+    createdAt:     { type: Date, default: Date.now },
   },
   { collection: 'expenses' }
 )
 expenseSchema.index({ userId: 1, createdAt: -1 })
+expenseSchema.index({ userId: 1, branchId: 1, createdAt: -1 })
+expenseSchema.index({ userId: 1, status: 1 })
 
 // ── Report ────────────────────────────────────────────────────────────────────
 export const reportSchema = new mongoose.Schema(

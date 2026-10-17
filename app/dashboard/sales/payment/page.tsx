@@ -445,6 +445,9 @@ function PaymentPageContent() {
         items: cart.map(item => ({
           productId: item.productId,
           productName: item.productName,
+          brand: item.brand,
+          model: item.model,
+          variant: item.variant,
           quantity: item.quantity,
           price: item.sellingPrice,
           discount: item.discount,
@@ -586,7 +589,16 @@ function PaymentPageContent() {
 
   function cancelOrder() { 
     sessionStorage.removeItem('pendingSale')
-    router.push(returnUrl) 
+    if (isOnline()) {
+      router.push(returnUrl)
+    } else {
+      // Offline: just reset to allow new sale
+      setCart([])
+      setCartDiscount(0)
+      setSelectedCustomer(null)
+      setPaymentEntries([])
+      toast.info('Order cancelled. Working offline.')
+    }
   }
 
   function holdOrder() {
@@ -596,7 +608,16 @@ function PaymentPageContent() {
     held.push({ id: `hold-${Date.now()}`, cart, cartDiscount, heldAt: new Date().toISOString() })
     localStorage.setItem(heldKey, JSON.stringify(held))
     sessionStorage.removeItem('pendingSale')
-    router.push(returnUrl)
+    if (isOnline()) {
+      router.push(returnUrl)
+    } else {
+      // Offline: reset state
+      setCart([])
+      setCartDiscount(0)
+      setSelectedCustomer(null)
+      setPaymentEntries([])
+      toast.success('Order held. Working offline.')
+    }
   }
 
   if (loading) return <div className="flex items-center justify-center h-screen"><div className="text-lg">Loading...</div></div>
@@ -1099,7 +1120,17 @@ function PaymentPageContent() {
               sessionStorage.removeItem('pendingSale')
               sessionStorage.removeItem('activeCart')
               sessionStorage.removeItem('activeCartDiscount')
-              router.push(returnUrl)
+              // Only navigate if online
+              if (isOnline()) {
+                router.push(returnUrl)
+              } else {
+                // Reset state to allow new sale without navigation
+                setCart([])
+                setCartDiscount(0)
+                setSelectedCustomer(null)
+                setPaymentEntries([])
+                setLastSale(null)
+              }
             }
           }}
           orderNumber={lastSale.receiptNumber}
@@ -1115,7 +1146,18 @@ function PaymentPageContent() {
             sessionStorage.removeItem('pendingSale')
             sessionStorage.removeItem('activeCart')
             sessionStorage.removeItem('activeCartDiscount')
-            router.push(returnUrl)
+            // Only navigate if online
+            if (isOnline()) {
+              router.push(returnUrl)
+            } else {
+              // Reset state to allow new sale without navigation
+              setShowCompletionDialog(false)
+              setCart([])
+              setCartDiscount(0)
+              setSelectedCustomer(null)
+              setPaymentEntries([])
+              setLastSale(null)
+            }
           }}
         />
       )}

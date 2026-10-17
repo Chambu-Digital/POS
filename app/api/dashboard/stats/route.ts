@@ -49,9 +49,34 @@ export async function GET(request: NextRequest) {
       ...(isStaff ? { servedBy: payload.userId } : {}),
     }).lean() : []
 
+    // Calculate sales revenue (excluding credit - that's debt, not money)
+    const salesRevenue = todaySales.reduce((s, x) => s + x.total, 0) + todayHospitalitySales.reduce((s: any, x: any) => s + x.total, 0)
+    
+    // Calculate credit collected today (debt payments received)
+    let creditCollected = 0
+    const todayCustomers = await models.Customer.find({
+      userId: ownerId,
+      'ledger.date': { $gte: todayStart, $lte: todayEnd },
+      'ledger.type': 'payment'
+    }).lean()
+    
+    todayCustomers.forEach((customer: any) => {
+      customer.ledger.forEach((entry: any) => {
+        const entryDate = new Date(entry.date)
+        if (
+          entryDate >= todayStart &&
+          entryDate <= todayEnd &&
+          entry.type === 'payment' &&
+          entry.amount < 0 // Negative means debt reduced
+        ) {
+          creditCollected += Math.abs(entry.amount)
+        }
+      })
+    })
+    
     const todayStats = {
       totalOrders: todaySales.length + todayHospitalitySales.length,
-      totalRevenue: todaySales.reduce((s, x) => s + x.total, 0) + todayHospitalitySales.reduce((s: any, x: any) => s + x.total, 0),
+      totalRevenue: salesRevenue + creditCollected, // Include credit collected in total revenue
       bySource: {
         pos:          todaySales.filter((s: any) => !s.source || s.source === 'pos').reduce((sum, s) => sum + s.total, 0),
         kds:          todaySales.filter((s: any) => s.source === 'kds').reduce((sum, s) => sum + s.total, 0),
@@ -64,15 +89,21 @@ export async function GET(request: NextRequest) {
           s.payments.forEach((p: any) => {
             // Use customMethodName if available, otherwise use method
             const methodName = p.customMethodName || p.method || 'cash'
+            // Skip "credit" - it's not actual money
+            if (methodName.toLowerCase() === 'credit') return
             acc[methodName] = (acc[methodName] || 0) + (p.amount || 0)
           })
         } else {
           // Fallback to legacy paymentMethod field
           const m = s.paymentMethod || 'cash'
+          // Skip "credit"
+          if (m.toLowerCase() === 'credit') return
           acc[m] = (acc[m] || 0) + s.total
         }
         return acc
       }, {}),
+      creditIssued: todaySales.reduce((sum, s: any) => sum + (s.debt || 0), 0),
+      creditCollected: creditCollected,
     }
 
     // Staff without reports permission — minimal response only
@@ -259,11 +290,23 @@ export async function GET(request: NextRequest) {
     })
 
     const paymentMethods: Record<string, { method: string; count: number; total: number }> = {}
+    let creditIssued = 0
+    // creditCollected will be calculated separately from customer ledger for the period
+    let periodCreditCollected = 0
+    
     ;[...recentSales, ...recentHospitalitySales].forEach((sale: any) => {
+      // Track credit issued (debt created)
+      if (sale.debt && sale.debt > 0) {
+        creditIssued += sale.debt
+      }
+      
       // Use payments array if available for better custom method tracking
       if (sale.payments && Array.isArray(sale.payments) && sale.payments.length > 0) {
         sale.payments.forEach((p: any) => {
           const methodName = p.customMethodName || p.method || 'cash'
+          // Skip "credit" as a payment method - it's not actual money
+          if (methodName.toLowerCase() === 'credit') return
+          
           if (!paymentMethods[methodName]) paymentMethods[methodName] = { method: methodName, count: 0, total: 0 }
           paymentMethods[methodName].count += 1
           paymentMethods[methodName].total += (p.amount || 0)
@@ -271,10 +314,33 @@ export async function GET(request: NextRequest) {
       } else {
         // Fallback to legacy paymentMethod
         const method = sale.paymentMethod || 'cash'
+        // Skip "credit" as a payment method
+        if (method.toLowerCase() === 'credit') return
+        
         if (!paymentMethods[method]) paymentMethods[method] = { method, count: 0, total: 0 }
         paymentMethods[method].count += 1
         paymentMethods[method].total += sale.total
       }
+    })
+    
+    // Calculate credit payments received (from customer ledger)
+    const customers = await models.Customer.find({
+      userId: ownerId,
+      'ledger.date': { $gte: startDate },
+      'ledger.type': 'payment'
+    }).lean()
+    
+    customers.forEach((customer: any) => {
+      customer.ledger.forEach((entry: any) => {
+        const entryDate = new Date(entry.date)
+        if (
+          entryDate >= startDate &&
+          entry.type === 'payment' &&
+          entry.amount < 0 // Negative means debt reduced
+        ) {
+          periodCreditCollected += Math.abs(entry.amount)
+        }
+      })
     })
 
     // Combine recent orders from both sources
@@ -323,6 +389,8 @@ export async function GET(request: NextRequest) {
       stats: {
         isStaffView: false,
         totalSales, totalRevenue, totalDiscount, averageSaleValue, revenueBySource,
+        creditIssued,
+        creditCollected: periodCreditCollected,
         recentPeriod: {
           days,
           totalSales: recentSales.length + recentHospitalitySales.length,

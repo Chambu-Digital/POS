@@ -4,54 +4,10 @@ import { getModels } from '@/lib/tenant/get-models'
 import { createToken, setAuthCookie } from '@/lib/jwt'
 import { DEMO_EMAIL, DEMO_PASSWORD, DEMO_USER_ID, getDemoUser } from '@/lib/demo'
 import { normaliseFeatures, normalisePermissions, DEFAULT_MODULE_FEATURES } from '@/lib/modules'
+import { findUserByEmail } from '@/lib/email-index'
 import { NextRequest, NextResponse } from 'next/server'
 import mongoose from 'mongoose'
 import { connectDB } from '@/lib/db'
-
-// ── Tenant list cache ───────────────────────────────────────────────────────
-// Cached for 5 minutes to avoid repeated admin DB queries on every login
-interface TenantCache {
-  data: Array<{
-    _id: any
-    mongoUri: string
-    features: Record<string, boolean>
-    shopName: string
-  }>
-  timestamp: number
-}
-
-declare global {
-  // eslint-disable-next-line no-var
-  var _tenantListCache: TenantCache | undefined
-}
-
-const TENANT_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
-
-async function getCachedTenantList() {
-  const now = Date.now()
-  
-  // Return cached data if still valid
-  if (global._tenantListCache && (now - global._tenantListCache.timestamp) < TENANT_CACHE_TTL) {
-    const age = Math.round((now - global._tenantListCache.timestamp) / 1000)
-    console.log(`[login] 📦 Using cached tenant list (age: ${age}s, ${global._tenantListCache.data.length} tenants)`)
-    return global._tenantListCache.data
-  }
-  
-  // Fetch fresh data
-  console.log('[login] 🔄 Fetching fresh tenant list from admin DB...')
-  const { Tenant } = await getAdminModels()
-  const tenants = await Tenant.find({ isActive: true }).lean() as unknown as Array<{
-    _id: any; mongoUri: string; features: Record<string, boolean>; shopName: string
-  }>
-  
-  // Update cache
-  global._tenantListCache = {
-    data: tenants,
-    timestamp: now
-  }
-  
-  return tenants
-}
 
 // ── Candidate match found across tenant search ─────────────────────────────
 interface Candidate {
@@ -90,81 +46,113 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: 'Login successful', user: { ...getDemoUser(), isDemo: true } })
     }
 
-    // ── Search all active tenants ────────────────────────────────────────────
-    const tenantLoadStart = Date.now()
-    const tenants = await getCachedTenantList()
-    timings.tenantLoad = Date.now() - tenantLoadStart
+    // ── Fast email lookup using index ───────────────────────────────────────
+    const indexLookupStart = Date.now()
+    console.log('[login] 🔍 Looking up email in index...')
+    
+    const emailEntries = await findUserByEmail(email)
+    timings.indexLookup = Date.now() - indexLookupStart
+    
+    console.log(`[login] 📊 Index lookup completed in ${timings.indexLookup}ms`)
+    console.log(`[login] Found ${emailEntries.length} entries for ${email}\n`)
 
-    console.log(`[login] 📊 Loaded ${tenants.length} active tenants in ${timings.tenantLoad}ms`)
-    console.log(`[login] Tenants: ${tenants.map(t => t.shopName || 'Unnamed').join(', ')}\n`)
-
+    // ── Search specific tenants only ─────────────────────────────────────────
     const ownerCandidates: Candidate[] = []
     const staffCandidates: Candidate[]  = []
-    const tenantSearchStart = Date.now()
-    let totalConnectionTime = 0
-    let totalUserQueryTime = 0
-    let totalStaffQueryTime = 0
-
-    console.log('[login] 🔍 Searching across all tenants...\n')
-
-    for (let i = 0; i < tenants.length; i++) {
-      const tenant = tenants[i]
-      const tenantStart = Date.now()
+    
+    if (emailEntries.length > 0) {
+      console.log('[login] 🎯 Searching specific tenant(s) from index...\n')
       
-      try {
-        const connStart = Date.now()
-        const conn   = await connectTenantDB(tenant.mongoUri)
-        const connTime = Date.now() - connStart
-        totalConnectionTime += connTime
+      const tenantSearchStart = Date.now()
+      const { Tenant } = await getAdminModels()
+      let totalConnectionTime = 0
+      let totalQueryTime = 0
+      
+      for (let i = 0; i < emailEntries.length; i++) {
+        const entry = emailEntries[i]
+        const entryStart = Date.now()
         
-        const models = getModels(conn)
-        const features = normaliseFeatures(tenant.features || {})
-
-        // Owner match
-        const userQueryStart = Date.now()
-        const userRecord = await models.User.findOne({ email }).select('+password')
-        const userQueryTime = Date.now() - userQueryStart
-        totalUserQueryTime += userQueryTime
-        
-        if (userRecord) {
-          console.log(`[login]   Tenant ${i+1}/${tenants.length} (${tenant.shopName}): ✓ OWNER found (conn: ${connTime}ms, query: ${userQueryTime}ms)`)
-          ownerCandidates.push({ record: userRecord, type: 'user', mongoUri: tenant.mongoUri, features })
-        } else {
-          console.log(`[login]   Tenant ${i+1}/${tenants.length} (${tenant.shopName}): - no owner (conn: ${connTime}ms, query: ${userQueryTime}ms)`)
+        try {
+          // Get tenant info
+          const tenant = await Tenant.findById(entry.tenantId).lean() as any
+          if (!tenant || !tenant.isActive) {
+            console.log(`[login]   Entry ${i+1}/${emailEntries.length}: ✗ Tenant not found or inactive`)
+            continue
+          }
+          
+          console.log(`[login]   Entry ${i+1}/${emailEntries.length} (${tenant.shopName}): Checking ${entry.userType}...`)
+          
+          // Connect to tenant DB
+          const connStart = Date.now()
+          const conn = await connectTenantDB(tenant.mongoUri)
+          const connTime = Date.now() - connStart
+          totalConnectionTime += connTime
+          
+          const models = getModels(conn)
+          const features = normaliseFeatures(tenant.features || {})
+          
+          // Query only the specific user type
+          const queryStart = Date.now()
+          if (entry.userType === 'user') {
+            const userRecord = await models.User.findOne({ email }).select('+password')
+            const queryTime = Date.now() - queryStart
+            totalQueryTime += queryTime
+            
+            if (userRecord) {
+              console.log(`[login]   ✓ OWNER found (conn: ${connTime}ms, query: ${queryTime}ms)`)
+              ownerCandidates.push({ 
+                record: userRecord, 
+                type: 'user', 
+                mongoUri: tenant.mongoUri, 
+                features 
+              })
+            } else {
+              console.log(`[login]   ✗ Owner not found (index may be stale)`)
+            }
+          } else {
+            const staffRecord = await models.Staff.findOne({ email, active: true }).select('+password')
+            const queryTime = Date.now() - queryStart
+            totalQueryTime += queryTime
+            
+            if (staffRecord) {
+              console.log(`[login]   ✓ STAFF found (conn: ${connTime}ms, query: ${queryTime}ms)`)
+              staffCandidates.push({ 
+                record: staffRecord, 
+                type: 'staff', 
+                mongoUri: tenant.mongoUri, 
+                features 
+              })
+            } else {
+              console.log(`[login]   ✗ Staff not found or inactive (index may be stale)`)
+            }
+          }
+          
+          const entryTime = Date.now() - entryStart
+          console.log(`[login]   Entry ${i+1}/${emailEntries.length} total time: ${entryTime}ms\n`)
+          
+        } catch (err) {
+          console.error(`[login]   Entry ${i+1}/${emailEntries.length}: ✗ ERROR -`, err)
+          continue
         }
-
-        // Staff match (only active staff)
-        const staffQueryStart = Date.now()
-        const staff = await models.Staff.findOne({ email, active: true }).select('+password')
-        const staffQueryTime = Date.now() - staffQueryStart
-        totalStaffQueryTime += staffQueryTime
-        
-        if (staff) {
-          console.log(`[login]   Tenant ${i+1}/${tenants.length} (${tenant.shopName}): ✓ STAFF found (staff query: ${staffQueryTime}ms)`)
-          staffCandidates.push({ record: staff, type: 'staff', mongoUri: tenant.mongoUri, features })
-        }
-
-        const tenantTime = Date.now() - tenantStart
-        console.log(`[login]   Tenant ${i+1}/${tenants.length} total time: ${tenantTime}ms\n`)
-        
-      } catch (err) {
-        console.error(`[login]   Tenant ${i+1}/${tenants.length} (${tenant.shopName}): ✗ ERROR -`, err)
-        continue
       }
+      
+      timings.tenantSearch = Date.now() - tenantSearchStart
+      timings.avgConnectionTime = emailEntries.length > 0 ? Math.round(totalConnectionTime / emailEntries.length) : 0
+      timings.avgQueryTime = emailEntries.length > 0 ? Math.round(totalQueryTime / emailEntries.length) : 0
+      
+      console.log('[login] 📊 Tenant search summary:')
+      console.log(`[login]   Total time: ${timings.tenantSearch}ms`)
+      console.log(`[login]   Tenants checked: ${emailEntries.length}`)
+      console.log(`[login]   Avg connection time: ${timings.avgConnectionTime}ms`)
+      console.log(`[login]   Avg query time: ${timings.avgQueryTime}ms`)
+      console.log(`[login]   Owner candidates: ${ownerCandidates.length}`)
+      console.log(`[login]   Staff candidates: ${staffCandidates.length}\n`)
+    } else {
+      timings.tenantSearch = 0
+      timings.avgConnectionTime = 0
+      timings.avgQueryTime = 0
+      console.log('[login] ℹ️  No index entries found\n')
     }
-    
-    timings.tenantSearch = Date.now() - tenantSearchStart
-    timings.avgConnectionTime = tenants.length > 0 ? Math.round(totalConnectionTime / tenants.length) : 0
-    timings.avgUserQueryTime = tenants.length > 0 ? Math.round(totalUserQueryTime / tenants.length) : 0
-    timings.avgStaffQueryTime = tenants.length > 0 ? Math.round(totalStaffQueryTime / tenants.length) : 0
-    
-    console.log('[login] 📊 Tenant search summary:')
-    console.log(`[login]   Total time: ${timings.tenantSearch}ms`)
-    console.log(`[login]   Avg connection time: ${timings.avgConnectionTime}ms`)
-    console.log(`[login]   Avg user query time: ${timings.avgUserQueryTime}ms`)
-    console.log(`[login]   Avg staff query time: ${timings.avgStaffQueryTime}ms`)
-    console.log(`[login]   Owner candidates: ${ownerCandidates.length}`)
-    console.log(`[login]   Staff candidates: ${staffCandidates.length}\n`)
 
     // ── Fallback: default DB (localhost dev / single-tenant) ─────────────────
     // Only check default DB if no candidates found in any tenant
@@ -298,16 +286,16 @@ export async function POST(request: NextRequest) {
       }
     }
     console.log('[login] 📊 PERFORMANCE SUMMARY:')
-    console.log(`[login]   Tenant load:           ${timings.tenantLoad}ms`)
-    console.log(`[login]   Tenant search:         ${timings.tenantSearch}ms`)
-    console.log(`[login]     - Avg connection:    ${timings.avgConnectionTime}ms`)
-    console.log(`[login]     - Avg user query:    ${timings.avgUserQueryTime}ms`)
-    console.log(`[login]     - Avg staff query:   ${timings.avgStaffQueryTime}ms`)
-    console.log(`[login]   Default DB check:      ${timings.defaultDbCheck}ms`)
-    console.log(`[login]   Candidate selection:   ${timings.candidateSelection}ms`)
-    console.log(`[login]     - Password checks:   ${timings.passwordCheckTime}ms`)
-    console.log(`[login]   Token creation:        ${timings.tokenCreation}ms`)
-    console.log(`[login]   ⏱️  TOTAL:              ${timings.total}ms`)
+    console.log(`[login]   Index lookup:         ${timings.indexLookup}ms`)
+    console.log(`[login]   Tenant search:        ${timings.tenantSearch}ms`)
+    console.log(`[login]     - Tenants checked:  ${emailEntries.length}`)
+    console.log(`[login]     - Avg connection:   ${timings.avgConnectionTime}ms`)
+    console.log(`[login]     - Avg query:        ${timings.avgQueryTime}ms`)
+    console.log(`[login]   Default DB check:     ${timings.defaultDbCheck}ms`)
+    console.log(`[login]   Candidate selection:  ${timings.candidateSelection}ms`)
+    console.log(`[login]     - Password checks:  ${timings.passwordCheckTime}ms`)
+    console.log(`[login]   Token creation:       ${timings.tokenCreation}ms`)
+    console.log(`[login]   ⏱️  TOTAL:             ${timings.total}ms`)
     console.log('========================================\n')
     
     return NextResponse.json({

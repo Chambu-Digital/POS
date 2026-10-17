@@ -17,12 +17,15 @@ import {
   Download,
   BarChart3,
   PieChart,
-  RefreshCw
+  RefreshCw,
+  CalendarClock,
+  ArrowRight
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
+import Link from 'next/link'
 
 interface Report {
   _id: string
@@ -306,6 +309,28 @@ function ReportsPageContent() {
         <h1 className="text-3xl font-bold">Reports & Analytics</h1>
         <p className="text-muted-foreground">Generate and view business reports</p>
       </div>
+
+      {/* End-of-Day Report Quick Access */}
+      <Link href="/dashboard/reports/end-of-day">
+        <Card className="border-green-200 bg-gradient-to-r from-green-50 to-emerald-50 hover:shadow-md transition-shadow cursor-pointer">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="bg-green-600 text-white p-3 rounded-lg">
+                  <CalendarClock className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-green-900">End-of-Day Report</h3>
+                  <p className="text-sm text-green-700">
+                    Complete daily summary with payment breakdown by employee, credit tracking, and expenses
+                  </p>
+                </div>
+              </div>
+              <ArrowRight className="h-5 w-5 text-green-600" />
+            </div>
+          </CardContent>
+        </Card>
+      </Link>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Generate Report Card */}

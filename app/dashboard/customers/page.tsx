@@ -58,7 +58,17 @@ function CustomersContent() {
   const [payCustomer, setPayCustomer] = useState<Customer | null>(null)
   const [payAmount, setPayAmount] = useState('')
   const [payNote, setPayNote] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState<string>('cash')
+  const [mpesaCode, setMpesaCode] = useState('')
+  const [mpesaPhone, setMpesaPhone] = useState('')
+  const [selectedBankId, setSelectedBankId] = useState('')
+  const [selectedCustomMethodId, setSelectedCustomMethodId] = useState('')
   const [paying, setPaying] = useState(false)
+
+  // Payment methods data
+  const [bankProviders, setBankProviders] = useState<Array<{ _id: string; name: string }>>([])
+  const [customMethods, setCustomMethods] = useState<Array<{ _id: string; name: string }>>([])
+
 
   // Edit customer
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null)
@@ -74,7 +84,12 @@ function CustomersContent() {
   const [shopSettings, setShopSettings] = useState<any>(null)
 
   // WhatsApp invoice sharing (legacy - keeping for compatibility)
-  useEffect(() => { load(); fetchSettings() }, [])
+  useEffect(() => { 
+    load()
+    fetchSettings()
+    fetchBankProviders()
+    fetchCustomMethods()
+  }, [])
 
   async function load() {
     setLoading(true)
@@ -103,6 +118,30 @@ function CustomersContent() {
       }
     } catch (error) {
       console.error('Failed to fetch settings:', error)
+    }
+  }
+
+  async function fetchBankProviders() {
+    try {
+      const res = await fetch('/api/bank-providers')
+      if (res.ok) {
+        const data = await res.json()
+        setBankProviders(data.providers || [])
+      }
+    } catch (error) {
+      console.error('Failed to fetch bank providers:', error)
+    }
+  }
+
+  async function fetchCustomMethods() {
+    try {
+      const res = await fetch('/api/payment-methods')
+      if (res.ok) {
+        const data = await res.json()
+        setCustomMethods(data.methods || [])
+      }
+    } catch (error) {
+      console.error('Failed to fetch payment methods:', error)
     }
   }
 
@@ -138,22 +177,82 @@ function CustomersContent() {
   }
 
   async function recordPayment() {
-    if (!payCustomer || !payAmount || parseFloat(payAmount) <= 0) { toast.error('Enter a valid amount'); return }
+    if (!payCustomer || !payAmount || parseFloat(payAmount) <= 0) { 
+      toast.error('Enter a valid amount')
+      return 
+    }
+    
+    if (!paymentMethod) {
+      toast.error('Select a payment method')
+      return
+    }
+    
+    // Determine if this is a custom method
+    const isCustomMethod = paymentMethod.startsWith('custom:')
+    const actualPaymentMethod = isCustomMethod ? 'custom' : paymentMethod
+    const customMethodId = isCustomMethod ? paymentMethod.split(':')[1] : selectedCustomMethodId
+    
+    // Validation for specific payment methods
+    if (paymentMethod === 'bank' && !selectedBankId) {
+      toast.error('Select a bank provider')
+      return
+    }
+    
+    if (isCustomMethod && !customMethodId) {
+      toast.error('Select a payment method')
+      return
+    }
+    
     setPaying(true)
     try {
+      const payload: any = {
+        amount: parseFloat(payAmount),
+        note: payNote,
+        paymentMethod: actualPaymentMethod,
+      }
+      
+      // Add method-specific fields
+      if (actualPaymentMethod === 'mobile_money') {
+        payload.mpesaCode = mpesaCode
+        payload.mpesaPhone = mpesaPhone
+      }
+      
+      if (actualPaymentMethod === 'bank' && selectedBankId) {
+        payload.bankProviderId = selectedBankId
+        const provider = bankProviders.find(p => p._id === selectedBankId)
+        if (provider) payload.bankProviderName = provider.name
+      }
+      
+      if (actualPaymentMethod === 'custom' && customMethodId) {
+        payload.customMethodId = customMethodId
+        const method = customMethods.find(m => m._id === customMethodId)
+        if (method) payload.customMethodName = method.name
+      }
+      
       const res = await fetch(`/api/customers/${payCustomer._id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: parseFloat(payAmount), note: payNote }),
+        body: JSON.stringify(payload),
       })
+      
       if (res.ok) {
         toast.success('Payment recorded')
-        setPayCustomer(null); setPayAmount(''); setPayNote('')
+        setPayCustomer(null)
+        setPayAmount('')
+        setPayNote('')
+        setPaymentMethod('cash')
+        setMpesaCode('')
+        setMpesaPhone('')
+        setSelectedBankId('')
+        setSelectedCustomMethodId('')
         load()
       } else {
-        const d = await res.json(); toast.error(d.error || 'Failed to record payment')
+        const d = await res.json()
+        toast.error(d.error || 'Failed to record payment')
       }
-    } catch { toast.error('Failed to record payment') }
+    } catch { 
+      toast.error('Failed to record payment') 
+    }
     setPaying(false)
   }
 
@@ -468,8 +567,93 @@ Thank you for choosing ${businessName}!`
               <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm">
                 <span className="text-red-600 font-semibold">Outstanding: KES {payCustomer.creditBalance.toLocaleString()}</span>
               </div>
+              
+              {/* Payment Method Selection - Dynamic */}
               <div>
-                <label className="text-sm font-medium text-gray-700">Amount Paid</label>
+                <label className="text-sm font-medium text-gray-700">Payment Method *</label>
+                <select
+                  value={paymentMethod}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setPaymentMethod(value)
+                    
+                    // Reset method-specific fields
+                    setMpesaCode('')
+                    setMpesaPhone('')
+                    setSelectedBankId('')
+                    setSelectedCustomMethodId('')
+                    
+                    // If custom method selected, set the customMethodId
+                    if (value.startsWith('custom:')) {
+                      setSelectedCustomMethodId(value.split(':')[1])
+                    }
+                  }}
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  {/* Built-in payment methods */}
+                  <optgroup label="Standard Methods">
+                    <option value="cash">Cash</option>
+                    <option value="mobile_money">M-Pesa / Mobile Money</option>
+                    <option value="card">Card</option>
+                    {bankProviders.length > 0 && <option value="bank">Bank Transfer</option>}
+                  </optgroup>
+                  
+                  {/* Custom payment methods from database */}
+                  {customMethods.length > 0 && (
+                    <optgroup label="Custom Methods">
+                      {customMethods.map(method => (
+                        <option key={method._id} value={`custom:${method._id}`}>
+                          {method.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              </div>
+
+              {/* M-Pesa Fields */}
+              {paymentMethod === 'mobile_money' && (
+                <>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">M-Pesa Code</label>
+                    <Input
+                      className="mt-1"
+                      value={mpesaCode}
+                      onChange={e => setMpesaCode(e.target.value)}
+                      placeholder="e.g. SG7XK3M9"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">M-Pesa Phone</label>
+                    <Input
+                      className="mt-1"
+                      value={mpesaPhone}
+                      onChange={e => setMpesaPhone(e.target.value)}
+                      placeholder="e.g. 0712345678"
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* Bank Selection */}
+              {paymentMethod === 'bank' && (
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Bank *</label>
+                  <select
+                    value={selectedBankId}
+                    onChange={(e) => setSelectedBankId(e.target.value)}
+                    className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  >
+                    <option value="">Select bank</option>
+                    {bankProviders.map(bank => (
+                      <option key={bank._id} value={bank._id}>{bank.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              
+              <div>
+                <label className="text-sm font-medium text-gray-700">Amount Paid *</label>
                 <Input
                   className="mt-1"
                   type="number"

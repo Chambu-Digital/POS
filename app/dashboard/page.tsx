@@ -87,14 +87,15 @@ export default function DashboardPage() {
             <div className="flex flex-wrap gap-6 text-sm">
               <span className="text-gray-700">Orders: <strong>{stats.todayStats.totalOrders}</strong></span>
               <span className="text-gray-700">Revenue: <strong>KES {stats.todayStats.totalRevenue.toLocaleString()}</strong></span>
-              {Object.entries(stats.todayStats.byPayment as Record<string, number>).map(([method, amt]) => {
+              {Object.entries(stats.todayStats.byPayment as Record<string, number>)
+                .filter(([method]) => method.toLowerCase() !== 'credit') // Exclude credit
+                .map(([method, amt]) => {
                 // Map built-in methods to display names, keep custom names as-is
                 let displayName = method
                 if (method === 'mobile_money') displayName = 'M-Pesa'
                 else if (method === 'cash') displayName = 'Cash'
                 else if (method === 'card') displayName = 'Card'
                 else if (method === 'bank_transfer') displayName = 'Bank Transfer'
-                else if (method === 'credit') displayName = 'Credit'
                 // Custom methods already have proper names, so just capitalize first letter
                 else displayName = method.charAt(0).toUpperCase() + method.slice(1)
                 
@@ -104,6 +105,16 @@ export default function DashboardPage() {
                   </span>
                 )
               })}
+              {stats.todayStats.creditIssued > 0 && (
+                <span className="text-amber-600">
+                  Credit Issued: <strong>KES {stats.todayStats.creditIssued.toLocaleString()}</strong>
+                </span>
+              )}
+              {stats.todayStats.creditCollected > 0 && (
+                <span className="text-blue-600">
+                  Credit Collected: <strong>KES {stats.todayStats.creditCollected.toLocaleString()}</strong>
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -185,14 +196,15 @@ export default function DashboardPage() {
             {showHospitality  && stats.todayStats.bySource.hospitality > 0 && <span className="text-emerald-700">Hospitality: <strong>KES {stats.todayStats.bySource.hospitality.toLocaleString()}</strong></span>}
             {showKds          && stats.todayStats.bySource.kds > 0         && <span className="text-blue-700">Kitchen: <strong>KES {stats.todayStats.bySource.kds.toLocaleString()}</strong></span>}
             {showRentals      && stats.todayStats.bySource.rental > 0      && <span className="text-purple-700">Rentals: <strong>KES {stats.todayStats.bySource.rental.toLocaleString()}</strong></span>}
-            {Object.entries(stats.todayStats.byPayment as Record<string, number>).map(([method, amt]) => {
+            {Object.entries(stats.todayStats.byPayment as Record<string, number>)
+              .filter(([method]) => method.toLowerCase() !== 'credit') // Exclude credit
+              .map(([method, amt]) => {
               // Map built-in methods to display names, keep custom names as-is
               let displayName = method
               if (method === 'mobile_money') displayName = 'M-Pesa'
               else if (method === 'cash') displayName = 'Cash'
               else if (method === 'card') displayName = 'Card'
               else if (method === 'bank_transfer') displayName = 'Bank Transfer'
-              else if (method === 'credit') displayName = 'Credit'
               // Custom methods already have proper names, so just capitalize first letter
               else displayName = method.charAt(0).toUpperCase() + method.slice(1)
               
@@ -202,6 +214,16 @@ export default function DashboardPage() {
                 </span>
               )
             })}
+            {stats.todayStats.creditIssued > 0 && (
+              <span className="text-amber-600">
+                Credit Issued: <strong>KES {stats.todayStats.creditIssued.toLocaleString()}</strong>
+              </span>
+            )}
+            {stats.todayStats.creditCollected > 0 && (
+              <span className="text-blue-600">
+                Credit Collected: <strong>KES {stats.todayStats.creditCollected.toLocaleString()}</strong>
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -349,14 +371,15 @@ export default function DashboardPage() {
             <CardHeader><CardTitle className="text-lg">Payment Methods</CardTitle></CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {stats.charts.paymentMethods.map((method: any, i: number) => {
+                {stats.charts.paymentMethods
+                  .filter((method: any) => method.method.toLowerCase() !== 'credit') // Exclude credit
+                  .map((method: any, i: number) => {
                   // Map built-in methods to display names, keep custom names as-is
                   let displayName = method.method
                   if (method.method === 'mobile_money') displayName = 'M-Pesa'
                   else if (method.method === 'cash') displayName = 'Cash'
                   else if (method.method === 'card') displayName = 'Card'
                   else if (method.method === 'bank_transfer') displayName = 'Bank Transfer'
-                  else if (method.method === 'credit') displayName = 'Credit'
                   // Custom methods - capitalize first letter
                   else displayName = method.method.charAt(0).toUpperCase() + method.method.slice(1)
                   
@@ -370,8 +393,26 @@ export default function DashboardPage() {
                     </div>
                   )
                 })}
-                {stats.charts.paymentMethods.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No data</p>}
+                {stats.charts.paymentMethods.filter((m: any) => m.method.toLowerCase() !== 'credit').length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No data</p>}
               </div>
+              
+              {/* Credit Metrics */}
+              {(stats.creditIssued > 0 || stats.creditCollected > 0) && (
+                <div className="mt-4 pt-4 border-t space-y-2">
+                  {stats.creditIssued > 0 && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-amber-700">Credit Issued</span>
+                      <span className="text-sm font-semibold text-amber-700">KES {stats.creditIssued.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {stats.creditCollected > 0 && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-blue-700">Credit Collected</span>
+                      <span className="text-sm font-semibold text-blue-700">KES {stats.creditCollected.toLocaleString()}</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

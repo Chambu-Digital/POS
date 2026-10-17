@@ -10,14 +10,47 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const { models } = await getTenantDB(request)
     const { id } = await params
-    const { status } = await request.json()
-    if (!['approved', 'rejected'].includes(status)) return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
+    const data = await request.json()
+    const { status, paymentMethod, paymentDate, receiptNumber, bankProviderId, bankProviderName, customMethodId, customMethodName, mpesaCode, mpesaPhone } = data
+
+    // Validate status
+    if (!['approved', 'rejected'].includes(status)) {
+      return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
+    }
+
+    // Validate payment method if provided
+    if (paymentMethod && !['cash', 'card', 'mobile_money', 'bank', 'custom', ''].includes(paymentMethod)) {
+      return NextResponse.json({ error: 'Invalid payment method' }, { status: 400 })
+    }
+
+    // Build update object
+    const updateData: any = {
+      status,
+      approvedBy: payload.userId,
+      approvedAt: new Date(),
+    }
+
+    // If approving and payment details provided, record payment
+    if (status === 'approved' && paymentMethod) {
+      updateData.paymentMethod = paymentMethod
+      updateData.paymentDate = paymentDate ? new Date(paymentDate) : new Date()
+      updateData.paidBy = payload.userId // Owner approved and paid
+      
+      if (receiptNumber) updateData.receiptNumber = receiptNumber
+      if (bankProviderId) updateData.bankProviderId = bankProviderId
+      if (bankProviderName) updateData.bankProviderName = bankProviderName
+      if (customMethodId) updateData.customMethodId = customMethodId
+      if (customMethodName) updateData.customMethodName = customMethodName
+      if (mpesaCode) updateData.mpesaCode = mpesaCode
+      if (mpesaPhone) updateData.mpesaPhone = mpesaPhone
+    }
 
     const expense = await models.Expense.findOneAndUpdate(
       { _id: id, userId: payload.userId },
-      { status, approvedBy: payload.userId, approvedAt: new Date() },
+      { $set: updateData },
       { new: true }
     )
+    
     if (!expense) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     return NextResponse.json({ expense })
   } catch (error) {

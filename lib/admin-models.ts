@@ -32,9 +32,30 @@ const clusterSchema = new mongoose.Schema(
   { collection: 'clusters' }
 )
 
+// Email-to-Tenant mapping for fast login lookups
+const userEmailIndexSchema = new mongoose.Schema(
+  {
+    email:      { type: String, required: true, lowercase: true, trim: true },
+    tenantId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
+    userType:   { type: String, enum: ['user', 'staff'], required: true },
+    userId:     { type: String, required: true }, // ID in the tenant DB
+    isActive:   { type: Boolean, default: true },
+    lastSync:   { type: Date, default: Date.now },
+  },
+  { 
+    collection: 'user_email_index',
+    timestamps: true 
+  }
+)
+
+// Compound index for fast email lookups
+userEmailIndexSchema.index({ email: 1, isActive: 1 })
+userEmailIndexSchema.index({ tenantId: 1 })
+
 export async function getAdminModels() {
   const conn = await connectAdminDB()
   const Tenant  = conn.models.Tenant  || conn.model('Tenant',  tenantSchema)
   const Cluster = conn.models.Cluster || conn.model('Cluster', clusterSchema)
-  return { Tenant, Cluster }
+  const UserEmailIndex = conn.models.UserEmailIndex || conn.model('UserEmailIndex', userEmailIndexSchema)
+  return { Tenant, Cluster, UserEmailIndex }
 }

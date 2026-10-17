@@ -13,13 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
-
-interface Branch {
-  _id: string
-  name: string
-  code: string
-  status: string
-}
+import type { Branch } from '@/hooks/use-auth'
 
 interface BranchSelectorProps {
   branches: Branch[]

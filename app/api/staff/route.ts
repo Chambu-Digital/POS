@@ -3,6 +3,7 @@ import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
 import { DEFAULT_STAFF_PERMISSIONS, DEFAULT_MANAGER_PERMISSIONS, normalisePermissions } from '@/lib/modules'
 import { checkEmailExistsAcrossTenants } from '@/lib/auth/check-email-exists'
+import { upsertEmailIndex } from '@/lib/email-index'
 
 export async function GET(request: NextRequest) {
   try {
@@ -90,6 +91,24 @@ export async function POST(request: NextRequest) {
       managerOfBranches: managerOfBranches || [],
     })
     await staff.save()
+
+    // Update email index for fast login
+    if (payload.mongoUri) {
+      // Extract tenantId from the connection - we need to get it from admin DB
+      const { getAdminModels } = await import('@/lib/admin-models')
+      const { Tenant } = await getAdminModels()
+      const tenant = await Tenant.findOne({ mongoUri: payload.mongoUri }).lean()
+      
+      if (tenant) {
+        await upsertEmailIndex({
+          email,
+          tenantId: tenant._id.toString(),
+          userType: 'staff',
+          userId: staff._id.toString(),
+          isActive: true
+        })
+      }
+    }
 
     const staffData = staff.toObject()
     delete staffData.password

@@ -2,6 +2,7 @@ import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
+import { activateEmailIndex, deactivateEmailIndex, removeEmailIndex } from '@/lib/email-index'
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -53,6 +54,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       'lastName','nationalId','kraPin','nhifNo','nssfNo','leaveDays','salary','commissionStructure',
       'employmentType','branchId','managerOfBranches']
     
+    // Track if active status is changing
+    const oldActive = staff.active
+    
     // Validate managerOfBranches if being updated
     if (data.managerOfBranches !== undefined && Array.isArray(data.managerOfBranches) && data.managerOfBranches.length > 0) {
       const branches = await models.Branch.find({ 
@@ -68,6 +72,30 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (data.password) staff.password = data.password
 
     await staff.save()
+    
+    // Update email index if active status changed
+    if (data.active !== undefined && oldActive !== data.active && payload.mongoUri) {
+      const { getAdminModels } = await import('@/lib/admin-models')
+      const { Tenant } = await getAdminModels()
+      const tenant = await Tenant.findOne({ mongoUri: payload.mongoUri }).lean()
+      
+      if (tenant) {
+        if (data.active) {
+          await activateEmailIndex({
+            email: staff.email,
+            tenantId: tenant._id.toString(),
+            userType: 'staff'
+          })
+        } else {
+          await deactivateEmailIndex({
+            email: staff.email,
+            tenantId: tenant._id.toString(),
+            userType: 'staff'
+          })
+        }
+      }
+    }
+    
     console.log('[staff PUT] Updated staff successfully:', staff._id)
     
     const staffData = staff.toObject()
@@ -90,6 +118,22 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     const staff = await models.Staff.findOneAndDelete({ _id: new Types.ObjectId(id), userId: payload.userId })
     if (!staff) return NextResponse.json({ error: 'Staff not found' }, { status: 404 })
+    
+    // Remove from email index
+    if (payload.mongoUri) {
+      const { getAdminModels } = await import('@/lib/admin-models')
+      const { Tenant } = await getAdminModels()
+      const tenant = await Tenant.findOne({ mongoUri: payload.mongoUri }).lean()
+      
+      if (tenant) {
+        await removeEmailIndex({
+          email: staff.email,
+          tenantId: tenant._id.toString(),
+          userType: 'staff'
+        })
+      }
+    }
+    
     return NextResponse.json({ message: 'Staff deleted' })
   } catch (error) {
     console.error('[staff] DELETE error:', error)

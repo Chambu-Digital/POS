@@ -18,9 +18,27 @@ interface Expense {
   createdAt: string
   status: 'pending' | 'approved' | 'rejected'
   staffId?: { firstName?: string; lastName?: string; name?: string } | null
+  branchId?: { _id: string; name: string } | null
+  paymentMethod?: string
+  paymentDate?: string
+  receiptNumber?: string
+  bankProviderName?: string
+  customMethodName?: string
+  mpesaCode?: string
+  paidBy?: { firstName?: string; lastName?: string; name?: string } | null
 }
 
 interface ExpenseCategory {
+  _id: string
+  name: string
+}
+
+interface BankProvider {
+  _id: string
+  name: string
+}
+
+interface PaymentMethod {
   _id: string
   name: string
 }
@@ -39,14 +57,39 @@ export default function ExpensesPage() {
   const { toast } = useToast()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [categories, setCategories] = useState<ExpenseCategory[]>([])
+  const [bankProviders, setBankProviders] = useState<BankProvider[]>([])
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [approveDialogOpen, setApproveDialogOpen] = useState(false)
+  const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null)
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
-  const [form, setForm] = useState({ title: '', category: '', notes: '', amount: '', date: '' })
+  const [form, setForm] = useState({ 
+    title: '', 
+    category: '', 
+    notes: '', 
+    amount: '', 
+    date: new Date().toISOString().split('T')[0], // Today's date by default
+    paymentMethod: '',
+    receiptNumber: '',
+    bankProviderId: '',
+    customMethodId: '',
+    mpesaCode: '',
+    mpesaPhone: ''
+  })
+  const [approveForm, setApproveForm] = useState({
+    paymentMethod: '',
+    paymentDate: '',
+    receiptNumber: '',
+    bankProviderId: '',
+    customMethodId: '',
+    mpesaCode: '',
+    mpesaPhone: ''
+  })
 
   const fetchExpenses = useCallback(async () => {
     setLoading(true)
@@ -62,28 +105,88 @@ export default function ExpensesPage() {
     setCategories(data.categories || [])
   }
 
+  const fetchBranches = async () => {
+    const res = await fetch('/api/branches')
+    const data = await res.json()
+    setBranches(data.branches || [])
+  }
+
+  const fetchBankProviders = async () => {
+    const res = await fetch('/api/bank-providers')
+    const data = await res.json()
+    setBankProviders(data.providers || [])
+  }
+
+  const fetchPaymentMethods = async () => {
+    const res = await fetch('/api/payment-methods')
+    const data = await res.json()
+    setPaymentMethods(data.methods || [])
+  }
+
   useEffect(() => {
     fetch('/api/auth/me').then(r => r.json()).then(d => setIsAdmin(d.user?.type === 'user')).catch(() => {})
     fetchCategories()
+    fetchBankProviders()
+    fetchPaymentMethods()
   }, [])
   useEffect(() => { fetchExpenses() }, [fetchExpenses])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.title || !form.category || !form.amount) {
+    if (!form.title || !form.amount) {
       toast({ title: 'Please fill in all required fields', variant: 'destructive' })
       return
     }
     setSubmitting(true)
+    
+    const payload: any = {
+      title: form.title,
+      category: form.category || '',
+      notes: form.notes,
+      amount: parseFloat(form.amount),
+      date: form.date ? new Date(form.date) : new Date(),
+      receiptNumber: form.receiptNumber || undefined,
+    }
+
+    // Add payment details if payment method is selected
+    if (form.paymentMethod) {
+      // Check if it's a built-in payment method or custom method ID
+      if (['cash', 'mobile_money', 'bank'].includes(form.paymentMethod)) {
+        payload.paymentMethod = form.paymentMethod
+        
+        if (form.paymentMethod === 'bank' && form.bankProviderId) {
+          payload.bankProviderId = form.bankProviderId
+          const provider = bankProviders.find(p => p._id === form.bankProviderId)
+          payload.bankProviderName = provider?.name || ''
+        }
+        
+        if (form.paymentMethod === 'mobile_money') {
+          payload.mpesaCode = form.mpesaCode || ''
+          payload.mpesaPhone = form.mpesaPhone || ''
+        }
+      } else {
+        // Custom payment method selected
+        payload.paymentMethod = 'custom'
+        payload.customMethodId = form.paymentMethod
+        const method = paymentMethods.find(m => m._id === form.paymentMethod)
+        payload.customMethodName = method?.name || ''
+      }
+    }
+
     const res = await fetch('/api/expenses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, amount: parseFloat(form.amount), date: form.date ? new Date(form.date) : new Date() }),
+      body: JSON.stringify(payload),
     })
+    
     if (res.ok) {
-      toast({ title: 'Expense submitted for approval' })
+      toast({ title: form.paymentMethod ? 'Expense recorded and paid' : 'Expense submitted for approval' })
       setDialogOpen(false)
-      setForm({ title: '', category: '', notes: '', amount: '', date: '' })
+      setForm({ 
+        title: '', category: '', notes: '', amount: '', date: new Date().toISOString().split('T')[0],
+        paymentMethod: '', receiptNumber: '', bankProviderId: '', customMethodId: '',
+        mpesaCode: '', mpesaPhone: ''
+      })
       fetchExpenses()
     } else {
       const err = await res.json()
@@ -93,17 +196,88 @@ export default function ExpensesPage() {
   }
 
   const handleApprove = async (id: string, status: 'approved' | 'rejected') => {
-    const res = await fetch(`/api/expenses/${id}`, {
+    if (status === 'approved') {
+      // Open dialog to collect payment details
+      const expense = expenses.find(e => e._id === id)
+      if (expense) {
+        setSelectedExpense(expense)
+        setApproveForm({
+          paymentMethod: '',
+          paymentDate: new Date().toISOString().split('T')[0],
+          receiptNumber: '',
+          bankProviderId: '',
+          customMethodId: '',
+          mpesaCode: '',
+          mpesaPhone: ''
+        })
+        setApproveDialogOpen(true)
+      }
+    } else {
+      // Reject directly
+      const res = await fetch(`/api/expenses/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      if (res.ok) {
+        toast({ title: 'Expense rejected' })
+        fetchExpenses()
+      } else {
+        toast({ title: 'Failed to update expense', variant: 'destructive' })
+      }
+    }
+  }
+
+  const handleConfirmApprove = async () => {
+    if (!selectedExpense || !approveForm.paymentMethod) {
+      toast({ title: 'Please select a payment method', variant: 'destructive' })
+      return
+    }
+
+    setSubmitting(true)
+    const payload: any = {
+      status: 'approved',
+      paymentDate: approveForm.paymentDate ? new Date(approveForm.paymentDate) : new Date(),
+      receiptNumber: approveForm.receiptNumber || undefined,
+    }
+
+    // Check if it's a built-in payment method or custom method ID
+    if (['cash', 'mobile_money', 'bank'].includes(approveForm.paymentMethod)) {
+      payload.paymentMethod = approveForm.paymentMethod
+
+      if (approveForm.paymentMethod === 'bank' && approveForm.bankProviderId) {
+        payload.bankProviderId = approveForm.bankProviderId
+        const provider = bankProviders.find(p => p._id === approveForm.bankProviderId)
+        payload.bankProviderName = provider?.name || ''
+      }
+
+      if (approveForm.paymentMethod === 'mobile_money') {
+        payload.mpesaCode = approveForm.mpesaCode || ''
+        payload.mpesaPhone = approveForm.mpesaPhone || ''
+      }
+    } else {
+      // Custom payment method selected
+      payload.paymentMethod = 'custom'
+      payload.customMethodId = approveForm.paymentMethod
+      const method = paymentMethods.find(m => m._id === approveForm.paymentMethod)
+      payload.customMethodName = method?.name || ''
+    }
+
+    const res = await fetch(`/api/expenses/${selectedExpense._id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify(payload),
     })
+
     if (res.ok) {
-      toast({ title: status === 'approved' ? 'Expense approved' : 'Expense rejected' })
+      toast({ title: 'Expense approved and payment recorded' })
+      setApproveDialogOpen(false)
+      setSelectedExpense(null)
       fetchExpenses()
     } else {
-      toast({ title: 'Failed to update expense', variant: 'destructive' })
+      toast({ title: 'Failed to approve expense', variant: 'destructive' })
     }
+    setSubmitting(false)
   }
 
   const handleDelete = async (id: string) => {
@@ -144,6 +318,20 @@ export default function ExpensesPage() {
   function ExpenseRow({ expense, showActions }: { expense: Expense; showActions?: boolean }) {
     const s = expense.staffId as any
     const name = s?.firstName ? `${s.firstName} ${s.lastName || ''}`.trim() : s?.name || null
+    const paidByStaff = expense.paidBy as any
+    const paidByName = paidByStaff?.firstName ? `${paidByStaff.firstName} ${paidByStaff.lastName || ''}`.trim() : paidByStaff?.name || 'Owner'
+    const branch = expense.branchId as any
+    
+    const getPaymentMethodDisplay = () => {
+      if (!expense.paymentMethod) return null
+      if (expense.paymentMethod === 'bank' && expense.bankProviderName) return expense.bankProviderName
+      if (expense.paymentMethod === 'custom' && expense.customMethodName) return expense.customMethodName
+      if (expense.paymentMethod === 'mobile_money') return 'M-Pesa'
+      if (expense.paymentMethod === 'cash') return 'Cash'
+      if (expense.paymentMethod === 'card') return 'Card'
+      return expense.paymentMethod
+    }
+
     return (
       <div className="flex items-center justify-between bg-white border rounded-lg p-4 shadow-sm">
         <div className="space-y-0.5 min-w-0">
@@ -155,8 +343,18 @@ export default function ExpensesPage() {
           {expense.notes && <p className="text-xs text-muted-foreground">{expense.notes}</p>}
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>{fmtDate(expense.date || expense.createdAt)}</span>
-            {name && <span>· {name}</span>}
+            {branch?.name && <span>· {branch.name}</span>}
+            {name && <span>· Logged by {name}</span>}
           </div>
+          {expense.paymentMethod && (
+            <div className="flex items-center gap-2 text-xs text-green-600">
+              <span>💳 Paid via {getPaymentMethodDisplay()}</span>
+              {expense.paymentDate && <span>on {fmtDate(expense.paymentDate)}</span>}
+              {expense.paidBy && <span>by {paidByName}</span>}
+              {expense.receiptNumber && <span>· Receipt: {expense.receiptNumber}</span>}
+              {expense.mpesaCode && <span>· {expense.mpesaCode}</span>}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3 shrink-0 ml-4">
           <span className="font-semibold text-green-700">
@@ -268,17 +466,18 @@ export default function ExpensesPage() {
 
       {/* Create Expense Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-green-600 text-center">Create Expense</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input placeholder="Enter Expense Title" value={form.title}
               onChange={e => setForm(f => ({ ...f, title: e.target.value }))} required />
+            
             <select value={form.category}
               onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-              className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-green-500" required>
-              <option value="">Select Category</option>
+              className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-green-500">
+              <option value="">Select Category (Optional)</option>
               {categories.map(c => <option key={c._id} value={c.name}>{c.name}</option>)}
             </select>
             <p className="text-xs text-muted-foreground -mt-2">
@@ -287,15 +486,67 @@ export default function ExpensesPage() {
                 Create Expense Category
               </button>
             </p>
-            <Input type="date" value={form.date}
-              onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Expense Date</label>
+              <Input type="date" value={form.date}
+                onChange={e => setForm(f => ({ ...f, date: e.target.value }))} required />
+            </div>
+            
+            <Input type="number" placeholder="Amount Spent" value={form.amount}
+              onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} min="0" step="0.01" required />
+
             <textarea placeholder="Notes/Reason" value={form.notes}
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
               className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[80px] resize-none" />
-            <Input type="number" placeholder="Amount Spent" value={form.amount}
-              onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} min="0" step="0.01" required />
+
+            <div className="border-t pt-4 space-y-3">
+              <p className="text-sm font-medium">Payment Details (Optional)</p>
+              <p className="text-xs text-muted-foreground -mt-2">Leave empty if payment will be made later</p>
+              
+              <select value={form.paymentMethod}
+                onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value, bankProviderId: '', customMethodId: '' }))}
+                className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-green-500">
+                <option value="">Not Paid Yet</option>
+                <option value="cash">Cash</option>
+                <option value="mobile_money">M-Pesa</option>
+                {bankProviders.length > 0 && <option value="bank">Bank Transfer</option>}
+                {paymentMethods.map(method => (
+                  <option key={method._id} value={method._id}>{method.name}</option>
+                ))}
+              </select>
+
+              {form.paymentMethod === 'bank' && (
+                <select value={form.bankProviderId}
+                  onChange={e => setForm(f => ({ ...f, bankProviderId: e.target.value }))}
+                  className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-green-500"
+                  required>
+                  <option value="">Select Bank</option>
+                  {bankProviders.map(b => <option key={b._id} value={b._id}>{b.name}</option>)}
+                </select>
+              )}
+
+              {form.paymentMethod && !['cash', 'mobile_money', 'bank'].includes(form.paymentMethod) && (
+                <input type="hidden" value={form.paymentMethod} onChange={e => setForm(f => ({ ...f, customMethodId: e.target.value }))} />
+              )}
+
+              {form.paymentMethod === 'mobile_money' && (
+                <>
+                  <Input placeholder="M-Pesa Code" value={form.mpesaCode}
+                    onChange={e => setForm(f => ({ ...f, mpesaCode: e.target.value }))} />
+                  <Input placeholder="Phone Number" value={form.mpesaPhone}
+                    onChange={e => setForm(f => ({ ...f, mpesaPhone: e.target.value }))} />
+                </>
+              )}
+
+              {form.paymentMethod && (
+                <Input placeholder="Receipt/Reference Number" value={form.receiptNumber}
+                  onChange={e => setForm(f => ({ ...f, receiptNumber: e.target.value }))} />
+              )}
+            </div>
+
             <Button type="submit" disabled={submitting} className="w-full bg-green-600 hover:bg-green-700 text-white">
-              {submitting ? 'Submitting...' : 'Submit for Approval'}
+              {submitting ? 'Submitting...' : (form.paymentMethod ? 'Record Expense' : 'Submit for Approval')}
             </Button>
           </form>
         </DialogContent>
@@ -312,6 +563,72 @@ export default function ExpensesPage() {
               onChange={e => setNewCategoryName(e.target.value)} required />
             <Button type="submit" className="w-full bg-green-600 hover:bg-green-700 text-white">Create</Button>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Approve Expense Dialog */}
+      <Dialog open={approveDialogOpen} onOpenChange={setApproveDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-green-600">Record Payment for Expense</DialogTitle>
+          </DialogHeader>
+          {selectedExpense && (
+            <div className="space-y-4">
+              <div className="bg-gray-50 rounded-lg p-3 space-y-1">
+                <p className="font-medium">{selectedExpense.title}</p>
+                <p className="text-sm text-muted-foreground">{selectedExpense.category}</p>
+                <p className="text-lg font-bold text-green-700">
+                  KES {selectedExpense.amount.toLocaleString('en-KE', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <select value={approveForm.paymentMethod}
+                  onChange={e => setApproveForm(f => ({ ...f, paymentMethod: e.target.value, bankProviderId: '', customMethodId: '' }))}
+                  className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-green-500"
+                  required>
+                  <option value="">Select Payment Method</option>
+                  <option value="cash">Cash</option>
+                  <option value="mobile_money">M-Pesa</option>
+                  {bankProviders.length > 0 && <option value="bank">Bank Transfer</option>}
+                  {paymentMethods.map(method => (
+                    <option key={method._id} value={method._id}>{method.name}</option>
+                  ))}
+                </select>
+
+                {approveForm.paymentMethod === 'bank' && (
+                  <select value={approveForm.bankProviderId}
+                    onChange={e => setApproveForm(f => ({ ...f, bankProviderId: e.target.value }))}
+                    className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-green-500"
+                    required>
+                    <option value="">Select Bank</option>
+                    {bankProviders.map(b => <option key={b._id} value={b._id}>{b.name}</option>)}
+                  </select>
+                )}
+
+                {approveForm.paymentMethod === 'mobile_money' && (
+                  <>
+                    <Input placeholder="M-Pesa Code" value={approveForm.mpesaCode}
+                      onChange={e => setApproveForm(f => ({ ...f, mpesaCode: e.target.value }))} />
+                    <Input placeholder="Phone Number" value={approveForm.mpesaPhone}
+                      onChange={e => setApproveForm(f => ({ ...f, mpesaPhone: e.target.value }))} />
+                  </>
+                )}
+
+                <Input type="date" value={approveForm.paymentDate}
+                  onChange={e => setApproveForm(f => ({ ...f, paymentDate: e.target.value }))}
+                  placeholder="Payment Date" />
+
+                <Input placeholder="Receipt/Reference Number (Optional)" value={approveForm.receiptNumber}
+                  onChange={e => setApproveForm(f => ({ ...f, receiptNumber: e.target.value }))} />
+              </div>
+
+              <Button onClick={handleConfirmApprove} disabled={submitting} 
+                className="w-full bg-green-600 hover:bg-green-700 text-white">
+                {submitting ? 'Processing...' : 'Approve & Record Payment'}
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
