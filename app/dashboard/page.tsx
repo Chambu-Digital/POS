@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { UtensilsCrossed, Clock, BedDouble } from 'lucide-react'
+import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -48,7 +49,7 @@ export default function DashboardPage() {
     setLoading(true)
     setIsOffline(false)
     
-    const result = await apiGet<{ stats: any }>(`/api/dashboard/stats?days=${period}`)
+    const result = await apiGet<{ stats: any }>(`/api/dashboard/stats?days=${period}`, { timeout: 90000 })
     
     if (result.success && result.data) {
       setStats(result.data.stats)
@@ -85,35 +86,32 @@ export default function DashboardPage() {
           <div className="rounded-lg border bg-amber-50 border-amber-200 px-4 py-3">
             <p className="text-xs font-semibold text-amber-700 mb-2 uppercase tracking-wide">Today's Summary</p>
             <div className="flex flex-wrap gap-6 text-sm">
-              <span className="text-gray-700">Orders: <strong>{stats.todayStats.totalOrders}</strong></span>
-              <span className="text-gray-700">Revenue: <strong>KES {stats.todayStats.totalRevenue.toLocaleString()}</strong></span>
+              <Link href="/dashboard/breakdown" className="text-gray-700 hover:underline cursor-pointer">Orders: <strong>{stats.todayStats.totalOrders}</strong></Link>
+              <Link href="/dashboard/breakdown" className="text-gray-700 hover:underline cursor-pointer">Revenue: <strong>KES {stats.todayStats.totalRevenue.toLocaleString()}</strong></Link>
               {Object.entries(stats.todayStats.byPayment as Record<string, number>)
-                .filter(([method]) => method.toLowerCase() !== 'credit') // Exclude credit
+                .filter(([method]) => method.toLowerCase() !== 'credit')
                 .map(([method, amt]) => {
-                // Map built-in methods to display names, keep custom names as-is
                 let displayName = method
                 if (method === 'mobile_money') displayName = 'M-Pesa'
                 else if (method === 'cash') displayName = 'Cash'
                 else if (method === 'card') displayName = 'Card'
                 else if (method === 'bank_transfer') displayName = 'Bank Transfer'
-                // Custom methods already have proper names, so just capitalize first letter
                 else displayName = method.charAt(0).toUpperCase() + method.slice(1)
-                
                 return (
-                  <span key={method} className="text-gray-500">
+                  <Link key={method} href={`/dashboard/breakdown?filter=${encodeURIComponent(method)}`} className="text-gray-500 hover:underline cursor-pointer">
                     {displayName}: <strong>KES {(amt as number).toLocaleString()}</strong>
-                  </span>
+                  </Link>
                 )
               })}
               {stats.todayStats.creditIssued > 0 && (
-                <span className="text-amber-600">
+                <Link href="/dashboard/breakdown?filter=credit_issued" className="text-amber-600 hover:underline cursor-pointer">
                   Credit Issued: <strong>KES {stats.todayStats.creditIssued.toLocaleString()}</strong>
-                </span>
+                </Link>
               )}
               {stats.todayStats.creditCollected > 0 && (
-                <span className="text-blue-600">
+                <Link href="/dashboard/breakdown?filter=credit_collected" className="text-blue-600 hover:underline cursor-pointer">
                   Credit Collected: <strong>KES {stats.todayStats.creditCollected.toLocaleString()}</strong>
-                </span>
+                </Link>
               )}
             </div>
           </div>
@@ -189,40 +187,37 @@ export default function DashboardPage() {
         <div className="rounded-lg border bg-amber-50 border-amber-200 px-4 py-3">
           <p className="text-xs font-semibold text-amber-700 mb-2 uppercase tracking-wide">Today's Summary</p>
           <div className="flex flex-wrap gap-6 text-sm">
-            <span className="text-gray-700">Orders: <strong>{stats.todayStats.totalOrders}</strong></span>
-            <span className="text-gray-700">Revenue: <strong>KES {stats.todayStats.totalRevenue.toLocaleString()}</strong></span>
-            {stats.todayStats.bySource.pos > 0         && <span className="text-gray-600">POS: <strong>KES {stats.todayStats.bySource.pos.toLocaleString()}</strong></span>}
-            {showBar          && stats.todayStats.bySource.bar > 0         && <span className="text-green-700">Bar: <strong>KES {stats.todayStats.bySource.bar.toLocaleString()}</strong></span>}
-            {showHospitality  && stats.todayStats.bySource.hospitality > 0 && <span className="text-emerald-700">Hospitality: <strong>KES {stats.todayStats.bySource.hospitality.toLocaleString()}</strong></span>}
-            {showKds          && stats.todayStats.bySource.kds > 0         && <span className="text-blue-700">Kitchen: <strong>KES {stats.todayStats.bySource.kds.toLocaleString()}</strong></span>}
-            {showRentals      && stats.todayStats.bySource.rental > 0      && <span className="text-purple-700">Rentals: <strong>KES {stats.todayStats.bySource.rental.toLocaleString()}</strong></span>}
+            <Link href="/dashboard/breakdown" className="text-gray-700 hover:underline cursor-pointer">Orders: <strong>{stats.todayStats.totalOrders}</strong></Link>
+            <Link href="/dashboard/breakdown" className="text-gray-700 hover:underline cursor-pointer">Revenue: <strong>KES {stats.todayStats.totalRevenue.toLocaleString()}</strong></Link>
+            {stats.todayStats.bySource.pos > 0         && <Link href="/dashboard/breakdown?filter=source_pos" className="text-gray-600 hover:underline cursor-pointer">POS: <strong>KES {stats.todayStats.bySource.pos.toLocaleString()}</strong></Link>}
+            {showBar          && stats.todayStats.bySource.bar > 0         && <Link href="/dashboard/breakdown?filter=source_bar" className="text-green-700 hover:underline cursor-pointer">Bar: <strong>KES {stats.todayStats.bySource.bar.toLocaleString()}</strong></Link>}
+            {showHospitality  && stats.todayStats.bySource.hospitality > 0 && <Link href="/dashboard/breakdown?filter=source_hospitality" className="text-emerald-700 hover:underline cursor-pointer">Hospitality: <strong>KES {stats.todayStats.bySource.hospitality.toLocaleString()}</strong></Link>}
+            {showKds          && stats.todayStats.bySource.kds > 0         && <Link href="/dashboard/breakdown?filter=source_kds" className="text-blue-700 hover:underline cursor-pointer">Kitchen: <strong>KES {stats.todayStats.bySource.kds.toLocaleString()}</strong></Link>}
+            {showRentals      && stats.todayStats.bySource.rental > 0      && <Link href="/dashboard/breakdown?filter=source_rental" className="text-purple-700 hover:underline cursor-pointer">Rentals: <strong>KES {stats.todayStats.bySource.rental.toLocaleString()}</strong></Link>}
             {Object.entries(stats.todayStats.byPayment as Record<string, number>)
-              .filter(([method]) => method.toLowerCase() !== 'credit') // Exclude credit
+              .filter(([method]) => method.toLowerCase() !== 'credit')
               .map(([method, amt]) => {
-              // Map built-in methods to display names, keep custom names as-is
               let displayName = method
               if (method === 'mobile_money') displayName = 'M-Pesa'
               else if (method === 'cash') displayName = 'Cash'
               else if (method === 'card') displayName = 'Card'
               else if (method === 'bank_transfer') displayName = 'Bank Transfer'
-              // Custom methods already have proper names, so just capitalize first letter
               else displayName = method.charAt(0).toUpperCase() + method.slice(1)
-              
               return (
-                <span key={method} className="text-gray-500">
+                <Link key={method} href={`/dashboard/breakdown?filter=${encodeURIComponent(method)}`} className="text-gray-500 hover:underline cursor-pointer">
                   {displayName}: <strong>KES {amt.toLocaleString()}</strong>
-                </span>
+                </Link>
               )
             })}
             {stats.todayStats.creditIssued > 0 && (
-              <span className="text-amber-600">
+              <Link href="/dashboard/breakdown?filter=credit_issued" className="text-amber-600 hover:underline cursor-pointer">
                 Credit Issued: <strong>KES {stats.todayStats.creditIssued.toLocaleString()}</strong>
-              </span>
+              </Link>
             )}
             {stats.todayStats.creditCollected > 0 && (
-              <span className="text-blue-600">
+              <Link href="/dashboard/breakdown?filter=credit_collected" className="text-blue-600 hover:underline cursor-pointer">
                 Credit Collected: <strong>KES {stats.todayStats.creditCollected.toLocaleString()}</strong>
-              </span>
+              </Link>
             )}
           </div>
         </div>

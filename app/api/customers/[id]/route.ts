@@ -45,6 +45,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       amount: -payment,
       balance: customer.creditBalance,
       note: paymentNote,
+      // Track who collected this payment for per-staff accountability
+      collectedBy: payload.userId,
+      collectedByType: payload.type, // 'staff' or 'user'
       // Store payment method details for reporting
       paymentMethod,
       mpesaCode: mpesaCode || undefined,
