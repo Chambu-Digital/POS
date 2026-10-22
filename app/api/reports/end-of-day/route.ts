@@ -3,6 +3,29 @@ import { getAuthPayload } from '@/lib/jwt'
 import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
+import { normalisePermissions } from '@/lib/modules'
+
+// ── helper: cap a payment amount at its actual revenue share (strips cash change) ──
+// Mirrors the same helper in /api/dashboard/stats so numbers are consistent.
+function cappedPaymentAmount(payment: any, allPayments: any[], saleTotal: number): number {
+  const methodName = payment.customMethodName || payment.method || 'cash'
+  const otherTotal = allPayments
+    .filter((op: any) => {
+      const opName = op.customMethodName || op.method || 'cash'
+      return opName !== methodName && opName.toLowerCase() !== 'credit'
+    })
+    .reduce((s: number, op: any) => s + (op.amount || 0), 0)
+  return Math.min(payment.amount || 0, Math.max(0, saleTotal - otherTotal))
+}
+
+// ── helper: resolve a payment method display name ────────────────────────────
+function resolveMethodName(payment: any): string {
+  if (payment.method === 'cash') return 'Cash'
+  if (payment.method === 'mobile_money') return 'M-Pesa'
+  if (payment.method === 'bank' && payment.bankProviderName) return payment.bankProviderName
+  if (payment.method === 'custom' && payment.customMethodName) return payment.customMethodName
+  return payment.method || 'Other'
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -10,8 +33,14 @@ export async function GET(request: NextRequest) {
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { models, conn } = await getTenantDB(request)
-    const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const isStaff = payload.type === 'staff'
+    const ownerId = isStaff && payload.adminId ? payload.adminId : payload.userId
     const branchContext = await getBranchContext(request)
+
+    // Staff without pos.reports permission only see their own records
+    const perms = isStaff ? normalisePermissions(payload.permissions || {}) : null
+    const canSeeFullReport = !isStaff || perms?.['pos.reports'] === true
+    const staffScopeId = isStaff && !canSeeFullReport ? payload.userId : null
 
     if (!branchContext) {
       return NextResponse.json({ error: 'Branch context required' }, { status: 400 })
@@ -41,7 +70,8 @@ export async function GET(request: NextRequest) {
       userId: ownerId,
       branchId: branchContext,
       createdAt: { $gte: startOfDay, $lte: endOfDay },
-      status: { $ne: 'held' } // Exclude held orders
+      status: { $ne: 'held' },
+      ...(staffScopeId ? { staffId: new Types.ObjectId(staffScopeId) } : {}),
     }).lean()
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -60,29 +90,23 @@ export async function GET(request: NextRequest) {
       }
       const employeePayments = paymentsByEmployee.get(saleStaffId)!
 
-      // Process payments array (new format)
+      // Process payments array (new format) — cap each payment to its revenue
+      // share so we never count cash change as revenue (mirrors dashboard stats).
       if (sale.payments && Array.isArray(sale.payments)) {
         for (const payment of sale.payments) {
-          let methodName = ''
-          
-          if (payment.method === 'cash') {
-            methodName = 'Cash'
-          } else if (payment.method === 'mobile_money') {
-            methodName = 'M-Pesa'
-          } else if (payment.method === 'bank' && payment.bankProviderName) {
-            methodName = payment.bankProviderName
-          } else if (payment.method === 'custom' && payment.customMethodName) {
-            methodName = payment.customMethodName
-          } else {
-            methodName = payment.method || 'Other'
-          }
+          if ((payment.method || '').toLowerCase() === 'credit') continue
+
+          const methodName = resolveMethodName(payment)
+          const capped = cappedPaymentAmount(payment, sale.payments, sale.total)
 
           allPaymentMethods.add(methodName)
           const currentAmount = employeePayments.get(methodName) || 0
-          employeePayments.set(methodName, currentAmount + payment.amount)
+          employeePayments.set(methodName, currentAmount + capped)
         }
       } else if (sale.paymentMethod) {
-        // Legacy single payment format
+        // Legacy single payment format — use sale.total (revenue), not amountPaid
+        if (sale.paymentMethod.toLowerCase() === 'credit') continue
+
         let methodName = ''
         if (sale.paymentMethod === 'cash') {
           methodName = 'Cash'
@@ -94,7 +118,7 @@ export async function GET(request: NextRequest) {
         
         allPaymentMethods.add(methodName)
         const currentAmount = employeePayments.get(methodName) || 0
-        employeePayments.set(methodName, currentAmount + (sale.amountPaid || 0))
+        employeePayments.set(methodName, currentAmount + (sale.total || 0))
       }
     }
 
@@ -116,16 +140,20 @@ export async function GET(request: NextRequest) {
           entryDate >= startOfDay &&
           entryDate <= endOfDay &&
           entry.type === 'payment' &&
-          entry.amount < 0 // Negative means debt reduced
+          entry.amount < 0
         ) {
+          // Scope to this staff member's collections if not full-report view
+          if (staffScopeId && entry.collectedBy?.toString() !== staffScopeId) continue
+
           const paymentAmount = Math.abs(entry.amount)
-          
-          // Add to employee payment totals
-          const staffId = 'owner' // Credit payments typically handled by owner
-          if (!paymentsByEmployee.has(staffId)) {
-            paymentsByEmployee.set(staffId, new Map())
+
+          // Attribute to whoever collected it (collectedBy), fallback to owner
+          const collectorId = entry.collectedBy?.toString() || 'owner'
+          staffIds.add(collectorId)
+          if (!paymentsByEmployee.has(collectorId)) {
+            paymentsByEmployee.set(collectorId, new Map())
           }
-          
+
           let methodName = ''
           if (entry.paymentMethod === 'cash') {
             methodName = 'Cash'
@@ -138,13 +166,12 @@ export async function GET(request: NextRequest) {
           } else if (entry.paymentMethod) {
             methodName = entry.paymentMethod
           } else {
-            methodName = 'Cash' // Default
+            methodName = 'Cash'
           }
 
           allPaymentMethods.add(methodName)
-          const employeePayments = paymentsByEmployee.get(staffId)!
-          const currentAmount = employeePayments.get(methodName) || 0
-          employeePayments.set(methodName, currentAmount + paymentAmount)
+          const employeePayments = paymentsByEmployee.get(collectorId)!
+          employeePayments.set(methodName, (employeePayments.get(methodName) || 0) + paymentAmount)
 
           creditPaymentsReceived.push({
             customerId: customer._id,
@@ -154,7 +181,8 @@ export async function GET(request: NextRequest) {
             mpesaCode: entry.mpesaCode || '',
             remainingBalance: entry.balance,
             timestamp: entry.date,
-            note: entry.note
+            note: entry.note,
+            collectedBy: collectorId,
           })
         }
       }
@@ -248,13 +276,15 @@ export async function GET(request: NextRequest) {
       userId: ownerId,
       branchId: branchContext,
       status: 'approved',
-      paymentDate: { $gte: startOfDay, $lte: endOfDay }
+      paymentDate: { $gte: startOfDay, $lte: endOfDay },
+      ...(staffScopeId ? { $or: [{ staffId: new Types.ObjectId(staffScopeId) }, { paidBy: new Types.ObjectId(staffScopeId) }] } : {}),
     }).lean()
 
     const pendingExpenses = await models.Expense.find({
       userId: ownerId,
       branchId: branchContext,
-      status: 'pending'
+      status: 'pending',
+      ...(staffScopeId ? { $or: [{ staffId: new Types.ObjectId(staffScopeId) }, { paidBy: new Types.ObjectId(staffScopeId) }] } : {}),
     }).lean()
 
     const expensesFormatted = approvedExpenses.map(exp => {
@@ -299,6 +329,9 @@ export async function GET(request: NextRequest) {
       .filter(s => s.paymentStatus !== 'paid')
       .reduce((sum, sale) => sum + (sale.debt || 0), 0)
 
+    // grandTotal already includes capped sales payments + credit repayments received
+    const totalCollected = grandTotal
+
     const report = {
       branch: {
         _id: branch._id,
@@ -306,14 +339,15 @@ export async function GET(request: NextRequest) {
       },
       date: reportDate,
       generatedAt: new Date(),
+      isStaffView: !!staffScopeId,
       generatedBy: {
-        name: ownerName,
+        name: staffScopeId ? (staffMap.get(staffScopeId) || 'Staff') : ownerName,
         type: payload.type
       },
       summary: {
         totalSales,
         totalSalesAmount,
-        totalCollected: grandTotal,
+        totalCollected,
         totalCreditIssued,
         totalExpenses,
         pendingExpensesCount: pendingExpenses.length,

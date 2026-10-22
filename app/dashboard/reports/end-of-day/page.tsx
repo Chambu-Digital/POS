@@ -1,4 +1,4 @@
-'use client'
+ 'use client'
 
 import { useState, useEffect } from 'react'
 import { Calendar, Download, Printer, AlertCircle, DollarSign, TrendingUp, CreditCard, Receipt, User, Wallet } from 'lucide-react'
