@@ -55,10 +55,13 @@ export function ImportProductsModal({ isOpen, onClose, onSuccess }: ImportProduc
   const [isLoadingBranches, setIsLoadingBranches] = useState(false)
   const [isLoadingProducts, setIsLoadingProducts] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showReview, setShowReview] = useState(false)
 
   useEffect(() => {
     if (isOpen) {
       fetchBranches()
+    } else {
+      setShowReview(false)
     }
   }, [isOpen])
 
@@ -183,6 +186,7 @@ export function ImportProductsModal({ isOpen, onClose, onSuccess }: ImportProduc
       if (response.ok) {
         const data = await response.json()
         toast.success(data.message || 'Products imported successfully')
+        setShowReview(false)
         onSuccess()
         onClose()
         // Reset form
@@ -215,6 +219,7 @@ export function ImportProductsModal({ isOpen, onClose, onSuccess }: ImportProduc
   const selectedCount = importItems.filter(item => item.selected).length
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -342,7 +347,7 @@ export function ImportProductsModal({ isOpen, onClose, onSuccess }: ImportProduc
                               <Input
                                 type="number"
                                 min="0"
-                                value={item.initialQuantity}
+                                value={item.initialQuantity || ''}
                                 onChange={(e) => updateItemQuantity(item.productId, parseInt(e.target.value) || 0)}
                                 disabled={!item.selected}
                                 placeholder="0"
@@ -373,14 +378,113 @@ export function ImportProductsModal({ isOpen, onClose, onSuccess }: ImportProduc
               Cancel
             </Button>
             <Button
-              onClick={handleSubmit}
-              disabled={isSubmitting || selectedCount === 0 || !sourceBranchId}
+              onClick={() => {
+                const selectedItems = importItems.filter(item => item.selected)
+                const itemsWithoutQuantity = selectedItems.filter(item => item.initialQuantity <= 0)
+                if (itemsWithoutQuantity.length > 0) {
+                  toast.error('All selected products must have a quantity greater than 0')
+                  return
+                }
+                setShowReview(true)
+              }}
+              disabled={selectedCount === 0 || !sourceBranchId}
             >
-              {isSubmitting ? 'Importing...' : `Import ${selectedCount} Product${selectedCount !== 1 ? 's' : ''}`}
+              Review {selectedCount} Product{selectedCount !== 1 ? 's' : ''}
             </Button>
           </div>
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* ── Review Modal ─────────────────────────────────────────────────── */}
+    <Dialog open={showReview} onOpenChange={(open) => {
+      if (!open) setShowReview(false)
+    }}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Package className="h-5 w-5" />
+            Review Import — {sourceBranchName}
+          </DialogTitle>
+          <DialogDescription>
+            Confirm the products and quantities to import into your branch
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Review Table */}
+          <div className="border rounded-lg overflow-hidden">
+            <div className="max-h-[50vh] overflow-y-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b sticky top-0">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                      Product
+                    </th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                      Price
+                    </th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-40">
+                      Quantity
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {importItems.filter(item => item.selected).map((item) => {
+                    const product = products.find(p => p._id === item.productId)
+                    return (
+                      <tr key={item.productId}>
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-sm">
+                            {[item.variant, item.brand, item.productName].filter(Boolean).join(' ')}
+                          </div>
+                          {item.model && (
+                            <div className="text-xs text-gray-500">{item.model}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          KES {product?.sellingPrice.toLocaleString() || '-'}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Input
+                            type="number"
+                            min="1"
+                            value={item.initialQuantity || ''}
+                            onChange={(e) => updateItemQuantity(item.productId, parseInt(e.target.value) || 0)}
+                            placeholder="0"
+                            className="w-full"
+                          />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Summary */}
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">
+              {importItems.filter(i => i.selected).length} products · {importItems.filter(i => i.selected).reduce((s, i) => s + i.initialQuantity, 0)} total units
+            </span>
+          </div>
+
+          {/* Actions */}
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <Button type="button" variant="outline" onClick={() => setShowReview(false)}>
+              Back
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Importing...' : 'Confirm Import'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }
