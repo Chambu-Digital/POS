@@ -22,6 +22,9 @@ interface ReturnItem {
   customMethodName?: string
   mpesaCode?: string
   mpesaPhone?: string
+  // Lot tracking — caller may supply the batchId from the original sale line
+  batchId?: string
+  lotLabel?: string
 }
 
 export async function POST(
@@ -84,6 +87,26 @@ export async function POST(
 
       const productObjId = new Types.ObjectId(returnItem.productId)
 
+      // Auto-resolve batchId from the original sale line if caller didn't supply it.
+      // When the same product appears on multiple lines (different lots), match by
+      // batchId first, then fall back to productId-only match.
+      let resolvedBatchId: Types.ObjectId | undefined
+      let resolvedLotLabel: string | undefined
+
+      if (returnItem.batchId) {
+        resolvedBatchId  = new Types.ObjectId(returnItem.batchId)
+        resolvedLotLabel = returnItem.lotLabel || ''
+      } else {
+        // Try to find a sale line item that has a batchId for this product
+        const saleLineItem = sale.items.find(
+          (item: any) => item.productId?.toString() === returnItem.productId && item.batchId
+        )
+        if (saleLineItem?.batchId) {
+          resolvedBatchId  = saleLineItem.batchId
+          resolvedLotLabel = saleLineItem.lotLabel || ''
+        }
+      }
+
       // Build return entry for sale document - NO STOCK CHANGES YET
       returnEntries.push({
         productId: productObjId,
@@ -104,6 +127,9 @@ export async function POST(
         customMethodName: returnItem.customMethodName || '',
         mpesaCode: returnItem.mpesaCode || '',
         mpesaPhone: returnItem.mpesaPhone || '',
+        // Lot tracking fields — stored so approval route can reverse the right batch
+        ...(resolvedBatchId  && { batchId:  resolvedBatchId  }),
+        ...(resolvedLotLabel && { lotLabel: resolvedLotLabel }),
       })
 
       processedItems.push({

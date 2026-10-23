@@ -32,6 +32,12 @@ export const productSchema = new mongoose.Schema(
       reorderPoint:        { type: Number },  // Manual reorder point override
       preferredSupplierId: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier' }
     },
+    // ── Per-unit / lot tracking ───────────────────────────────────────────────
+    // When trackLots is true, stock is managed through individual ProductBatch
+    // documents rather than a single integer counter.  lotUnit describes what
+    // each measurable unit is called (metres, pieces, kg, litres, rolls …).
+    trackLots: { type: Boolean, default: false },
+    lotUnit:   { type: String, default: 'pieces' },  // display label for the quantity unit
     createdAt:    { type: Date, default: Date.now },
     updatedAt:    { type: Date, default: Date.now },
   },
@@ -77,6 +83,9 @@ export const saleSchema = new mongoose.Schema(
       quantity:    { type: Number, required: true },
       price:       { type: Number, required: true },
       discount:    { type: Number, default: 0 },
+      // Lot tracking — populated when item was sold from a specific ProductBatch
+      batchId:     { type: mongoose.Schema.Types.ObjectId, ref: 'ProductBatch' },
+      lotLabel:    { type: String, default: '' },
     }],
     subtotal:      Number,
     discount:      { type: Number, default: 0 },
@@ -133,6 +142,9 @@ export const saleSchema = new mongoose.Schema(
       notes:         String,
       returnedBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
       returnedAt:    { type: Date, default: Date.now },
+      // Lot tracking — carried from the original sale line item
+      batchId:       { type: mongoose.Schema.Types.ObjectId, ref: 'ProductBatch' },
+      lotLabel:      { type: String, default: '' },
       
       // Approval workflow
       status:        { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
@@ -590,6 +602,10 @@ export const stockLedgerSchema = new mongoose.Schema(
     totalCost:       { type: Number },                   // total value of this movement
     reference:       { type: String, default: '' },      // invoice/PO number
     
+    // Lot / batch tracking — set when a movement involves a specific ProductBatch
+    batchId:         { type: mongoose.Schema.Types.ObjectId, ref: 'ProductBatch' },
+    lotLabel:        { type: String, default: '' },  // denormalized label for quick display
+
     // General fields
     reason:          { type: String, default: '' },
     notes:           { type: String, default: '' },
@@ -604,6 +620,7 @@ stockLedgerSchema.index({ userId: 1, saleId: 1 })
 stockLedgerSchema.index({ userId: 1, supplierId: 1, timestamp: -1 })
 stockLedgerSchema.index({ userId: 1, type: 1, timestamp: -1 })
 stockLedgerSchema.index({ userId: 1, timestamp: -1 })
+stockLedgerSchema.index({ userId: 1, batchId: 1, timestamp: -1 })  // lot-level movement history
 
 // ── Supplier ───────────────────────────────────────────────────────────────────
 // Manages supplier/vendor information for retail inventory.
@@ -625,6 +642,58 @@ export const supplierSchema = new mongoose.Schema(
 )
 supplierSchema.index({ userId: 1, isActive: 1 })
 supplierSchema.index({ userId: 1, name: 1 })
+
+// ── ProductBatch ───────────────────────────────────────────────────────────────
+// Tracks individual physical lots/units of a retail product.
+// Only used when Product.trackLots === true.
+// Examples: Roll A of 90m wire, Box 3 of 100 nails, Carton 2 of 24 bottles.
+// Mirrors the pharmacy DrugBatch pattern but without expiry-date requirements.
+export const productBatchSchema = new mongoose.Schema(
+  {
+    userId:           { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:         { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
+    productId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+
+    // ── Identity ──────────────────────────────────────────────────────────────
+    // lotId is the system-generated unique reference (LOT-YYMMDD-XXXX).
+    // lotLabel is the human-friendly display name staff can customise.
+    lotId:            { type: String, required: true, trim: true },   // e.g. LOT-241022-A3BF
+    lotLabel:         { type: String, default: '', trim: true },       // e.g. "Roll A", "Box 2"
+    supplierLot:      { type: String, default: '', trim: true },       // supplier's own lot/batch number
+
+    // ── Quantity tracking ─────────────────────────────────────────────────────
+    quantity:         { type: Number, required: true, default: 0 },   // current remaining
+    initialQuantity:  { type: Number, required: true },                // quantity when first received
+    reservedQuantity: { type: Number, default: 0 },                   // held for pending sales
+
+    // ── Pricing (optional per-lot override) ───────────────────────────────────
+    buyingPrice:      { type: Number, required: true },
+    sellingPrice:     { type: Number },                               // overrides product default when set
+
+    // ── Provenance ────────────────────────────────────────────────────────────
+    supplier:         { type: String, default: '' },
+    invoiceNumber:    { type: String, default: '', trim: true },
+    poReference:      { type: String, default: '', trim: true },
+    receivedDate:     { type: Date, default: Date.now },
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    // active   — in use / available for sale
+    // depleted — quantity reached zero from sales
+    // sealed   — manually closed (e.g. damaged, set aside) before depletion
+    status:           { type: String, enum: ['active', 'depleted', 'sealed'], default: 'active' },
+
+    notes:            { type: String, default: '' },
+    createdAt:        { type: Date, default: Date.now },
+    updatedAt:        { type: Date, default: Date.now },
+  },
+  { collection: 'product_batches' }
+)
+// FIFO query — sort by receivedDate ascending to consume oldest lots first
+productBatchSchema.index({ userId: 1, branchId: 1, productId: 1, receivedDate: 1 })
+productBatchSchema.index({ userId: 1, branchId: 1, status: 1 })
+productBatchSchema.index({ userId: 1, branchId: 1, productId: 1, status: 1 })
+productBatchSchema.index({ userId: 1, branchId: 1, lotId: 1 }, { unique: true })
+productBatchSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
 
 // ── DrugBatch ─────────────────────────────────────────────────────────────────
 // Tracks individual stock batches per drug for FEFO, expiry, and batch recall
@@ -708,6 +777,7 @@ export const branchSchema = new mongoose.Schema(
     code: { type: String, required: true, unique: true, trim: true, uppercase: true },
     address: { type: String, default: '' },
     phone: { type: String, default: '' },
+    phones: { type: [String], default: [] },
     status: { type: String, enum: ['active', 'inactive', 'closed'], default: 'active' },
     isDefault: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now },

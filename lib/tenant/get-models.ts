@@ -7,7 +7,7 @@ import {
   reportSchema, stockLedgerSchema, supplierSchema,
   customerSchema, drugBatchSchema, drugSchema,
   branchSchema, mobileShopSchema, inventorySchema, inventoryTransactionSchema,
-
+  productBatchSchema,
   purchaseOrderSchema, restockPlanSchema, quotationSchema,
   hospitalityMenuItemSchema, hospitalityServingTypeSchema, hospitalityServingInventorySchema,
   hospitalityServingMovementSchema, hospitalityProductionLogSchema, hospitalityOrderSchema,
@@ -20,6 +20,7 @@ export function getModels(conn: mongoose.Connection) {
   return {
     Product:         conn.models.Product         || conn.model('Product',         productSchema),
     ProductInventory: conn.models.ProductInventory || conn.model('ProductInventory', productInventorySchema),
+    ProductBatch:    conn.models.ProductBatch    || conn.model('ProductBatch',    productBatchSchema),
     Sale:            conn.models.Sale            || conn.model('Sale',            saleSchema),
     Category:        conn.models.Category        || conn.model('Category',        categorySchema),
     Staff:           conn.models.Staff           || conn.model('Staff',           staffSchema),

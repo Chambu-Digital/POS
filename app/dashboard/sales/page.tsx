@@ -16,7 +16,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { Plus, Minus, X, Search, AlertCircle, Clock } from 'lucide-react'
+import { Plus, Minus, X, Search, AlertCircle, Clock, Layers, ChevronDown, ChevronUp } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
@@ -38,6 +38,7 @@ import { CameraScanner } from '@/components/barcode/camera-scanner'
 import { IntegratedCameraScanner } from '@/components/barcode/integrated-camera-scanner'
 import { HeldOrders } from '@/components/sales/held-orders'
 import { ProductImage } from '@/components/ui/product-image'
+import { LotPickerModal } from '@/components/sales/lot-picker-modal'
 import type { ScanResult } from '@/lib/barcode-scanner/types'
 
 interface Product {
@@ -52,6 +53,8 @@ interface Product {
   variant?: string
   barcode?: string
   images?: string[]
+  trackLots?: boolean
+  lotUnit?: string
 }
 
 interface CartItem {
@@ -63,6 +66,9 @@ interface CartItem {
   sellingPrice: number
   quantity: number
   discount: number
+  // lot breakdown — only present when sold via the lot picker
+  // carries the per-lot split for API batch deduction; invisible to cart display
+  lotBreakdown?: Array<{ batchId: string; lotLabel: string; quantity: number }>
 }
 
 export default function SalesPage() {
@@ -134,6 +140,10 @@ function SalesPageContent() {
   const [selectedCartIndex, setSelectedCartIndex] = useState<number>(-1)
   const [overrideItem, setOverrideItem] = useState<string | null>(null)
   const [overridePrice, setOverridePrice] = useState('')
+  // Lot picker state
+  const [lotPickerProduct, setLotPickerProduct] = useState<Product | null>(null)
+  // Which multi-lot product groups are expanded in the cart
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
 
   useEffect(() => { productsRef2.current = products }, [products])
 
@@ -385,12 +395,18 @@ function SalesPageContent() {
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur()
     }
-    
+
     if (product.stock <= 0) {
       toast.error('Product out of stock')
       return
     }
-    
+
+    // Lot-tracked products: open the picker modal instead of adding directly
+    if (product.trackLots) {
+      setLotPickerProduct(product)
+      return
+    }
+
     setCart((prevCart) => {
       const existingItemIndex = prevCart.findIndex((item) => item.productId === product._id)
       if (existingItemIndex !== -1) {
@@ -399,7 +415,6 @@ function SalesPageContent() {
           toast.error('Not enough stock')
           return prevCart
         }
-        // Item already exists, increment quantity and select it
         setSelectedCartIndex(existingItemIndex)
         return prevCart.map((item) =>
           item.productId === product._id
@@ -407,7 +422,6 @@ function SalesPageContent() {
             : item
         )
       }
-      // New item - add to cart and select it (will be at the end)
       setSelectedCartIndex(prevCart.length)
       const priceToUse = isWholesaleMode && product.wholeSale > 0 ? product.wholeSale : product.sellingPrice
       return [
@@ -423,6 +437,35 @@ function SalesPageContent() {
           discount: 0,
         },
       ]
+    })
+  }
+
+  // Called by LotPickerModal with a single CartItem carrying lotBreakdown
+  function addToCartWithLots(item: CartItem) {
+    setLotPickerProduct(null)
+    setCart(prevCart => {
+      const existingIdx = prevCart.findIndex(c => c.productId === item.productId)
+      if (existingIdx !== -1) {
+        // Merge: add quantities, merge lot breakdowns
+        return prevCart.map((c, i) => {
+          if (i !== existingIdx) return c
+          const existing = c.lotBreakdown || []
+          const incoming = item.lotBreakdown || []
+          // Merge by batchId
+          const merged = [...existing]
+          for (const lot of incoming) {
+            const idx = merged.findIndex(l => l.batchId === lot.batchId)
+            if (idx !== -1) {
+              merged[idx] = { ...merged[idx], quantity: merged[idx].quantity + lot.quantity }
+            } else {
+              merged.push(lot)
+            }
+          }
+          return { ...c, quantity: c.quantity + item.quantity, lotBreakdown: merged }
+        })
+      }
+      setSelectedCartIndex(prevCart.length)
+      return [...prevCart, item]
     })
   }
 
@@ -688,8 +731,10 @@ function SalesPageContent() {
     toast.success('Price updated')
   }
 
-  function removeFromCart(productId: string) {
-    setCart((prevCart) => prevCart.filter((item) => item.productId !== productId))
+  function removeFromCart(idOrBatchId: string) {
+    setCart((prevCart) => prevCart.filter(
+      (item) => item.productId !== idOrBatchId
+    ))
   }
 
   function scrollToCart() {
@@ -919,7 +964,11 @@ function SalesPageContent() {
                 {filteredProducts.map((product) => (
                   <Card
                     key={product._id}
-                    className="hover:shadow-md hover:ring-2 hover:ring-green-500 transition-all cursor-pointer"
+                    className={`hover:shadow-md transition-all cursor-pointer ${
+                      product.trackLots
+                        ? 'hover:ring-2 hover:ring-blue-400'
+                        : 'hover:ring-2 hover:ring-green-500'
+                    }`}
                     onClick={() => addToCart(product)}
                   >
                     <CardContent className="p-3 flex gap-3 items-center">
@@ -930,9 +979,14 @@ function SalesPageContent() {
                         className="shrink-0"
                       />
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm truncate leading-tight">
-                          {formatProductName(product)}
-                        </p>
+                        <div className="flex items-center gap-1">
+                          <p className="font-semibold text-sm truncate leading-tight">
+                            {formatProductName(product)}
+                          </p>
+                          {product.trackLots && (
+                            <Layers size={11} className="text-blue-500 shrink-0" title="Lot tracked — picker will open" />
+                          )}
+                        </div>
                         {product.model && (
                           <p className="text-xs text-muted-foreground truncate">{product.model}</p>
                         )}
@@ -947,13 +1001,18 @@ function SalesPageContent() {
                           </p>
                           <Badge
                             variant={product.stock > 0 ? 'default' : 'destructive'}
-                            className="text-[10px] px-1.5 py-0"
+                            className={`text-[10px] px-1.5 py-0 ${product.trackLots && product.stock > 0 ? 'bg-blue-100 text-blue-800 hover:bg-blue-100 border-0' : ''}`}
                           >
                             {product.stock > 0 ? `${product.stock}` : '0'}
+                            {product.trackLots && product.lotUnit && (
+                              <span className="ml-0.5 opacity-75">{product.lotUnit}</span>
+                            )}
                           </Badge>
                         </div>
                       </div>
-                      <span className="text-xl font-bold text-green-600 shrink-0">+</span>
+                      <span className={`text-xl font-bold shrink-0 ${product.trackLots ? 'text-blue-500' : 'text-green-600'}`}>
+                        {product.trackLots ? <Layers size={18} /> : '+'}
+                      </span>
                     </CardContent>
                   </Card>
                 ))}
@@ -987,21 +1046,35 @@ function SalesPageContent() {
               {cart.length === 0 ? (
                 <p className="text-center text-muted-foreground py-8">Cart is empty</p>
               ) : (
-                cart.map((item, index) => (
-                  <div 
-                    key={item.productId} 
+                cart.map((item, index) => {
+                  const hasLots    = item.lotBreakdown && item.lotBreakdown.length > 0
+                  const isExpanded = expandedGroups.has(item.productId)
+
+                  return (
+                  <div
+                    key={item.productId}
                     className={`border rounded-lg p-2.5 flex gap-2.5 transition-all ${
-                      selectedCartIndex === index 
-                        ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-300' 
+                      selectedCartIndex === index
+                        ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-300'
                         : 'hover:bg-gray-50'
                     }`}
                     onClick={() => setSelectedCartIndex(index)}
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start">
-                        <p className="font-medium text-sm truncate leading-tight pr-1">
-                          {formatProductName(item)}
-                        </p>
+                        <div className="min-w-0 pr-1">
+                          <p className="font-medium text-sm truncate leading-tight">
+                            {formatProductName(item)}
+                          </p>
+                          {hasLots && (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <Layers size={10} className="text-blue-400 shrink-0" />
+                              <span className="text-[10px] text-blue-600 font-medium">
+                                {item.lotBreakdown!.length} lot{item.lotBreakdown!.length !== 1 ? 's' : ''}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                         <Button
                           size="sm"
                           variant="ghost"
@@ -1081,15 +1154,15 @@ function SalesPageContent() {
                               }}
                               onClick={(e) => e.stopPropagation()}
                             />
-                            <button 
-                              onClick={() => applyPriceOverride(item.productId)} 
+                            <button
+                              onClick={() => applyPriceOverride(item.productId)}
                               className="text-xs text-green-600 font-semibold hover:text-green-700"
                             >
                               OK
                             </button>
                           </div>
                         ) : (
-                          <button 
+                          <button
                             onClick={(e) => {
                               e.stopPropagation()
                               setOverrideItem(item.productId)
@@ -1100,10 +1173,40 @@ function SalesPageContent() {
                             KSh {(item.sellingPrice * item.quantity - item.discount).toLocaleString()}
                           </button>
                         )}
+                        {/* Chevron — only for lot items */}
+                        {hasLots && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setExpandedGroups(prev => {
+                                const next = new Set(prev)
+                                next.has(item.productId) ? next.delete(item.productId) : next.add(item.productId)
+                                return next
+                              })
+                            }}
+                            className="text-muted-foreground hover:text-foreground ml-0.5"
+                          >
+                            {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                          </button>
+                        )}
                       </div>
+                      {/* Lot breakdown — read-only, collapsible */}
+                      {hasLots && isExpanded && (
+                        <div className="mt-1.5 pt-1.5 border-t border-dashed space-y-0.5">
+                          {item.lotBreakdown!.map(lot => (
+                            <div key={lot.batchId} className="flex items-center gap-1 text-[10px] text-muted-foreground pl-1">
+                              <Layers size={9} className="text-blue-300 shrink-0" />
+                              <span className="text-blue-600 font-medium">{lot.lotLabel}</span>
+                              <span className="ml-auto">{lot.quantity}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
-                ))
+                  )
+                })
               )}
             </CardContent>
           </Card>
@@ -1284,6 +1387,15 @@ function SalesPageContent() {
           Chambu Digital
         </a>
       </div>
+
+      {/* Lot Picker Modal — opens when a lot-tracked product card is clicked */}
+      <LotPickerModal
+        open={lotPickerProduct !== null}
+        product={lotPickerProduct}
+        isWholesaleMode={isWholesaleMode}
+        onConfirm={addToCartWithLots}
+        onCancel={() => setLotPickerProduct(null)}
+      />
     </>
   )
 }

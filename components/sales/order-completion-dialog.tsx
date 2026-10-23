@@ -32,6 +32,7 @@ interface OrderCompletionDialogProps {
   discount?: number
   onPrintReceipt: () => void
   onMakeNewSale: () => void
+  customerPhone?: string
 }
 
 export function OrderCompletionDialog({
@@ -47,10 +48,11 @@ export function OrderCompletionDialog({
   discount = 0,
   onPrintReceipt,
   onMakeNewSale,
+  customerPhone,
 }: OrderCompletionDialogProps) {
   const router = useRouter()
   const [showSendOptions, setShowSendOptions] = useState(false)
-  const [phoneNumber, setPhoneNumber] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState(customerPhone || '')
   const [focusedButton, setFocusedButton] = useState<'new-sale' | 'print' | 'send'>('print')
   
   const newSaleRef = useRef<HTMLButtonElement>(null)
@@ -62,8 +64,10 @@ export function OrderCompletionDialog({
     if (open) {
       setFocusedButton('print')
       setTimeout(() => printRef.current?.focus(), 100)
+      // Pre-fill customer phone each time the dialog opens
+      setPhoneNumber(customerPhone || '')
     }
-  }, [open])
+  }, [open, customerPhone])
 
   // Update focus when focused button changes
   useEffect(() => {

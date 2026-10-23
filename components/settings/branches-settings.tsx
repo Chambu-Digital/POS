@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, Edit, Trash2, Building2, UserCheck } from 'lucide-react'
+import { Plus, Edit, Trash2, Building2, UserCheck, X, MapPin, Phone } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -22,6 +22,7 @@ interface Branch {
   code: string
   address: string
   phone: string
+  phones?: string[]
   status: 'active' | 'inactive' | 'closed'
   isDefault: boolean
   createdAt: string
@@ -47,62 +48,47 @@ export function BranchesSettings() {
     name: '',
     code: '',
     address: '',
-    phone: '',
+    phones: [''] as string[],
     status: 'active' as Branch['status'],
   })
   const [selectedManagers, setSelectedManagers] = useState<string[]>([])
   const [addingManager, setAddingManager] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  useEffect(() => {
-    fetchData()
-  }, [])
+  useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
     setLoading(true)
     try {
       const [branchesRes, staffRes] = await Promise.all([
         fetch('/api/branches?status=all'),
-        fetch('/api/staff')
+        fetch('/api/staff'),
       ])
 
       let branchList: Branch[] = []
       let allStaff: Staff[] = []
 
       if (branchesRes.ok) {
-        const branchData = await branchesRes.json()
-        branchList = branchData.branches || []
+        const d = await branchesRes.json()
+        branchList = d.branches || []
       }
-
       if (staffRes.ok) {
-        const staffData = await staffRes.json()
-        allStaff = staffData.staff || []
-        console.log('[Branch Settings] All staff:', allStaff.map((s: any) => ({ 
-          id: s._id, 
-          name: s.name, 
-          managerOfBranches: s.managerOfBranches 
-        })))
+        const d = await staffRes.json()
+        allStaff = d.staff || []
         setStaff(allStaff)
       }
 
-      // Map managers to branches using the managerOfBranches array
       const branchesWithManagers = branchList.map(branch => {
-        console.log('[Branch Settings] Processing branch:', branch._id, branch.name)
-        const managers = allStaff.filter((s: any) => {
-          const hasMatch = s.managerOfBranches?.some((bid: string) => {
-            const match = bid === branch._id || bid.toString() === branch._id.toString()
-            if (match) console.log('[Branch Settings] Match found:', s.name, 'manages', branch.name)
-            return match
-          })
-          return hasMatch
-        })
-        console.log('[Branch Settings] Branch', branch.name, 'has', managers.length, 'managers')
+        const managers = allStaff.filter((s: any) =>
+          s.managerOfBranches?.some((bid: string) =>
+            bid === branch._id || bid.toString() === branch._id.toString()
+          )
+        )
         return { ...branch, managers }
       })
-      
+
       setBranches(branchesWithManagers)
-    } catch (error) {
-      console.error('Failed to fetch data:', error)
+    } catch {
       toast.error('Failed to load branches')
     } finally {
       setLoading(false)
@@ -111,13 +97,7 @@ export function BranchesSettings() {
 
   function openCreateModal() {
     setEditingBranch(null)
-    setFormData({
-      name: '',
-      code: '',
-      address: '',
-      phone: '',
-      status: 'active',
-    })
+    setFormData({ name: '', code: '', address: '', phones: [''], status: 'active' })
     setSelectedManagers([])
     setAddingManager(false)
     setIsModalOpen(true)
@@ -125,11 +105,17 @@ export function BranchesSettings() {
 
   function openEditModal(branch: Branch) {
     setEditingBranch(branch)
+    const phones =
+      branch.phones && branch.phones.length > 0
+        ? branch.phones
+        : branch.phone
+        ? [branch.phone]
+        : ['']
     setFormData({
       name: branch.name,
       code: branch.code,
       address: branch.address || '',
-      phone: branch.phone || '',
+      phones,
       status: branch.status,
     })
     setSelectedManagers(branch.managers?.map(m => m._id) || [])
@@ -142,13 +128,10 @@ export function BranchesSettings() {
       toast.error('Name and code are required')
       return
     }
-
     setIsSubmitting(true)
     try {
-      const url = editingBranch
-        ? `/api/branches/${editingBranch._id}`
-        : '/api/branches'
-      
+      const cleanPhones = formData.phones.filter(p => p.trim() !== '')
+      const url = editingBranch ? `/api/branches/${editingBranch._id}` : '/api/branches'
       const method = editingBranch ? 'PUT' : 'POST'
 
       const response = await fetch(url, {
@@ -158,7 +141,8 @@ export function BranchesSettings() {
           name: formData.name,
           code: formData.code.toUpperCase(),
           address: formData.address,
-          phone: formData.phone,
+          phones: cleanPhones,
+          phone: cleanPhones[0] || '',
           status: formData.status,
         }),
       })
@@ -170,72 +154,35 @@ export function BranchesSettings() {
 
       const { branch } = await response.json()
 
-      // Handle manager assignment changes
+      // Handle manager changes
       const oldManagerIds = editingBranch?.managers?.map(m => m._id) || []
-      const newManagerIds = selectedManagers
+      const managersToRemove = oldManagerIds.filter(id => !selectedManagers.includes(id))
+      const managersToAdd = selectedManagers.filter(id => !oldManagerIds.includes(id))
 
-      console.log('[Branch Update] Old managers:', oldManagerIds)
-      console.log('[Branch Update] New managers:', newManagerIds)
-
-      // Managers to remove (in old but not in new)
-      const managersToRemove = oldManagerIds.filter(id => !newManagerIds.includes(id))
-      // Managers to add (in new but not in old)
-      const managersToAdd = newManagerIds.filter(id => !oldManagerIds.includes(id))
-
-      console.log('[Branch Update] Managers to remove:', managersToRemove)
-      console.log('[Branch Update] Managers to add:', managersToAdd)
-
-      // Remove managers from THIS branch
       for (const managerId of managersToRemove) {
-        // Fetch current staff to get their managerOfBranches array
-        const staffRes = await fetch(`/api/staff/${managerId}`)
-        if (staffRes.ok) {
-          const { staff: staffMember } = await staffRes.json()
-          const updatedBranches = (staffMember.managerOfBranches || []).filter(
-            (bid: string) => bid !== branch._id
-          )
-          
-          const updateRes = await fetch(`/api/staff/${managerId}`, {
+        const res = await fetch(`/api/staff/${managerId}`)
+        if (res.ok) {
+          const { staff: s } = await res.json()
+          await fetch(`/api/staff/${managerId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              managerOfBranches: updatedBranches,
+              managerOfBranches: (s.managerOfBranches || []).filter((bid: string) => bid !== branch._id),
             }),
           })
-          
-          if (!updateRes.ok) {
-            console.error('Failed to remove manager:', await updateRes.text())
-          }
         }
       }
-
-      // Add new managers to THIS branch
       for (const managerId of managersToAdd) {
-        console.log('[Branch Update] Fetching staff:', managerId)
-        // Fetch current staff to get their managerOfBranches array
-        const staffRes = await fetch(`/api/staff/${managerId}`)
-        if (staffRes.ok) {
-          const { staff: staffMember } = await staffRes.json()
-          console.log('[Branch Update] Current managerOfBranches:', staffMember.managerOfBranches)
-          
-          const updatedBranches = [...(staffMember.managerOfBranches || []), branch._id]
-          console.log('[Branch Update] Updated managerOfBranches:', updatedBranches)
-          
-          const updateRes = await fetch(`/api/staff/${managerId}`, {
+        const res = await fetch(`/api/staff/${managerId}`)
+        if (res.ok) {
+          const { staff: s } = await res.json()
+          await fetch(`/api/staff/${managerId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              managerOfBranches: updatedBranches,
+              managerOfBranches: [...(s.managerOfBranches || []), branch._id],
             }),
           })
-          
-          if (!updateRes.ok) {
-            console.error('Failed to add manager:', await updateRes.text())
-          } else {
-            console.log('[Branch Update] Successfully added manager')
-          }
-        } else {
-          console.error('Failed to fetch staff:', await staffRes.text())
         }
       }
 
@@ -251,26 +198,17 @@ export function BranchesSettings() {
 
   async function handleDelete(branchId: string) {
     if (!confirm('Are you sure you want to delete this branch?')) return
-
     try {
-      const response = await fetch(`/api/branches/${branchId}`, {
-        method: 'DELETE',
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to delete branch')
-      }
-
+      const response = await fetch(`/api/branches/${branchId}`, { method: 'DELETE' })
+      if (!response.ok) throw new Error('Failed to delete branch')
       toast.success('Branch deleted')
       fetchData()
-    } catch (error) {
+    } catch {
       toast.error('Failed to delete branch')
     }
   }
 
-  const availableManagers = staff.filter(s => 
-    !selectedManagers.includes(s._id)
-  )
+  const availableManagers = staff.filter(s => !selectedManagers.includes(s._id))
 
   function addManager(managerId: string) {
     setSelectedManagers([...selectedManagers, managerId])
@@ -281,168 +219,228 @@ export function BranchesSettings() {
     setSelectedManagers(selectedManagers.filter(id => id !== managerId))
   }
 
+  const statusColor = (status: Branch['status']) => {
+    if (status === 'active') return 'bg-green-100 text-green-700 border-green-200'
+    if (status === 'inactive') return 'bg-amber-100 text-amber-700 border-amber-200'
+    return 'bg-red-100 text-red-700 border-red-200'
+  }
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">Branch Management</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Manage your business branches and assign managers</p>
+      {/* Header — matches Section header bar style */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/60 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-gray-900">Branch Management</h3>
+            <p className="text-xs text-gray-500 mt-0.5">Manage your business locations and assign managers</p>
+          </div>
+          <button
+            onClick={openCreateModal}
+            className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold flex items-center gap-2 transition-colors"
+          >
+            <Plus size={14} /> Add Branch
+          </button>
         </div>
-        <Button onClick={openCreateModal}>
-          <Plus size={16} className="mr-2" />
-          Add Branch
-        </Button>
-      </div>
 
-      {/* Branches List */}
-      {loading ? (
-        <div className="space-y-3">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-24 bg-muted rounded-lg animate-pulse" />
-          ))}
-        </div>
-      ) : branches.length === 0 ? (
-        <div className="text-center py-12 bg-white rounded-lg border">
-          <Building2 size={48} className="mx-auto text-muted-foreground mb-4 opacity-20" />
-          <p className="text-muted-foreground">No branches yet</p>
-          <Button onClick={openCreateModal} className="mt-4" variant="outline">
-            <Plus size={16} className="mr-2" />
-            Create First Branch
-          </Button>
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {branches.map(branch => (
-            <div
-              key={branch._id}
-              className="bg-white border rounded-lg p-4 hover:shadow-md transition-shadow"
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Building2 size={20} className="text-primary" />
-                    <h3 className="font-semibold text-lg">{branch.name}</h3>
-                    <Badge variant="outline">{branch.code}</Badge>
-                    {branch.isDefault && (
-                      <Badge>Default</Badge>
-                    )}
-                    <Badge variant={branch.status === 'active' ? 'default' : 'secondary'}>
-                      {branch.status}
-                    </Badge>
-                  </div>
+        {/* Branch list */}
+        <div className="divide-y divide-gray-100">
+          {loading ? (
+            [...Array(2)].map((_, i) => (
+              <div key={i} className="px-6 py-5">
+                <div className="h-4 bg-gray-100 rounded w-48 mb-3 animate-pulse" />
+                <div className="h-3 bg-gray-100 rounded w-72 animate-pulse" />
+              </div>
+            ))
+          ) : branches.length === 0 ? (
+            <div className="px-6 py-12 text-center">
+              <Building2 size={40} className="mx-auto text-gray-300 mb-3" />
+              <p className="text-sm text-gray-500 mb-4">No branches yet</p>
+              <button
+                onClick={openCreateModal}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                Create First Branch
+              </button>
+            </div>
+          ) : (
+            branches.map(branch => {
+              const phones =
+                branch.phones && branch.phones.filter(p => p).length > 0
+                  ? branch.phones.filter(p => p)
+                  : branch.phone
+                  ? [branch.phone]
+                  : []
 
-                  <div className="space-y-1 text-sm text-muted-foreground">
-                    {branch.address && <p>📍 {branch.address}</p>}
-                    {branch.phone && <p>📞 {branch.phone}</p>}
-                    {branch.managers && branch.managers.length > 0 && (
-                      <div className="mt-2 space-y-1">
-                        <div className="flex items-center gap-2">
-                          <UserCheck size={16} className="text-green-600" />
-                          <span className="font-medium text-foreground">
-                            {branch.managers.length === 1 ? 'Manager:' : 'Managers:'}
-                          </span>
+              return (
+                <div key={branch._id} className="px-6 py-5 flex items-start justify-between hover:bg-gray-50/50 transition-colors">
+                  <div className="flex-1 min-w-0">
+                    {/* Name row */}
+                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                      <Building2 size={15} className="text-green-600 shrink-0" />
+                      <span className="font-semibold text-gray-900 text-sm">{branch.name}</span>
+                      <span className="text-xs text-gray-400 font-mono border border-gray-200 px-1.5 py-0.5 rounded">{branch.code}</span>
+                      {branch.isDefault && (
+                        <span className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">Default</span>
+                      )}
+                      <span className={`text-xs font-semibold border px-2 py-0.5 rounded-full ${statusColor(branch.status)}`}>
+                        {branch.status.charAt(0).toUpperCase() + branch.status.slice(1)}
+                      </span>
+                    </div>
+
+                    {/* Contact details */}
+                    <div className="space-y-1 mt-2">
+                      {branch.address && (
+                        <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                          <MapPin size={12} className="shrink-0" />
+                          <span>{branch.address}</span>
                         </div>
-                        <div className="ml-6 space-y-0.5">
-                          {branch.managers.map(manager => (
-                            <div key={manager._id} className="text-foreground">
-                              {manager.name} <span className="text-xs text-muted-foreground">({manager.email})</span>
+                      )}
+                      {phones.map((p, i) => (
+                        <div key={i} className="flex items-center gap-1.5 text-xs text-gray-500">
+                          <Phone size={12} className="shrink-0" />
+                          <span>{p}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Managers */}
+                    <div className="mt-3">
+                      {branch.managers && branch.managers.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {branch.managers.map(m => (
+                            <div key={m._id} className="flex items-center gap-1.5 bg-gray-100 rounded-full px-2.5 py-1 text-xs text-gray-700">
+                              <UserCheck size={11} className="text-green-600" />
+                              {m.name}
                             </div>
                           ))}
                         </div>
-                      </div>
-                    )}
-                    {(!branch.managers || branch.managers.length === 0) && (
-                      <p className="text-amber-600 mt-2">⚠️ No managers assigned</p>
+                      ) : (
+                        <div className="inline-flex items-center gap-1.5 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-1">
+                          <span>No managers assigned</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-2 ml-4 shrink-0">
+                    <button
+                      onClick={() => openEditModal(branch)}
+                      className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 flex items-center gap-1.5 transition-colors"
+                    >
+                      <Edit size={12} /> Edit
+                    </button>
+                    {!branch.isDefault && (
+                      <button
+                        onClick={() => handleDelete(branch._id)}
+                        className="px-3 py-1.5 rounded-lg border border-red-200 text-xs font-medium text-red-600 hover:bg-red-50 flex items-center gap-1.5 transition-colors"
+                      >
+                        <Trash2 size={12} />
+                      </button>
                     )}
                   </div>
                 </div>
-
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => openEditModal(branch)}
-                  >
-                    <Edit size={14} className="mr-1" />
-                    Edit
-                  </Button>
-                  {!branch.isDefault && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDelete(branch._id)}
-                    >
-                      <Trash2 size={14} className="text-red-500" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
+              )
+            })
+          )}
         </div>
-      )}
+      </div>
 
-      {/* Create/Edit Modal */}
+      {/* Create / Edit Modal */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingBranch ? 'Edit Branch' : 'Create New Branch'}</DialogTitle>
             <DialogDescription>
-              {editingBranch
-                ? 'Update branch details and assign a manager'
-                : 'Add a new branch to your business'}
+              {editingBranch ? 'Update branch details and managers' : 'Add a new location to your business'}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 mt-4">
-            <div>
-              <Label>Branch Name *</Label>
+          <div className="space-y-4 mt-2">
+            {/* Name */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Branch Name *</Label>
               <Input
                 value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                onChange={e => setFormData({ ...formData, name: e.target.value })}
                 placeholder="e.g. Downtown Branch"
+                className="focus-visible:ring-green-500"
               />
             </div>
 
-            <div>
-              <Label>Branch Code *</Label>
+            {/* Code */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Branch Code *</Label>
               <Input
                 value={formData.code}
-                onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                onChange={e => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
                 placeholder="e.g. DT01"
                 maxLength={10}
+                className="focus-visible:ring-green-500 font-mono"
               />
-              <p className="text-xs text-muted-foreground mt-1">
-                Unique identifier for this branch
-              </p>
+              <p className="text-xs text-gray-400">Unique short identifier for this branch</p>
             </div>
 
-            <div>
-              <Label>Address</Label>
+            {/* Address */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Address</Label>
               <Input
                 value={formData.address}
-                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                placeholder="e.g. 123 Main Street"
+                onChange={e => setFormData({ ...formData, address: e.target.value })}
+                placeholder="e.g. 123 Main Street, Nairobi"
+                className="focus-visible:ring-green-500"
               />
             </div>
 
-            <div>
-              <Label>Phone</Label>
-              <Input
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                placeholder="e.g. +254 712 345 678"
-              />
+            {/* Phone numbers */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Phone Number(s)</Label>
+              <div className="space-y-2">
+                {formData.phones.map((phone, idx) => (
+                  <div key={idx} className="flex gap-2">
+                    <Input
+                      value={phone}
+                      onChange={e => {
+                        const updated = [...formData.phones]
+                        updated[idx] = e.target.value
+                        setFormData({ ...formData, phones: updated })
+                      }}
+                      placeholder="e.g. +254 712 345 678"
+                      className="focus-visible:ring-green-500"
+                    />
+                    {formData.phones.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormData({ ...formData, phones: formData.phones.filter((_, i) => i !== idx) })
+                        }
+                        className="shrink-0 p-2 rounded-lg border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {formData.phones.length < 3 && (
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, phones: [...formData.phones, ''] })}
+                    className="w-full py-1.5 rounded-lg border border-dashed border-gray-300 text-xs font-medium text-gray-500 hover:border-green-400 hover:text-green-600 hover:bg-green-50 transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <Plus size={12} /> Add Another Number
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div>
-              <Label>Status</Label>
+            {/* Status */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Status</Label>
               <Select
                 value={formData.status}
                 onValueChange={(val: any) => setFormData({ ...formData, status: val })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="focus:ring-green-500">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -453,93 +451,93 @@ export function BranchesSettings() {
               </Select>
             </div>
 
-            <div>
-              <Label>Branch Managers</Label>
+            {/* Managers */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Branch Managers</Label>
+
               {selectedManagers.length > 0 && (
-                <div className="mt-2 space-y-2 mb-3">
+                <div className="space-y-1.5 mb-2">
                   {selectedManagers.map(managerId => {
                     const manager = staff.find(s => s._id === managerId)
                     if (!manager) return null
                     return (
-                      <div key={managerId} className="flex items-center justify-between bg-muted rounded-md p-2">
+                      <div key={managerId} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
                         <div className="flex items-center gap-2">
-                          <UserCheck size={14} className="text-green-600" />
-                          <span className="text-sm font-medium">{manager.name}</span>
-                          <span className="text-xs text-muted-foreground">({manager.email})</span>
+                          <UserCheck size={13} className="text-green-600" />
+                          <span className="text-sm font-medium text-gray-800">{manager.name}</span>
+                          <span className="text-xs text-gray-400">{manager.email}</span>
                         </div>
-                        <Button
+                        <button
                           type="button"
-                          variant="ghost"
-                          size="sm"
                           onClick={() => removeManager(managerId)}
-                          className="h-7 text-red-500 hover:text-red-700"
+                          className="text-gray-300 hover:text-red-500 transition-colors"
                         >
-                          <Trash2 size={14} />
-                        </Button>
+                          <X size={14} />
+                        </button>
                       </div>
                     )
                   })}
                 </div>
               )}
-              
+
               {!addingManager ? (
-                <Button
+                <button
                   type="button"
-                  variant="outline"
-                  size="sm"
                   onClick={() => setAddingManager(true)}
-                  className="w-full"
                   disabled={availableManagers.length === 0}
+                  className="w-full py-1.5 rounded-lg border border-dashed border-gray-300 text-xs font-medium text-gray-500 hover:border-green-400 hover:text-green-600 hover:bg-green-50 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <Plus size={14} className="mr-2" />
-                  Add Manager
-                </Button>
+                  <Plus size={12} /> Add Manager
+                </button>
               ) : (
                 <div className="space-y-2">
                   <Select onValueChange={addManager}>
-                    <SelectTrigger>
+                    <SelectTrigger className="focus:ring-green-500">
                       <SelectValue placeholder="Select staff member" />
                     </SelectTrigger>
                     <SelectContent>
                       {availableManagers.map(s => (
                         <SelectItem key={s._id} value={s._id}>
-                          {s.name} ({s.email}) - {s.role}
+                          {s.name} — {s.role}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  <Button
+                  <button
                     type="button"
-                    variant="ghost"
-                    size="sm"
                     onClick={() => setAddingManager(false)}
-                    className="w-full"
+                    className="w-full py-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors"
                   >
                     Cancel
-                  </Button>
+                  </button>
                 </div>
               )}
-              
-              <p className="text-xs text-muted-foreground mt-2">
+
+              <p className="text-xs text-gray-400 mt-1">
                 {selectedManagers.length === 0
-                  ? 'No managers assigned - admin handles all duties'
+                  ? 'No managers — owner handles all duties'
                   : `${selectedManagers.length} manager${selectedManagers.length > 1 ? 's' : ''} assigned`}
               </p>
             </div>
 
-            <div className="flex justify-end gap-2 pt-4">
-              <Button
-                variant="outline"
+            {/* Footer buttons */}
+            <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+              <button
                 onClick={() => setIsModalOpen(false)}
                 disabled={isSubmitting}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
               >
                 Cancel
-              </Button>
-              <Button onClick={handleSubmit} disabled={isSubmitting}>
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={isSubmitting}
+                className="px-5 py-2 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold transition-colors"
+              >
                 {isSubmitting
-                  ? editingBranch ? 'Updating...' : 'Creating...'
-                  : editingBranch ? 'Update' : 'Create'}
-              </Button>
+                  ? editingBranch ? 'Updating…' : 'Creating…'
+                  : editingBranch ? 'Update Branch' : 'Create Branch'}
+              </button>
             </div>
           </div>
         </DialogContent>

@@ -24,6 +24,7 @@ interface CartItem {
   sellingPrice: number
   quantity: number
   discount: number
+  lotBreakdown?: Array<{ batchId: string; lotLabel: string; quantity: number }>
 }
 
 interface Customer {
@@ -99,6 +100,7 @@ function PaymentPageContent() {
   const [lastSale, setLastSale] = useState<any>(null)
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
   const [shopSettings, setShopSettings] = useState<any>(null)
+  const [activeBranch, setActiveBranch] = useState<{ name: string; phone?: string; address?: string } | null>(null)
   const [showCompletionDialog, setShowCompletionDialog] = useState(false)
 
   // Customer state
@@ -152,6 +154,25 @@ function PaymentPageContent() {
     try {
       const res = await fetch('/api/settings')
       if (res.ok) { const data = await res.json(); setShopSettings(data.settings) }
+    } catch {}
+    // Fetch active branch for receipt contact info
+    try {
+      const branchId = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('selected_branch='))
+        ?.split('=')[1]
+      if (branchId) {
+        const res = await fetch(`/api/branches/${branchId}`)
+        if (res.ok) {
+          const data = await res.json()
+          const phones = (data.branch.phones || []).filter((p: string) => p.trim())
+          setActiveBranch({
+            name: data.branch.name,
+            phone: phones.length > 0 ? phones.join(' / ') : (data.branch.phone || ''),
+            address: data.branch.address || '',
+          })
+        }
+      }
     } catch {}
   }
 
@@ -468,14 +489,16 @@ function PaymentPageContent() {
     try {
       const saleData: any = {
         items: cart.map(item => ({
-          productId: item.productId,
-          productName: item.productName,
-          brand: item.brand,
-          model: item.model,
-          variant: item.variant,
-          quantity: item.quantity,
-          price: item.sellingPrice,
-          discount: item.discount,
+          productId:    item.productId,
+          productName:  item.productName,
+          brand:        item.brand,
+          model:        item.model,
+          variant:      item.variant,
+          quantity:     item.quantity,
+          price:        item.sellingPrice,
+          discount:     item.discount,
+          // lot breakdown — API uses this to decrement individual batches
+          ...(item.lotBreakdown && { lotBreakdown: item.lotBreakdown }),
         })),
         subtotal,
         discount: cartDiscount,
@@ -530,6 +553,7 @@ function PaymentPageContent() {
           amountPaid: totalPaid,
           paymentMethod: completedPayments.length === 1 ? completedPayments[0].method : 'multiple',
           customerName: selectedCustomer?.name || 'Cash Sale',
+          customerPhone: selectedCustomer?.phone || '',
           date: new Date(),
           receiptNumber: orderNumber,
           creditBalance: selectedCustomer?.creditBalance,
@@ -582,6 +606,7 @@ function PaymentPageContent() {
           subtotal, discount: cartDiscount, total: Math.max(0, total),
           paymentMethod: 'offline',
           customerName: selectedCustomer?.name || 'Cash Sale',
+          customerPhone: selectedCustomer?.phone || '',
           date: new Date(), receiptNumber: `OFFLINE-${Date.now()}`,
           payments: completedPayments.map(p => ({
             method: p.method === 'mpesa_stk' || p.method === 'mpesa_manual' ? 'mobile_money' : 
@@ -1167,6 +1192,7 @@ function PaymentPageContent() {
           subtotal={lastSale.subtotal}
           discount={lastSale.discount}
           onPrintReceipt={() => receiptRef.current?.print()}
+          customerPhone={lastSale.customerPhone}
           onMakeNewSale={() => { 
             sessionStorage.removeItem('pendingSale')
             sessionStorage.removeItem('activeCart')
@@ -1202,12 +1228,14 @@ function PaymentPageContent() {
           paymentMethod={lastSale.paymentMethod}
           date={lastSale.date}
           receiptNumber={lastSale.receiptNumber}
-          shopPhone={shopSettings?.general?.phone}
+          shopPhone={activeBranch?.phone || shopSettings?.general?.phone}
           shopEmail={shopSettings?.general?.email}
-          shopAddress={shopSettings?.general?.address}
+          shopAddress={activeBranch?.address || shopSettings?.general?.address}
           mpesaPaybill={shopSettings?.payment?.mpesaPaybill}
           mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}
           paperSize={shopSettings?.receipt?.paperSize || '58mm'}
+          termsEnabled={shopSettings?.features?.termsEnabled}
+          termsText={shopSettings?.features?.termsText}
           payments={lastSale.payments}
           cashPaid={lastSale.cashPaid}
           debtCreated={lastSale.debtCreated}

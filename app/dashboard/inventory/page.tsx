@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Upload, Download, Trash2, Edit2, Search, FolderTree, ArrowLeftRight, PackageOpen } from 'lucide-react'
+import { Plus, Upload, Download, Trash2, Edit2, Search, FolderTree, ArrowLeftRight, PackageOpen, Layers } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { ProductForm } from '@/components/inventory/product-form'
@@ -39,6 +39,8 @@ interface Product {
   sellingPrice: number
   description?: string
   images?: string[]
+  trackLots?: boolean
+  lotUnit?: string
 }
 
 export default function InventoryPage() {
@@ -366,9 +368,17 @@ function InventoryPageContent() {
 
                     {/* Stock Badge */}
                     <div className={`flex-shrink-0 px-3 py-1.5 rounded-lg ${stockBg} min-w-[80px]`}>
-                      <div className="text-xs text-muted-foreground">Stock</div>
+                      <div className="text-xs text-muted-foreground flex items-center gap-1">
+                        Stock
+                        {product.trackLots && (
+                          <Layers size={10} className="text-blue-500" title="Lot tracked" />
+                        )}
+                      </div>
                       <div className={`font-bold ${stockColor}`}>
-                        {product.stock} <span className="text-xs font-normal">{(product as any).unit || 'pcs'}</span>
+                        {product.stock}{' '}
+                        <span className="text-xs font-normal">
+                          {product.trackLots ? (product.lotUnit || 'units') : ((product as any).unit || 'pcs')}
+                        </span>
                       </div>
                     </div>
 
@@ -496,111 +506,137 @@ function InventoryPageContent() {
             </DialogDescription>
           </DialogHeader>
           {selectedProduct && (
-            <div className="space-y-6">
-              {/* Image gallery */}
-              {selectedProduct.images && selectedProduct.images.length > 0 && (
-                <div className="grid grid-cols-4 gap-2">
-                  {selectedProduct.images.map((src, i) => (
-                    <div key={i} className={`rounded-lg overflow-hidden border border-gray-200 ${i === 0 ? 'col-span-2 row-span-2' : ''}`}>
-                      <ProductImage
-                        src={src}
-                        alt={`${selectedProduct.productName} ${i + 1}`}
-                        size="lg"
-                        className="aspect-square w-full h-full"
-                      />
+            <Tabs defaultValue="details">
+              <TabsList className="w-full">
+                <TabsTrigger value="details" className="flex-1">Details</TabsTrigger>
+                {selectedProduct.trackLots && (
+                  <TabsTrigger value="lots" className="flex-1 flex items-center gap-1.5">
+                    <Layers size={13} />
+                    Lots
+                  </TabsTrigger>
+                )}
+              </TabsList>
+
+              {/* ── Details tab ───────────────────────────────────────────── */}
+              <TabsContent value="details">
+                <div className="space-y-6 pt-2">
+                  {/* Image gallery */}
+                  {selectedProduct.images && selectedProduct.images.length > 0 && (
+                    <div className="grid grid-cols-4 gap-2">
+                      {selectedProduct.images.map((src, i) => (
+                        <div key={i} className={`rounded-lg overflow-hidden border border-gray-200 ${i === 0 ? 'col-span-2 row-span-2' : ''}`}>
+                          <ProductImage
+                            src={src}
+                            alt={`${selectedProduct.productName} ${i + 1}`}
+                            size="lg"
+                            className="aspect-square w-full h-full"
+                          />
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
-              {/* Product Information Grid */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-muted-foreground">Product Name</Label>
-                  <p className="text-lg font-semibold">{selectedProduct.productName}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Category</Label>
-                  <p className="text-lg font-semibold">{selectedProduct.category}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Brand</Label>
-                  <p className="text-lg font-semibold">{(selectedProduct as any).brand || '-'}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Model</Label>
-                  <p className="text-lg font-semibold">{(selectedProduct as any).model || '-'}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Variant</Label>
-                  <p className="text-lg font-semibold">{(selectedProduct as any).variant || '-'}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Unit</Label>
-                  <p className="text-lg font-semibold">{(selectedProduct as any).unit || 'pieces'}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Stock</Label>
-                  <p className="text-lg font-semibold text-green-600">{selectedProduct.stock}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Stock Value</Label>
-                  <p className="text-lg font-semibold text-primary">
-                    {formatCurrency(selectedProduct.stock * selectedProduct.sellingPrice, currency, false)}
-                  </p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Buying Price</Label>
-                  <p className="text-lg font-semibold">{formatCurrency(selectedProduct.buyingPrice, currency)}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Selling Price</Label>
-                  <p className="text-lg font-semibold">{formatCurrency(selectedProduct.sellingPrice, currency)}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Wholesale Price</Label>
-                  <p className="text-lg font-semibold">{formatCurrency((selectedProduct as any).wholeSale || 0, currency)}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Profit Margin</Label>
-                  <p className="text-lg font-semibold text-green-600">
-                    {formatCurrency(selectedProduct.sellingPrice - selectedProduct.buyingPrice, currency)}
-                  </p>
-                </div>
-              </div>
+                  )}
+                  {/* Product Information Grid */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-muted-foreground">Product Name</Label>
+                      <p className="text-lg font-semibold">{selectedProduct.productName}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Category</Label>
+                      <p className="text-lg font-semibold">{selectedProduct.category}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Brand</Label>
+                      <p className="text-lg font-semibold">{(selectedProduct as any).brand || '-'}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Model</Label>
+                      <p className="text-lg font-semibold">{(selectedProduct as any).model || '-'}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Variant</Label>
+                      <p className="text-lg font-semibold">{(selectedProduct as any).variant || '-'}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Unit</Label>
+                      <p className="text-lg font-semibold">{(selectedProduct as any).unit || 'pieces'}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Stock</Label>
+                      <p className="text-lg font-semibold text-green-600">
+                        {selectedProduct.stock}
+                        {selectedProduct.trackLots && (
+                          <span className="text-sm font-normal ml-1 text-muted-foreground">
+                            {selectedProduct.lotUnit || 'units'}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Stock Value</Label>
+                      <p className="text-lg font-semibold text-primary">
+                        {formatCurrency(selectedProduct.stock * selectedProduct.sellingPrice, currency, false)}
+                      </p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Buying Price</Label>
+                      <p className="text-lg font-semibold">{formatCurrency(selectedProduct.buyingPrice, currency)}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Selling Price</Label>
+                      <p className="text-lg font-semibold">{formatCurrency(selectedProduct.sellingPrice, currency)}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Wholesale Price</Label>
+                      <p className="text-lg font-semibold">{formatCurrency((selectedProduct as any).wholeSale || 0, currency)}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Profit Margin</Label>
+                      <p className="text-lg font-semibold text-green-600">
+                        {formatCurrency(selectedProduct.sellingPrice - selectedProduct.buyingPrice, currency)}
+                      </p>
+                    </div>
+                    {selectedProduct.trackLots && (
+                      <div className="col-span-2">
+                        <Label className="text-muted-foreground">Lot Tracking</Label>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Layers size={14} className="text-blue-500" />
+                          <span className="text-sm font-medium text-blue-700">
+                            Enabled — tracked per {selectedProduct.lotUnit || 'unit'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-              {/* Description */}
-              {selectedProduct.description && (
-                <div>
-                  <Label className="text-muted-foreground">Description</Label>
-                  <p className="text-sm mt-1">{selectedProduct.description}</p>
-                </div>
-              )}
+                  {/* Description */}
+                  {selectedProduct.description && (
+                    <div>
+                      <Label className="text-muted-foreground">Description</Label>
+                      <p className="text-sm mt-1">{selectedProduct.description}</p>
+                    </div>
+                  )}
 
-              {/* Action Buttons */}
-              <div className="flex gap-3 pt-4 border-t">
-                <Button
-                  onClick={() => {
-                    setIsViewOpen(false)
-                    setIsEditOpen(true)
-                  }}
-                  className="flex-1"
-                >
-                  <Edit2 size={16} className="mr-2" />
-                  Edit Product
-                </Button>
-                <Button
-                  onClick={() => {
-                    setIsViewOpen(false)
-                    handleDeleteProduct(selectedProduct._id)
-                  }}
-                  variant="destructive"
-                  className="flex-1"
-                >
-                  <Trash2 size={16} className="mr-2" />
-                  Delete Product
-                </Button>
-              </div>
-            </div>
+                  {/* Action Buttons */}
+                  <div className="flex gap-3 pt-4 border-t">
+                    <Button onClick={() => { setIsViewOpen(false); setIsEditOpen(true) }} className="flex-1">
+                      <Edit2 size={16} className="mr-2" />Edit Product
+                    </Button>
+                    <Button onClick={() => { setIsViewOpen(false); handleDeleteProduct(selectedProduct._id) }}
+                      variant="destructive" className="flex-1">
+                      <Trash2 size={16} className="mr-2" />Delete Product
+                    </Button>
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* ── Lots tab ──────────────────────────────────────────────── */}
+              {selectedProduct.trackLots && (
+                <TabsContent value="lots">
+                  <LotsTabContent product={selectedProduct} currency={currency} />
+                </TabsContent>
+              )}
+            </Tabs>
           )}
         </DialogContent>
       </Dialog>
@@ -671,6 +707,124 @@ function InventoryPageContent() {
           fetchProducts()
         }}
       />
+    </div>
+  )
+}
+
+// ── LotsTabContent ─────────────────────────────────────────────────────────────
+// Read-only view of all batches for a lot-tracked product.
+// Shown inside the "Lots" tab of the product view dialog.
+// Stock changes happen only through Stock In / Stock Count / Sales.
+
+interface Batch {
+  _id: string
+  lotId: string
+  lotLabel: string
+  quantity: number
+  initialQuantity: number
+  status: string
+  receivedDate: string
+  supplier?: string
+  notes?: string
+}
+
+function LotsTabContent({ product, currency }: { product: Product; currency: string }) {
+  const [batches, setBatches] = useState<Batch[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (product._id) fetchBatches()
+  }, [product._id])
+
+  async function fetchBatches() {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/products/${product._id}/batches?status=all`)
+      if (res.ok) {
+        const data = await res.json()
+        setBatches(data.batches || [])
+      }
+    } catch {
+      toast.error('Failed to load lots')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const statusColors: Record<string, string> = {
+    active:   'bg-green-100 text-green-800',
+    depleted: 'bg-gray-100 text-gray-600',
+    sealed:   'bg-orange-100 text-orange-700',
+  }
+
+  if (loading) return <div className="py-8 text-center text-sm text-muted-foreground">Loading lots…</div>
+
+  if (batches.length === 0) {
+    return (
+      <div className="py-8 text-center space-y-2">
+        <Layers size={32} className="mx-auto text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">No lots yet for this product.</p>
+        <p className="text-xs text-muted-foreground">
+          Use <strong>Stock In</strong> to receive stock and create lots.
+        </p>
+      </div>
+    )
+  }
+
+  const totalRemaining = batches
+    .filter(b => b.status === 'active')
+    .reduce((s, b) => s + b.quantity, 0)
+
+  return (
+    <div className="space-y-4 pt-2">
+      {/* Summary bar */}
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-muted-foreground">{batches.length} lot{batches.length !== 1 ? 's' : ''} total</span>
+        <span className="font-semibold text-green-700">
+          {totalRemaining} {product.lotUnit || 'units'} available
+        </span>
+      </div>
+
+      {/* Read-only lot table */}
+      <div className="border rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted">
+            <tr>
+              <th className="text-left p-2 text-xs font-medium">Lot</th>
+              <th className="text-right p-2 text-xs font-medium">Initial</th>
+              <th className="text-right p-2 text-xs font-medium">Remaining</th>
+              <th className="text-center p-2 text-xs font-medium">Status</th>
+              <th className="text-left p-2 text-xs font-medium hidden sm:table-cell">Received</th>
+            </tr>
+          </thead>
+          <tbody>
+            {batches.map(b => (
+              <tr key={b._id} className="border-t hover:bg-muted/30">
+                <td className="p-2">
+                  <div className="font-medium text-xs">{b.lotLabel || b.lotId}</div>
+                  <div className="text-[10px] text-muted-foreground">{b.lotId}</div>
+                  {b.notes && <div className="text-[10px] text-muted-foreground italic">{b.notes}</div>}
+                </td>
+                <td className="p-2 text-right text-xs text-muted-foreground">{b.initialQuantity}</td>
+                <td className="p-2 text-right">
+                  <span className={`text-xs font-semibold ${b.status === 'active' ? 'text-green-700' : 'text-muted-foreground'}`}>
+                    {b.quantity}
+                  </span>
+                </td>
+                <td className="p-2 text-center">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusColors[b.status] || 'bg-gray-100 text-gray-600'}`}>
+                    {b.status}
+                  </span>
+                </td>
+                <td className="p-2 text-xs text-muted-foreground hidden sm:table-cell">
+                  {new Date(b.receivedDate).toLocaleDateString()}
+                  {b.supplier && <div className="text-[10px]">{b.supplier}</div>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

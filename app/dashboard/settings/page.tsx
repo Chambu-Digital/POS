@@ -64,7 +64,7 @@ const NAV: { key: NavKey; label: string; desc: string; icon: React.ElementType }
   { key: 'documents',     label: 'Documents',     desc: 'Print quotations & POs', icon: FileText        },
   { key: 'restocking',    label: 'Restocking',    desc: 'Inventory thresholds',   icon: Package         },
   { key: 'branches',      label: 'Branches',      desc: 'Multi-branch management', icon: Building2       },
-  // { key: 'features',      label: 'Features',      desc: 'KDS, shifts & more',     icon: UtensilsCrossed },
+  { key: 'features',      label: 'Features',      desc: 'KDS, shifts & more',     icon: UtensilsCrossed },
   { key: 'security',      label: 'Security',      desc: 'Password & sessions',    icon: Shield          },
 ]
 
@@ -417,76 +417,6 @@ export default function SettingsPage() {
                 </SettingRow>
               </Section>
 
-              <Section title="Taxes and VAT" desc="Tax can be added to every sale. Go to Sales to view reports and reports for more info.">
-                <ToggleRow label="Enable Tax & Discounts" checked={features.taxEnabled}
-                  onChange={v => { upFeatures({ taxEnabled: v }); autoSave({ features: { taxEnabled: v } }) }} />
-                {features.taxEnabled && (
-                  <SettingRow label="Tax Rate (%)" desc="Kenya VAT is 16%">
-                    <Input type="number" value={features.taxRate} min={0} max={100} step={0.01}
-                      onChange={e => upFeatures({ taxRate: parseFloat(e.target.value) || 0 })}
-                      className="focus-visible:ring-green-500 w-32" />
-                  </SettingRow>
-                )}
-              </Section>
-
-              <Section title="Terms / Extra" desc="Add a custom message for your store with a limit of 512 characters.">
-                <ToggleRow label="Enable After-Sale Terms" checked={features.termsEnabled}
-                  onChange={v => { upFeatures({ termsEnabled: v }); autoSave({ features: { termsEnabled: v } }) }} />
-                {features.termsEnabled && (
-                  <SettingRow label="Terms text">
-                    <Textarea value={features.termsText}
-                      onChange={e => upFeatures({ termsText: e.target.value })}
-                      placeholder="e.g. Goods once sold are not returnable…" rows={3} maxLength={512}
-                      className="focus-visible:ring-green-500 max-w-md" />
-                  </SettingRow>
-                )}
-              </Section>
-
-              <Section title="Discounts" desc="You can go to discounts to change the discount time.">
-                <ToggleRow label="Enable discount" checked={features.discountsEnabled}
-                  onChange={v => { upFeatures({ discountsEnabled: v }); autoSave({ features: { discountsEnabled: v } }) }} />
-              </Section>
-
-              <Section title="KDS" desc="This is applicable to restaurants that want to send orders to kitchen.">
-                <ToggleRow label="Enable KDS" checked={features.kdsEnabled}
-                  onChange={v => { upFeatures({ kdsEnabled: v }); autoSave({ features: { kdsEnabled: v } }) }} />
-                {features.kdsEnabled && (
-                  <>
-                    <SettingRow label="Restaurant / Kitchen Name" desc="Displayed on the kitchen display header">
-                      <Input value={features.kdsRestaurantName}
-                        onChange={e => upFeatures({ kdsRestaurantName: e.target.value })}
-                        placeholder="e.g. The Grill House" className="focus-visible:ring-green-500 max-w-md" />
-                    </SettingRow>
-                    <SettingRow label="Number of Tables" desc="Used for table selection when taking orders">
-                      <Input type="number" min={1} max={200} value={features.kdsTableCount}
-                        onChange={e => upFeatures({ kdsTableCount: parseInt(e.target.value) || 10 })}
-                        className="focus-visible:ring-green-500 w-32" />
-                    </SettingRow>
-                    <div className="py-3">
-                      <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
-                        ✅ KDS enabled — Kitchen Display will appear in the sidebar. Save to apply.
-                      </div>
-                    </div>
-                  </>
-                )}
-              </Section>
-
-              <Section title="Shifts" desc="Do you have teams working with shifts?">
-                <ToggleRow label="Enable Shifts" checked={features.shiftsEnabled}
-                  onChange={v => { upFeatures({ shiftsEnabled: v }); autoSave({ features: { shiftsEnabled: v } }) }} />
-              </Section>
-
-              <Section title="Bar / Restaurant Tabs" desc="Enable the bar tab system for bartenders to manage customer drink tabs.">
-                <ToggleRow label="Enable Bar Tabs" checked={features.barEnabled}
-                  onChange={v => { upFeatures({ barEnabled: v }); autoSave({ features: { barEnabled: v } }) }} />
-                {features.barEnabled && (
-                  <div className="py-3">
-                    <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
-                      🍺 Bar Tabs enabled — the Bar management system will appear in the sidebar. Save to apply.
-                    </div>
-                  </div>
-                )}
-              </Section>
             </>
           )}
 
@@ -688,6 +618,17 @@ export default function SettingsPage() {
                   placeholder="Thank You For Shopping With Us!" rows={3}
                   className="focus-visible:ring-green-500 max-w-md" />
               </SettingRow>
+              <ToggleRow label="Enable After-Sale Terms" desc="Show terms and conditions at the bottom of every receipt"
+                checked={features.termsEnabled}
+                onChange={v => { upFeatures({ termsEnabled: v }); autoSave({ features: { termsEnabled: v } }) }} />
+              {features.termsEnabled && (
+                <SettingRow label="Terms text" desc="Limit of 512 characters">
+                  <Textarea value={features.termsText}
+                    onChange={e => upFeatures({ termsText: e.target.value })}
+                    placeholder="e.g. Goods once sold are not returnable…" rows={3} maxLength={512}
+                    className="focus-visible:ring-green-500 max-w-md" />
+                </SettingRow>
+              )}
             </Section>
           )}
 
@@ -733,14 +674,48 @@ export default function SettingsPage() {
 
           {/* ══ FEATURES ═════════════════════════════════════════════════════ */}
           {activeNav === 'features' && (
-            <Section title="Advanced Features" desc="Enable or disable features for your business type">
-              <ToggleRow label="Kitchen Display System (KDS)" desc="Enable for restaurants — waiters take orders, chefs see them on the kitchen display"
-                checked={features.kdsEnabled} onChange={v => { upFeatures({ kdsEnabled: v }); autoSave({ features: { kdsEnabled: v } }) }} />
-              <ToggleRow label="Shifts" desc="Enable shift management for your team"
-                checked={features.shiftsEnabled} onChange={v => { upFeatures({ shiftsEnabled: v }); autoSave({ features: { shiftsEnabled: v } }) }} />
-              <ToggleRow label="Discounts" desc="Allow discounts to be applied on sales"
-                checked={features.discountsEnabled} onChange={v => { upFeatures({ discountsEnabled: v }); autoSave({ features: { discountsEnabled: v } }) }} />
-            </Section>
+            <>
+              <Section title="Kitchen Display System (KDS)" desc="For restaurants — waiters take orders at the table, chefs see them live on the kitchen display.">
+                <ToggleRow label="Enable KDS" checked={features.kdsEnabled}
+                  onChange={v => { upFeatures({ kdsEnabled: v }); autoSave({ features: { kdsEnabled: v } }) }} />
+                {features.kdsEnabled && (
+                  <>
+                    <SettingRow label="Restaurant / Kitchen Name" desc="Displayed on the kitchen display header">
+                      <Input value={features.kdsRestaurantName}
+                        onChange={e => upFeatures({ kdsRestaurantName: e.target.value })}
+                        placeholder="e.g. The Grill House" className="focus-visible:ring-green-500 max-w-md" />
+                    </SettingRow>
+                    <SettingRow label="Number of Tables" desc="Used for table selection when taking orders">
+                      <Input type="number" min={1} max={200} value={features.kdsTableCount}
+                        onChange={e => upFeatures({ kdsTableCount: parseInt(e.target.value) || 10 })}
+                        className="focus-visible:ring-green-500 w-32" />
+                    </SettingRow>
+                    <div className="py-3">
+                      <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
+                        ✅ KDS enabled — Kitchen Display will appear in the sidebar. Save to apply.
+                      </div>
+                    </div>
+                  </>
+                )}
+              </Section>
+
+              <Section title="Bar / Restaurant Tabs" desc="Enable the bar tab system for bartenders to manage customer drink tabs.">
+                <ToggleRow label="Enable Bar Tabs" checked={features.barEnabled}
+                  onChange={v => { upFeatures({ barEnabled: v }); autoSave({ features: { barEnabled: v } }) }} />
+                {features.barEnabled && (
+                  <div className="py-3">
+                    <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+                      🍺 Bar Tabs enabled — the Bar management system will appear in the sidebar. Save to apply.
+                    </div>
+                  </div>
+                )}
+              </Section>
+
+              <Section title="Shifts" desc="Enable shift management for teams working in rotations.">
+                <ToggleRow label="Enable Shifts" checked={features.shiftsEnabled}
+                  onChange={v => { upFeatures({ shiftsEnabled: v }); autoSave({ features: { shiftsEnabled: v } }) }} />
+              </Section>
+            </>
           )}
 
           {/* ══ RESTOCKING ═══════════════════════════════════════════════════ */}

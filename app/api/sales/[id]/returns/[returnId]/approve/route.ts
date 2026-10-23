@@ -107,6 +107,34 @@ export async function PATCH(
               }
             )
           }
+
+          // ── Lot tracking: reverse the specific ProductBatch ─────────────────
+          // returnEntry.batchId is set at return-request time from the original
+          // sale line item.  Use it directly — more reliable than scanning
+          // sale.items when the same product appears on multiple lot lines.
+          const batchIdToReverse = returnEntry.batchId
+
+          if (batchIdToReverse) {
+            try {
+              const batch = await (models as any).ProductBatch.findOne({
+                _id:    batchIdToReverse,
+                userId: ownerId,
+              })
+
+              if (batch) {
+                batch.quantity  = batch.quantity + returnEntry.quantity
+                // Revive a depleted batch when stock is returned to it
+                if (batch.status === 'depleted' && batch.quantity > 0) {
+                  batch.status = 'active'
+                }
+                batch.updatedAt = new Date()
+                await batch.save()
+              }
+            } catch (batchErr) {
+              // Non-fatal: aggregate stock was already corrected above
+              console.error('[returns/approve] ProductBatch reversal failed:', batchErr)
+            }
+          }
         } else if (returnEntry.condition === 'damaged') {
           // Do not restock - record as damage
           newStock = previousStock

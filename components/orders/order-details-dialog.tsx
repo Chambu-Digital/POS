@@ -26,6 +26,8 @@ interface PaymentEntry {
   amount: number
   mpesaPhone?: string
   mpesaCode?: string
+  customMethodName?: string
+  bankProviderName?: string
 }
 
 interface OrderItem {
@@ -249,7 +251,9 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
     return `KES ${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
-  function getPaymentMethodName(method: string): string {
+  function getPaymentMethodName(method: string, payment?: PaymentEntry): string {
+    if (payment?.method === 'custom' && payment.customMethodName) return payment.customMethodName
+    if (payment?.method === 'bank' && payment.bankProviderName) return payment.bankProviderName
     const names: Record<string, string> = {
       'cash': 'Cash',
       'mobile_money': 'M-Pesa',
@@ -264,7 +268,9 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
     
     const consolidated: Record<string, number> = {}
     paymentList.forEach(payment => {
-      consolidated[payment.method] = (consolidated[payment.method] || 0) + payment.amount
+      // Use the resolved display name as the key so bank/custom methods show correctly
+      const key = getPaymentMethodName(payment.method, payment)
+      consolidated[key] = (consolidated[key] || 0) + payment.amount
     })
     return consolidated
   }
@@ -330,9 +336,9 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
               <div className="ml-2 font-semibold">
                 {order.payments && order.payments.length > 0 ? (
                   <div className="space-y-2">
-                    {Object.entries(consolidatePayments(order.payments)).map(([method, amount]) => (
-                      <div key={method} className="text-sm flex justify-between gap-4">
-                        <span>{getPaymentMethodName(method)}:</span>
+                    {Object.entries(consolidatePayments(order.payments)).map(([label, amount]) => (
+                      <div key={label} className="text-sm flex justify-between gap-4">
+                        <span>{label}:</span>
                         <span>{formatCurrency(amount)}</span>
                       </div>
                     ))}

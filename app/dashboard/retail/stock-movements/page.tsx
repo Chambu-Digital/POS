@@ -13,7 +13,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Search, Calendar, TrendingUp, TrendingDown, Package, AlertCircle, Plus } from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Search, Calendar, TrendingUp, TrendingDown, Package, AlertCircle, Plus, Download, FileBarChart } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { RecordMovementModal } from '@/components/inventory/record-movement-modal'
@@ -48,6 +55,25 @@ interface StockMovement {
   notes?: string
   orderNumber?: string
   supplierName?: string
+}
+
+interface SummaryRow {
+  productId: string
+  type: string
+  productName: string
+  brand?: string
+  model?: string
+  variant?: string
+  lotUnit?: string
+  totalQty: number
+  transactions: number
+}
+
+interface StaffMember {
+  _id: string
+  name: string
+  firstName?: string
+  lastName?: string
 }
 
 type MovementType = 'all' | 'STOCK_IN' | 'SALE' | 'RETURN' | 'DAMAGE' | 'WASTAGE' | 'EXPIRED' | 'LOSS' | 'ADJUSTMENT' | 'TRANSFER_OUT' | 'TRANSFER_IN' | 'EXCHANGE_IN' | 'EXCHANGE_OUT'
@@ -96,9 +122,100 @@ function StockMovementsPageContent() {
   const [isRecordMovementOpen, setIsRecordMovementOpen] = useState(false)
   const [syncing, setSyncing] = useState(false)
 
+  // ── Report / summary state ─────────────────────────────────────────────────
+  const today = new Date().toISOString().split('T')[0]
+  const [reportDate, setReportDate]       = useState(today)
+  const [reportEndDate, setReportEndDate] = useState(today)
+  const [selectedStaffId, setSelectedStaffId] = useState('all')
+  const [staffList, setStaffList]         = useState<StaffMember[]>([])
+  const [summaryRows, setSummaryRows]     = useState<SummaryRow[]>([])
+  const [summaryLoading, setSummaryLoading] = useState(false)
+  const [summaryMeta, setSummaryMeta]     = useState<any>(null)
+  const [showSummary, setShowSummary]     = useState(false)
+
   useEffect(() => {
     fetchMovements()
+    fetchStaff()
   }, [activeType, search])
+
+  async function fetchStaff() {
+    try {
+      const res = await fetch('/api/staff')
+      if (res.ok) {
+        const data = await res.json()
+        setStaffList(data.staff || [])
+      }
+    } catch { /* silent */ }
+  }
+
+  async function fetchSummary() {
+    setSummaryLoading(true)
+    setShowSummary(true)
+    try {
+      const params = new URLSearchParams({
+        startDate: reportDate,
+        endDate:   reportEndDate,
+      })
+      if (selectedStaffId !== 'all') params.append('staffId', selectedStaffId)
+      if (activeType !== 'all')      params.append('type', activeType)
+
+      const res = await fetch(`/api/inventory/stock-ledger/summary?${params}`)
+      if (res.ok) {
+        const data = await res.json()
+        setSummaryRows(data.rows || [])
+        setSummaryMeta(data.meta)
+      } else {
+        const data = await res.json()
+        toast.error(data.error || 'Failed to load summary')
+      }
+    } catch {
+      toast.error('Failed to load summary')
+    } finally {
+      setSummaryLoading(false)
+    }
+  }
+
+  function downloadSummaryCSV() {
+    if (summaryRows.length === 0) { toast.error('No data to download'); return }
+
+    const staffLabel = summaryMeta?.staffName || (selectedStaffId === 'all' ? 'All Users' : selectedStaffId)
+    const header = ['Product', 'Brand', 'Model', 'Variant', 'Unit', 'Movement Type', 'Total Quantity', 'Transactions']
+    const rows = summaryRows.map(r => [
+      `"${(r.productName || '').replace(/"/g, '""')}"`,
+      `"${(r.brand || '').replace(/"/g, '""')}"`,
+      `"${(r.model || '').replace(/"/g, '""')}"`,
+      `"${(r.variant || '').replace(/"/g, '""')}"`,
+      `"${(r.lotUnit || 'units')}"`,
+      `"${r.type}"`,
+      r.totalQty,
+      r.transactions,
+    ])
+
+    const csvContent = [
+      `"Stock Movements Summary"`,
+      `"Date: ${summaryMeta?.startDate}${summaryMeta?.startDate !== summaryMeta?.endDate ? ' to ' + summaryMeta?.endDate : ''}"`,
+      `"User: ${staffLabel}"`,
+      `"Type: ${activeType === 'all' ? 'All' : activeType}"`,
+      '',
+      header.join(','),
+      ...rows.map(r => r.join(',')),
+    ].join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = `stock_summary_${reportDate}_${staffLabel.replace(/\s+/g, '_')}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success('Report downloaded')
+  }
+
+  function formatStaffName(s: StaffMember) {
+    return s.firstName && s.lastName
+      ? `${s.firstName} ${s.lastName}`.trim()
+      : s.name
+  }
 
   async function fetchMovements() {
     try {
@@ -438,6 +555,150 @@ function StockMovementsPageContent() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Activity Report Filter Bar ────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <FileBarChart size={16} />
+            Activity Report
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Filter by date, user, and movement type then generate a summary or download CSV
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-3 items-end">
+            {/* From date */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">From</label>
+              <Input
+                type="date"
+                value={reportDate}
+                onChange={e => setReportDate(e.target.value)}
+                className="h-9 w-40 text-sm"
+              />
+            </div>
+            {/* To date */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">To</label>
+              <Input
+                type="date"
+                value={reportEndDate}
+                onChange={e => setReportEndDate(e.target.value)}
+                className="h-9 w-40 text-sm"
+              />
+            </div>
+            {/* User / staff */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">User</label>
+              <Select value={selectedStaffId} onValueChange={setSelectedStaffId}>
+                <SelectTrigger className="h-9 w-48 text-sm">
+                  <SelectValue placeholder="All users" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All users</SelectItem>
+                  <SelectItem value="owner">Owner</SelectItem>
+                  {staffList.map(s => (
+                    <SelectItem key={s._id} value={s._id}>
+                      {formatStaffName(s)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {/* Generate */}
+            <Button
+              onClick={fetchSummary}
+              disabled={summaryLoading}
+              size="sm"
+              className="h-9"
+            >
+              {summaryLoading ? 'Loading…' : 'Generate Report'}
+            </Button>
+            {/* Download — only shown once summary is loaded */}
+            {showSummary && summaryRows.length > 0 && (
+              <Button
+                onClick={downloadSummaryCSV}
+                variant="outline"
+                size="sm"
+                className="h-9"
+              >
+                <Download size={14} className="mr-1" />
+                Download CSV
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Summary Table ─────────────────────────────────────────────────── */}
+      {showSummary && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">
+              {summaryMeta?.staffName
+                ? `${summaryMeta.staffName}'s Activity`
+                : 'Activity Summary'}
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              {summaryMeta?.startDate === summaryMeta?.endDate
+                ? summaryMeta?.startDate
+                : `${summaryMeta?.startDate} → ${summaryMeta?.endDate}`}
+              {activeType !== 'all' && ` · ${getMovementLabel(activeType)}`}
+            </p>
+          </CardHeader>
+          <CardContent>
+            {summaryLoading ? (
+              <div className="text-center py-6 text-sm text-muted-foreground">Generating…</div>
+            ) : summaryRows.length === 0 ? (
+              <div className="text-center py-6 text-sm text-muted-foreground">
+                No movements found for the selected criteria.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Product</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="text-right">Total Qty</TableHead>
+                      <TableHead className="text-right">Transactions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {summaryRows.map((row, i) => (
+                      <TableRow key={`${row.productId}-${row.type}-${i}`}>
+                        <TableCell className="font-medium">
+                          {[row.variant, row.brand, row.productName].filter(Boolean).join(' ')}
+                          {row.model && <div className="text-xs text-muted-foreground">{row.model}</div>}
+                        </TableCell>
+                        <TableCell>
+                          <Badge className={getMovementColor(row.type)}>
+                            <span className="flex items-center gap-1">
+                              {getMovementIcon(row.type)}
+                              {getMovementLabel(row.type)}
+                            </span>
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-semibold">
+                          {row.totalQty}
+                          {row.lotUnit && row.lotUnit !== 'pieces' && (
+                            <span className="text-xs font-normal ml-1 text-muted-foreground">{row.lotUnit}</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {row.transactions}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Movement Types Pills */}
       <div className="flex flex-wrap gap-2">

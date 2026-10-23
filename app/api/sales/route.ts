@@ -247,25 +247,23 @@ export async function POST(request: NextRequest) {
       if (!item.productId) continue
       try {
         const productObjId = new Types.ObjectId(item.productId)
-        
+
         let previousStock = 0
         let newStock = 0
 
         // Multi-branch: update ProductInventory (branch-specific stock)
         if (branchContext) {
           const inventory = await models.ProductInventory.findOne({
-            userId: ownerId,
-            branchId: branchContext,
+            userId:    ownerId,
+            branchId:  branchContext,
             productId: productObjId,
           })
 
           if (inventory) {
-            previousStock = inventory.stock ?? 0
-            newStock = Math.max(0, previousStock - item.quantity)
-            
-            // Update branch-specific inventory
-            inventory.stock = newStock
-            inventory.lastUpdated = new Date()
+            previousStock          = inventory.stock ?? 0
+            newStock               = Math.max(0, previousStock - item.quantity)
+            inventory.stock        = newStock
+            inventory.lastUpdated  = new Date()
             await inventory.save()
           } else {
             console.warn(`[sales] No ProductInventory found for product ${productObjId} in branch ${branchContext}`)
@@ -281,26 +279,41 @@ export async function POST(request: NextRequest) {
           // Legacy single-branch: update Product.stock only
           const product = await models.Product.findById(productObjId).select('stock').lean() as any
           if (!product) continue
-          
+
           previousStock = product.stock ?? 0
-          newStock = Math.max(0, previousStock - item.quantity)
-          
+          newStock      = Math.max(0, previousStock - item.quantity)
+
           await models.Product.findByIdAndUpdate(
             productObjId,
             { $inc: { stock: -item.quantity }, updatedAt: new Date() }
           )
         }
 
+        // ── Lot tracking: decrement each ProductBatch in the breakdown ──────────
+        // item.lotBreakdown is set by the sales page when the cashier uses the
+        // lot picker modal.  When absent (non-lot products) this block is skipped.
+        if (item.lotBreakdown && Array.isArray(item.lotBreakdown) && item.lotBreakdown.length > 0) {
+          for (const lotEntry of item.lotBreakdown) {
+            if (!lotEntry.batchId || !lotEntry.quantity) continue
+            try {
+              const batch = await (models as any).ProductBatch.findOne({
+                _id:    new Types.ObjectId(lotEntry.batchId),
+                userId: ownerId,
+              })
+              if (batch) {
+                batch.quantity = Math.max(0, batch.quantity - lotEntry.quantity)
+                if (batch.quantity <= 0) { batch.quantity = 0; batch.status = 'depleted' }
+                batch.updatedAt = new Date()
+                await batch.save()
+              }
+            } catch (batchError) {
+              console.error('[sales] ProductBatch deduction failed for lot:', lotEntry.batchId, batchError)
+            }
+          }
+        }
+
+        // ── Write stock ledger entry ───────────────────────────────────────────
         try {
-          console.log('[sales] Creating StockLedger entry:', {
-            userId: ownerId,
-            branchId: branchContext,
-            branchIdType: typeof branchContext,
-            productId: productObjId,
-            type: 'SALE',
-            quantity: -item.quantity,
-          })
-          
           const ledgerEntry = await (models as any).StockLedger.create({
             userId:        ownerId,
             branchId:      branchContext ? new Types.ObjectId(branchContext) : null,
@@ -313,12 +326,7 @@ export async function POST(request: NextRequest) {
             orderNumber,
             timestamp:     new Date(),
           })
-          
-          console.log('[sales] StockLedger created:', {
-            id: ledgerEntry._id,
-            branchId: ledgerEntry.branchId,
-            hasBranchId: !!ledgerEntry.branchId,
-          })
+          console.log('[sales] StockLedger created:', { id: ledgerEntry._id, hasBranchId: !!ledgerEntry.branchId })
         } catch (ledgerError) {
           console.error('[sales] StockLedger creation failed:', ledgerError)
         }

@@ -19,15 +19,21 @@ interface Branch {
 interface Product {
   _id: string
   productName: string
+  brand?: string
+  model?: string
+  variant?: string
   sku: string
   sellingPrice: number
   category: string
-  sourceStock: number // Stock in source branch (for reference only)
+  sourceStock: number
 }
 
 interface ImportItem {
   productId: string
   productName: string
+  brand?: string
+  model?: string
+  variant?: string
   sku: string
   initialQuantity: number
   selected: boolean
@@ -92,11 +98,14 @@ export function ImportProductsModal({ isOpen, onClose, onSuccess }: ImportProduc
         
         // Initialize import items with all products unselected
         setImportItems((data.products || []).map((p: Product) => ({
-          productId: p._id,
-          productName: p.productName,
-          sku: p.sku,
+          productId:       p._id,
+          productName:     p.productName,
+          brand:           p.brand,
+          model:           p.model,
+          variant:         p.variant,
+          sku:             p.sku,
           initialQuantity: 0,
-          selected: false,
+          selected:        false,
         })))
       } else {
         const data = await response.json()
@@ -192,10 +201,16 @@ export function ImportProductsModal({ isOpen, onClose, onSuccess }: ImportProduc
     }
   }
 
-  const filteredItems = importItems.filter(item =>
-    item.productName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.sku?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredItems = importItems.filter(item => {
+    const q = searchQuery.toLowerCase()
+    return (
+      item.productName.toLowerCase().includes(q) ||
+      (item.brand?.toLowerCase() || '').includes(q) ||
+      (item.model?.toLowerCase() || '').includes(q) ||
+      (item.variant?.toLowerCase() || '').includes(q) ||
+      (item.sku?.toLowerCase() || '').includes(q)
+    )
+  })
 
   const selectedCount = importItems.filter(item => item.selected).length
 
@@ -255,7 +270,7 @@ export function ImportProductsModal({ isOpen, onClose, onSuccess }: ImportProduc
               <div className="flex items-center gap-2">
                 <div className="flex-1">
                   <Input
-                    placeholder="Search products by name or SKU..."
+                    placeholder="Search by name, brand, model, variant..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
@@ -305,11 +320,18 @@ export function ImportProductsModal({ isOpen, onClose, onSuccess }: ImportProduc
                               />
                             </td>
                             <td className="px-4 py-3">
-                              <div className="font-medium text-sm">{item.productName}</div>
-                              <div className="text-xs text-gray-500">SKU: {item.sku}</div>
+                              <div className="font-medium text-sm">
+                                {[item.variant, item.brand, item.productName].filter(Boolean).join(' ')}
+                              </div>
+                              {item.model && (
+                                <div className="text-xs text-gray-500">{item.model}</div>
+                              )}
+                              {item.sku && (
+                                <div className="text-xs text-gray-400">SKU: {item.sku}</div>
+                              )}
                               {product && (
                                 <div className="text-xs text-gray-500">
-                                  Price: KES {product.sellingPrice.toLocaleString()}
+                                  KES {product.sellingPrice.toLocaleString()}
                                 </div>
                               )}
                             </td>

@@ -19,10 +19,16 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { toast } from 'sonner'
-import { Check, ChevronsUpDown, ImagePlus, X, Loader2, Plus } from 'lucide-react'
+import { Check, ChevronsUpDown, ImagePlus, X, Loader2, Plus, Layers, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ProductImage } from '@/components/ui/product-image'
 import { QuickAddSupplierDialog } from '@/components/suppliers/quick-add-supplier-dialog'
+import { Switch } from '@/components/ui/switch'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 
 interface Product {
   _id?: string
@@ -41,6 +47,8 @@ interface Product {
   description?: string
   stock: number
   images?: string[]
+  trackLots?: boolean
+  lotUnit?: string
 }
 
 interface ProductFormProps {
@@ -59,6 +67,10 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
   const [uploadingImages, setUploadingImages] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Lots collapsible state (edit mode only)
+  const [lotsOpen, setLotsOpen]       = useState(false)
+  const [batches, setBatches]         = useState<Array<{ _id: string; lotId: string; lotLabel: string; quantity: number; initialQuantity: number; status: string; receivedDate: string }>>([])
+  const [batchesLoading, setBatchesLoading] = useState(false)
   const [formData, setFormData] = useState<Product>(
     product || {
       productName: '',
@@ -76,6 +88,8 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
       description: '',
       stock: 0,
       images: [],
+      trackLots: false,
+      lotUnit: 'pieces',
     }
   )
 
@@ -88,6 +102,24 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
   useEffect(() => {
     setImages(product?.images || [])
   }, [product?._id])
+
+  // When editing an existing lot-tracked product, lazily fetch batches when the
+  // collapsible is opened for the first time.
+  async function fetchBatchesForEdit() {
+    if (!product?._id || !formData.trackLots) return
+    setBatchesLoading(true)
+    try {
+      const res = await fetch(`/api/products/${product._id}/batches?status=all`)
+      if (res.ok) {
+        const data = await res.json()
+        setBatches(data.batches || [])
+      }
+    } catch {
+      // silently ignore
+    } finally {
+      setBatchesLoading(false)
+    }
+  }
 
   async function fetchCategories() {
     try {
@@ -204,7 +236,13 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to save product')
+        const errData = await response.json()
+        if (errData.duplicate) {
+          toast.warning(errData.error, { duration: 5000 })
+        } else {
+          toast.error(errData.error || 'Failed to save product')
+        }
+        return
       }
 
       toast.success(product ? 'Product updated' : 'Product created')
@@ -431,6 +469,145 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             disabled={loading}
           />
         </div>
+
+        {/* ── Lot / unit tracking ─────────────────────────────────────────── */}
+        <div className="col-span-3 border rounded-lg p-4 space-y-4 bg-muted/30">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Layers size={16} className="text-muted-foreground" />
+                <Label className="text-sm font-semibold">Track Individual Lots / Units</Label>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Enable to manage each physical unit separately — e.g. each roll of wire, each carton of nails.
+                Stock count and sales will track remaining quantity per lot.
+              </p>
+            </div>
+            <Switch
+              checked={formData.trackLots ?? false}
+              onCheckedChange={(checked) =>
+                setFormData((prev) => ({ ...prev, trackLots: checked }))
+              }
+              disabled={loading}
+            />
+          </div>
+
+          {formData.trackLots && (
+            <div className="space-y-2 pt-2 border-t">
+              <Label htmlFor="lotUnit">Lot Unit of Measure</Label>
+              <div className="flex gap-2 flex-wrap">
+                {['metres', 'pieces', 'kg', 'litres', 'rolls', 'boxes', 'cartons', 'packs'].map((u) => (
+                  <button
+                    key={u}
+                    type="button"
+                    onClick={() => setFormData((prev) => ({ ...prev, lotUnit: u }))}
+                    className={cn(
+                      'px-3 py-1 rounded-full text-xs border transition-all',
+                      formData.lotUnit === u
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-background border-input hover:border-primary'
+                    )}
+                    disabled={loading}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
+              <Input
+                id="lotUnit"
+                name="lotUnit"
+                value={formData.lotUnit ?? ''}
+                onChange={handleChange}
+                placeholder="Or type a custom unit (e.g. sheets)"
+                disabled={loading}
+                className="mt-2"
+              />
+              <p className="text-xs text-muted-foreground">
+                This label appears next to quantities throughout the app (e.g. &quot;70 metres&quot;).
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* ── Current lots (edit mode only, read-only) ─────────────────────── */}
+        {product?._id && formData.trackLots && (
+          <div className="col-span-3">
+            <Collapsible
+              open={lotsOpen}
+              onOpenChange={(open) => {
+                setLotsOpen(open)
+                if (open && batches.length === 0) fetchBatchesForEdit()
+              }}
+            >
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground w-full text-left"
+                >
+                  <Layers size={14} />
+                  Current lots
+                  {batches.length > 0 && (
+                    <span className="text-xs font-normal text-muted-foreground">
+                      ({batches.filter(b => b.status === 'active').length} active)
+                    </span>
+                  )}
+                  <ChevronDown
+                    size={14}
+                    className={cn('ml-auto transition-transform', lotsOpen && 'rotate-180')}
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-2">
+                {batchesLoading ? (
+                  <p className="text-xs text-muted-foreground py-2">Loading lots…</p>
+                ) : batches.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-2">
+                    No lots yet. Use <strong>Stock In</strong> to receive stock.
+                  </p>
+                ) : (
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted">
+                        <tr>
+                          <th className="text-left p-2 font-medium">Lot</th>
+                          <th className="text-right p-2 font-medium">Initial</th>
+                          <th className="text-right p-2 font-medium">Remaining</th>
+                          <th className="text-center p-2 font-medium">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {batches.map(b => (
+                          <tr key={b._id} className="border-t">
+                            <td className="p-2">
+                              <div className="font-medium">{b.lotLabel || b.lotId}</div>
+                              <div className="text-[10px] text-muted-foreground">{b.lotId}</div>
+                            </td>
+                            <td className="p-2 text-right text-muted-foreground">{b.initialQuantity}</td>
+                            <td className="p-2 text-right">
+                              <span className={b.status === 'active' ? 'text-green-700 font-semibold' : 'text-muted-foreground'}>
+                                {b.quantity}
+                              </span>
+                            </td>
+                            <td className="p-2 text-center">
+                              <span className={cn(
+                                'px-1.5 py-0.5 rounded-full text-[10px] font-medium',
+                                b.status === 'active'   && 'bg-green-100 text-green-800',
+                                b.status === 'depleted' && 'bg-gray-100 text-gray-600',
+                                b.status === 'sealed'   && 'bg-orange-100 text-orange-700',
+                              )}>
+                                {b.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
+        )}
 
         <div className="space-y-2">
           <Label htmlFor="stock">Stock Quantity *</Label>

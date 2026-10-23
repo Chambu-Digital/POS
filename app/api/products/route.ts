@@ -83,6 +83,33 @@ export async function POST(request: NextRequest) {
     if (cleanedData.categoryId === '') delete cleanedData.categoryId
     if (cleanedData.branchId === '') delete cleanedData.branchId
 
+    // ── Duplicate detection ───────────────────────────────────────────────────
+    // A product is considered a duplicate when userId + productName + brand +
+    // model + variant all match an existing record (case-insensitive on name,
+    // exact match on brand/model/variant since they are identifiers).
+    // Empty/undefined fields are treated as empty string for comparison.
+    if (cleanedData.productName) {
+      const dupQuery: any = {
+        userId:      ownerId,
+        productName: { $regex: `^${cleanedData.productName.trim()}$`, $options: 'i' },
+        brand:       cleanedData.brand   || '',
+        model:       cleanedData.model   || '',
+        variant:     cleanedData.variant || '',
+      }
+
+      const existing = await models.Product.findOne(dupQuery).lean() as any
+      if (existing) {
+        return NextResponse.json(
+          {
+            error:      'Duplicate item detected',
+            duplicate:  true,
+            existingId: existing._id.toString(),
+          },
+          { status: 409 }
+        )
+      }
+    }
+
     // Create product catalog entry (stock field is deprecated but kept for backward compatibility)
     const product = new models.Product({ 
       ...cleanedData, 

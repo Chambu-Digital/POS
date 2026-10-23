@@ -25,11 +25,12 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { toast } from 'sonner'
-import { Check, ChevronsUpDown, ImagePlus, X, Loader2, Plus, Trash2, AlertCircle, ChevronDown } from 'lucide-react'
+import { Check, ChevronsUpDown, ImagePlus, X, Loader2, Plus, Trash2, AlertCircle, ChevronDown, Layers } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ProductImage } from '@/components/ui/product-image'
 import { QuickAddSupplierDialog } from '@/components/suppliers/quick-add-supplier-dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Switch } from '@/components/ui/switch'
 
 interface Product {
   _id?: string
@@ -61,6 +62,12 @@ interface ProductVariant {
   errors: Record<string, string>
 }
 
+interface InitialLot {
+  id: string
+  label: string
+  quantity: number
+}
+
 interface ProductCardState {
   id: string
   productName: string
@@ -74,6 +81,10 @@ interface ProductCardState {
   description?: string
   variants: ProductVariant[]
   errors: Record<string, string>
+  trackLots: boolean
+  lotUnit: string
+  initialLots: InitialLot[]
+  duplicate: boolean
 }
 
 interface BatchProductFormProps {
@@ -113,7 +124,15 @@ export function BatchProductForm({ onSuccess }: BatchProductFormProps) {
       description: '',
       variants: [createEmptyVariant()],
       errors: {},
+      trackLots: false,
+      lotUnit: 'pieces',
+      initialLots: [],
+      duplicate: false,
     }
+  }
+
+  function createEmptyLot(): InitialLot {
+    return { id: `lot-${Date.now()}-${Math.random()}`, label: '', quantity: 0 }
   }
 
   function createEmptyVariant(): ProductVariant {
@@ -247,6 +266,41 @@ export function BatchProductForm({ onSuccess }: BatchProductFormProps) {
     updateVariant(cardId, variantId, { errors: {} })
   }
 
+  // ── Initial lot helpers ────────────────────────────────────────────────────
+
+  function addInitialLot(cardId: string) {
+    setProducts(prev => prev.map(p =>
+      p.id === cardId
+        ? { ...p, initialLots: [...p.initialLots, createEmptyLot()] }
+        : p
+    ))
+  }
+
+  function removeInitialLot(cardId: string, lotId: string) {
+    setProducts(prev => prev.map(p =>
+      p.id === cardId
+        ? { ...p, initialLots: p.initialLots.filter(l => l.id !== lotId) }
+        : p
+    ))
+  }
+
+  function updateInitialLot(cardId: string, lotId: string, field: keyof InitialLot, value: string | number) {
+    setProducts(prev => prev.map(p =>
+      p.id === cardId
+        ? {
+            ...p,
+            initialLots: p.initialLots.map(l =>
+              l.id === lotId ? { ...l, [field]: value } : l
+            ),
+          }
+        : p
+    ))
+  }
+
+  function lotsTotal(lots: InitialLot[]): number {
+    return lots.reduce((s, l) => s + (Number(l.quantity) || 0), 0)
+  }
+
   async function uploadImages(cardId: string, variantId: string, files: FileList | File[]) {
     try {
       const newUrls: string[] = []
@@ -316,6 +370,8 @@ export function BatchProductForm({ onSuccess }: BatchProductFormProps) {
 
       const updatedVariants = product.variants.map(variant => {
         const variantErrors = validateVariant(variant)
+        // For lot-tracked products the stock field is hidden — don't validate it
+        if (product.trackLots) delete variantErrors.stock
         if (Object.keys(variantErrors).length > 0) {
           isValid = false
         }
@@ -335,57 +391,110 @@ async function submitBatch() {
     }
 
     setLoading(true)
-    const results = { success: 0, failed: 0, errors: [] as any[] }
+    const results = { success: 0, failed: 0, duplicates: [] as string[], errors: [] as any[] }
 
     try {
       for (const product of products) {
         for (const variant of product.variants) {
           try {
-            // Construct product data for each variant
             const { id: varId, errors: varErrors, images: varImages, ...varData } = variant
-            const { id: prodId, errors: prodErrors, variants, ...prodData } = product
+            const { id: prodId, errors: prodErrors, variants, initialLots, ...prodData } = product
+
+            // For lot-tracked products, stock = sum of initial lots (or 0 if none)
+            const openingStock = product.trackLots
+              ? lotsTotal(product.initialLots)
+              : variant.stock
 
             const createData = {
               ...prodData,
               ...varData,
-              images: varImages,
+              stock:     openingStock,
+              images:    varImages,
+              trackLots: product.trackLots,
+              lotUnit:   product.lotUnit,
             }
 
             const response = await fetch('/api/products', {
-              method: 'POST',
+              method:  'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(createData),
+              body:    JSON.stringify(createData),
             })
 
             if (!response.ok) {
               const data = await response.json()
-              results.failed++
-              results.errors.push({
-                productName: `${product.productName} (${variant.variant})`,
-                error: data.error || 'Failed to create product',
-              })
-            } else {
-              results.success++
+              if (data.duplicate) {
+                // Mark the card as duplicate so it turns orange in the UI
+                setProducts(prev => prev.map(p =>
+                  p.id === product.id ? { ...p, duplicate: true } : p
+                ))
+                const label = [variant.variant, variant.brand, product.productName].filter(Boolean).join(' ')
+                results.duplicates.push(label)
+              } else {
+                results.failed++
+                results.errors.push({
+                  productName: `${product.productName}${variant.brand ? ` (${variant.brand})` : ''}`,
+                  error: data.error || 'Failed to create product',
+                })
+              }
+              continue
             }
+
+            const created = await response.json()
+
+            // ── Create opening-balance lots if trackLots is on ──────────────
+            if (product.trackLots && product.initialLots.length > 0) {
+              const validLots = product.initialLots.filter(l => Number(l.quantity) > 0)
+              if (validLots.length > 0) {
+                const batchRes = await fetch(`/api/products/${created._id}/batches`, {
+                  method:  'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body:    JSON.stringify({
+                    lots:        validLots.map(l => ({ label: l.label || `Lot ${l.id}`, quantity: Number(l.quantity) })),
+                    buyingPrice: product.buyingPrice,
+                    notes:       'Opening balance',
+                  }),
+                })
+                if (!batchRes.ok) {
+                  const batchData = await batchRes.json()
+                  // Warn but don't fail — product exists, lots can be added via Stock In
+                  toast.warning(`Product created but lots failed: ${batchData.error || 'Unknown error'}. Add lots via Stock In.`)
+                }
+              }
+            }
+
+            results.success++
           } catch (error) {
             results.failed++
             results.errors.push({
-              productName: `${product.productName} (${variant.variant})`,
+              productName: `${product.productName} (${variant.variant || variant.brand})`,
               error: error instanceof Error ? error.message : 'Unknown error',
             })
           }
         }
       }
 
-      if (results.failed === 0) {
-        toast.success(`✓ ${results.success} product(s) created successfully`)
+      if (results.success > 0) {
+        toast.success(`✓ ${results.success} product${results.success !== 1 ? 's' : ''} created`)
         onSuccess()
-      } else {
-        const errorMsg = results.errors.map(e => `${e.productName}: ${e.error}`).join('\n')
-        toast.error(
-          `${results.success} succeeded, ${results.failed} failed:\n${errorMsg}`,
+      }
+
+      if (results.duplicates.length > 0) {
+        toast.warning(
+          `Duplicate${results.duplicates.length !== 1 ? 's' : ''} detected: ${results.duplicates.join(', ')} already exist${results.duplicates.length === 1 ? 's' : ''} in your catalog`,
           { duration: 6000 }
         )
+      }
+
+      if (results.failed > 0) {
+        const errorMsg = results.errors.map(e => `${e.productName}: ${e.error}`).join('\n')
+        toast.error(
+          `${results.failed} item${results.failed !== 1 ? 's' : ''} failed to create`,
+          { description: errorMsg, duration: 6000 }
+        )
+      }
+
+      if (results.success === 0 && results.duplicates.length === 0 && results.failed === 0) {
+        toast.info('Nothing to create')
       }
     } finally {
       setLoading(false)
@@ -409,8 +518,10 @@ async function submitBatch() {
             key={product.id} 
             className={cn(
               'border transition-colors',
-              Object.keys(product.errors).length > 0 
-                ? 'border-red-300 bg-red-50' 
+              Object.keys(product.errors).length > 0
+                ? 'border-red-300 bg-red-50'
+                : product.duplicate
+                ? 'border-orange-300 bg-orange-50'
                 : 'border-gray-200 hover:border-gray-300'
             )}
           >
@@ -425,6 +536,12 @@ async function submitBatch() {
                     <span className="text-xs text-red-600 font-medium flex items-center gap-1">
                       <AlertCircle size={12} />
                       {Object.keys(product.errors).length} error(s)
+                    </span>
+                  )}
+                  {product.duplicate && Object.keys(product.errors).length === 0 && (
+                    <span className="text-xs text-orange-600 font-medium flex items-center gap-1">
+                      <AlertCircle size={12} />
+                      Duplicate — already in catalog
                     </span>
                   )}
                 </div>
@@ -570,7 +687,7 @@ async function submitBatch() {
                     id={`productName-${product.id}`}
                     value={product.productName}
                     onChange={(e) => {
-                      updateProduct(product.id, { productName: e.target.value })
+                      updateProduct(product.id, { productName: e.target.value, duplicate: false })
                       if (product.errors.productName) clearErrors(product.id)
                     }}
                     required
@@ -774,7 +891,8 @@ async function submitBatch() {
                       />
                     </div>
 
-                    {/* Stock - 1 col */}
+                    {/* Stock - 1 col — hidden when lot tracking is on (stock = sum of lots) */}
+                    {!product.trackLots && (
                     <div className="space-y-1">
                       <Label className="text-xs font-medium">
                         Stock {variant.errors.stock && <span className="text-red-500">*</span>}
@@ -792,6 +910,7 @@ async function submitBatch() {
                         placeholder="0"
                       />
                     </div>
+                    )}
 
                     {/* Remove Variant Button */}
                     {product.variants.length > 1 && (
@@ -962,6 +1081,147 @@ async function submitBatch() {
                       className="min-h-12 text-sm"
                       placeholder="Product details..."
                     />
+                  </div>
+
+                  {/* ── Lot / unit tracking ───────────────────────────────── */}
+                  <div className="space-y-2 border rounded-lg p-3 bg-muted/30 border-gray-200">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <Layers size={13} className="text-muted-foreground" />
+                          <span className="text-xs font-semibold">Track individual lots / units</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
+                          Enable to track each roll, box, or carton separately.
+                          Stock count and sales will manage remaining quantity per lot.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={product.trackLots}
+                        onCheckedChange={(checked) => {
+                          updateProduct(product.id, {
+                            trackLots:   checked,
+                            initialLots: checked && product.initialLots.length === 0
+                              ? [createEmptyLot()]
+                              : product.initialLots,
+                          })
+                          // Auto-open More Details so the lots table is immediately visible
+                          if (checked) setExpandedCardId(product.id)
+                        }}
+                        disabled={loading}
+                      />
+                    </div>
+
+                    {product.trackLots && (
+                      <div className="space-y-3 pt-2 border-t border-gray-200">
+
+                        {/* Unit of measure */}
+                        <div className="space-y-1.5">
+                          <Label className="text-xs font-medium">Unit of measure</Label>
+                          <div className="flex gap-1.5 flex-wrap">
+                            {['metres', 'pieces', 'kg', 'litres', 'rolls', 'boxes', 'cartons', 'packs'].map((u) => (
+                              <button
+                                key={u}
+                                type="button"
+                                onClick={() => updateProduct(product.id, { lotUnit: u })}
+                                className={cn(
+                                  'px-2 py-0.5 rounded-full text-[10px] border transition-all',
+                                  product.lotUnit === u
+                                    ? 'bg-primary text-primary-foreground border-primary'
+                                    : 'bg-background border-input hover:border-primary'
+                                )}
+                                disabled={loading}
+                              >
+                                {u}
+                              </button>
+                            ))}
+                          </div>
+                          <Input
+                            value={product.lotUnit}
+                            onChange={(e) => updateProduct(product.id, { lotUnit: e.target.value })}
+                            placeholder="Or type a custom unit (e.g. sheets)"
+                            disabled={loading}
+                            className="h-7 text-xs"
+                          />
+                        </div>
+
+                        {/* Initial lots table */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs font-medium">
+                              Opening lots
+                              <span className="text-muted-foreground font-normal ml-1">(optional — add later via Stock In)</span>
+                            </Label>
+                            {product.initialLots.length > 0 && (
+                              <span className="text-[10px] text-muted-foreground">
+                                Total: {lotsTotal(product.initialLots)} {product.lotUnit}
+                              </span>
+                            )}
+                          </div>
+
+                          {product.initialLots.length > 0 && (
+                            <div className="space-y-1.5">
+                              {/* Column headers */}
+                              <div className="grid grid-cols-12 gap-1.5 px-1">
+                                <span className="col-span-7 text-[10px] text-muted-foreground">Label (e.g. Roll 1)</span>
+                                <span className="col-span-4 text-[10px] text-muted-foreground">Qty ({product.lotUnit})</span>
+                                <span className="col-span-1" />
+                              </div>
+
+                              {product.initialLots.map((lot, li) => (
+                                <div key={lot.id} className="grid grid-cols-12 gap-1.5 items-center">
+                                  <div className="col-span-7">
+                                    <Input
+                                      value={lot.label}
+                                      onChange={(e) => updateInitialLot(product.id, lot.id, 'label', e.target.value)}
+                                      placeholder={`e.g. Roll ${li + 1}`}
+                                      disabled={loading}
+                                      className="h-7 text-xs"
+                                    />
+                                  </div>
+                                  <div className="col-span-4">
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      value={lot.quantity || ''}
+                                      onChange={(e) => updateInitialLot(product.id, lot.id, 'quantity', parseFloat(e.target.value) || 0)}
+                                      onFocus={(e) => e.target.select()}
+                                      placeholder="0"
+                                      disabled={loading}
+                                      className="h-7 text-xs"
+                                    />
+                                  </div>
+                                  <div className="col-span-1 flex justify-end">
+                                    <button
+                                      type="button"
+                                      onClick={() => removeInitialLot(product.id, lot.id)}
+                                      disabled={loading}
+                                      className="text-red-400 hover:text-red-600 p-0.5"
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => addInitialLot(product.id)}
+                            disabled={loading}
+                            className="w-full h-7 text-xs border-dashed gap-1"
+                          >
+                            <Plus size={12} />
+                            {product.initialLots.length === 0 ? 'Add opening lot' : 'Add another lot'}
+                          </Button>
+                        </div>
+
+                      </div>
+                    )}
                   </div>
 
                   {/* Per-Variant Images Section */}

@@ -77,6 +77,9 @@ interface ReceiptProps {
   debtCreated?: number      // amount added to customer account
   // Multi-payment support
   payments?: PaymentEntry[] // array of payment methods used
+  // Terms / after-sale message
+  termsEnabled?: boolean
+  termsText?: string
 }
 export interface ReceiptRef {
   print: () => void
@@ -116,6 +119,8 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
   cashPaid,
   debtCreated,
   payments,
+  termsEnabled,
+  termsText,
 }, ref) => {
   const receiptRef = useRef<HTMLDivElement>(null)
 
@@ -177,8 +182,9 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
                 .return-notice { margin: 15px 0; padding: 10px; background: #fee; border: 1px solid #faa; border-radius: 4px; text-align: center; font-size: 11px; font-weight: bold; color: #c00; }
                 .returned-item { text-decoration: line-through; color: #999; }
                 .returned-badge { display: inline-block; background: #fee; color: #c00; padding: 2px 6px; border-radius: 3px; font-size: 9px; margin-left: 6px; font-weight: bold; }
-                .footer { margin-top: 30px; text-align: center; font-size: 11px; border-top: 1px solid #ddd; padding-top: 15px; }
-                .served-by { margin: 15px 0; text-align: center; font-size: 11px; font-style: italic; }
+                .footer { margin-top: 30px; text-align: center; font-size: 11px; border-top: 1px dashed #000; padding-top: 15px; }
+                .served-by { margin: 10px 0 5px; text-align: center; font-size: 11px; font-style: italic; }
+                .terms { margin: 8px 0; font-size: 10px; color: #444; text-align: left; white-space: pre-wrap; border-top: 1px dashed #ccc; padding-top: 6px; }
               </style>
             </head>
             <body>${receiptRef.current.innerHTML}</body>
@@ -273,6 +279,16 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
           <div><strong>Customer:</strong> {customerName}</div>
           {customerPhone && <div><strong>Phone:</strong> {customerPhone}</div>}
           {customerIdNo && <div><strong>ID:</strong> {customerIdNo}</div>}
+          {customerBalance != null && customerBalance > 0 && !creditCleared && (
+            <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #ddd', color: '#92400e', fontWeight: 'bold' }}>
+              Outstanding Balance: KES {customerBalance.toFixed(2)}
+            </div>
+          )}
+          {customerBalance != null && customerBalance < 0 && (
+            <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #ddd', color: '#0c2d6b', fontWeight: 'bold' }}>
+              Credit Available: KES {Math.abs(customerBalance).toFixed(2)}
+            </div>
+          )}
         </div>
       ) : !isRental && (
         <div className="customer-info">
@@ -439,7 +455,6 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
         </div>
       )}
 
-      <div className="served-by">You Were Served By: {cashierName}</div>
 
       {!isSlip && paymentMethod === 'mobile_money' && mpesaPaybill && (
         <div style={{ margin: '15px 0', fontSize: '11px' }}>
@@ -455,24 +470,21 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
             ✓ CREDIT CLEARED
           </div>
         )}
-        {customerBalance != null && customerBalance > 0 && !creditCleared && (
-          <div style={{ backgroundColor: '#fef3c7', padding: '8px', borderRadius: '4px', marginBottom: '10px', textAlign: 'center', fontSize: '12px', fontWeight: 'bold', color: '#92400e' }}>
-            Balance Due: KES {customerBalance.toFixed(2)}
-          </div>
-        )}
-        {customerBalance != null && customerBalance < 0 && (
-          <div style={{ backgroundColor: '#dbeafe', padding: '8px', borderRadius: '4px', marginBottom: '10px', textAlign: 'center', fontSize: '12px', fontWeight: 'bold', color: '#0c2d6b' }}>
-            Credit Available: KES {Math.abs(customerBalance).toFixed(2)}
-          </div>
-        )}
         {debtCreated && debtCreated > 0 && (
           <div style={{ backgroundColor: '#fef08a', padding: '8px', borderRadius: '4px', marginBottom: '10px', textAlign: 'center', fontSize: '11px', color: '#78350f' }}>
             KES {debtCreated.toFixed(2)} added to your account balance
           </div>
         )}
+        {/* Custom message */}
         <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
           {receiptType === 'rental_slip' ? 'Thank you! Please keep this slip.' : 'Thank You For Shopping With Us!'}
         </div>
+        {/* Terms */}
+        {termsEnabled && termsText && (
+          <div className="terms">{termsText}</div>
+        )}
+        {/* Served by */}
+        <div className="served-by">Served By: {cashierName}</div>
         <div style={{ fontSize: '10px', color: '#666', marginTop: '10px' }}>
           Powered by Chambu Digital
         </div>

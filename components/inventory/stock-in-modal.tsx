@@ -25,7 +25,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
-import { Plus, Trash2, Package, Check, ChevronsUpDown } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Plus, Trash2, Package, Check, ChevronsUpDown, Layers, ChevronDown, ChevronUp, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { QuickAddSupplierDialog } from '@/components/suppliers/quick-add-supplier-dialog'
@@ -35,12 +36,19 @@ interface Supplier {
   name: string
 }
 
-interface Product {
+interface ProductMeta {
   _id: string
   productName: string
   brand?: string
   variant?: string
   model?: string
+  trackLots?: boolean
+  lotUnit?: string
+}
+
+interface LotEntry {
+  label: string
+  quantity: number
 }
 
 interface StockInItem {
@@ -48,6 +56,9 @@ interface StockInItem {
   productName: string
   quantity: number
   unitCost: number
+  // lot fields — only populated when the chosen product has trackLots===true
+  lotsExpanded: boolean
+  lots: LotEntry[]
 }
 
 interface StockInModalProps {
@@ -57,30 +68,29 @@ interface StockInModalProps {
 }
 
 export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProps) {
-  const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [products, setProducts] = useState<Product[]>([])
-  const [supplierId, setSupplierId] = useState('')
-  const [supplierOpen, setSupplierOpen] = useState(false)
+  const [suppliers, setSuppliers]           = useState<Supplier[]>([])
+  const [products, setProducts]             = useState<ProductMeta[]>([])
+  const [supplierId, setSupplierId]         = useState('')
+  const [supplierOpen, setSupplierOpen]     = useState(false)
   const [quickAddSupplierOpen, setQuickAddSupplierOpen] = useState(false)
-  const [reference, setReference] = useState('')
-  const [notes, setNotes] = useState('')
-  const [items, setItems] = useState<StockInItem[]>([
-    { productId: '', productName: '', quantity: 0, unitCost: 0 }
+  const [reference, setReference]           = useState('')
+  const [notes, setNotes]                   = useState('')
+  const [items, setItems]                   = useState<StockInItem[]>([
+    { productId: '', productName: '', quantity: 0, unitCost: 0, lotsExpanded: false, lots: [] },
   ])
   const [productOpenStates, setProductOpenStates] = useState<Record<number, boolean>>({})
-  const [submitting, setSubmitting] = useState(false)
-  const [loadingData, setLoadingData] = useState(true)
+  const [submitting, setSubmitting]         = useState(false)
+  const [loadingData, setLoadingData]       = useState(true)
 
   useEffect(() => {
     if (open) {
       fetchInitialData()
     } else {
-      // Reset form when closed
       setSupplierId('')
       setSupplierOpen(false)
       setReference('')
       setNotes('')
-      setItems([{ productId: '', productName: '', quantity: 0, unitCost: 0 }])
+      setItems([{ productId: '', productName: '', quantity: 0, unitCost: 0, lotsExpanded: false, lots: [] }])
       setProductOpenStates({})
     }
   }, [open])
@@ -90,17 +100,15 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
       setLoadingData(true)
       const [suppliersRes, productsRes] = await Promise.all([
         fetch('/api/suppliers'),
-        fetch('/api/products')
+        fetch('/api/products'),
       ])
-
       if (suppliersRes.ok) {
-        const data = await suppliersRes.json()
-        setSuppliers(data.suppliers || [])
+        const d = await suppliersRes.json()
+        setSuppliers(d.suppliers || [])
       }
-
       if (productsRes.ok) {
-        const data = await productsRes.json()
-        setProducts(data.products || [])
+        const d = await productsRes.json()
+        setProducts(d.products || [])
       }
     } catch (error) {
       toast.error('Failed to load data')
@@ -110,88 +118,178 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
     }
   }
 
+  function formatProductName(p: ProductMeta) {
+    return [p.brand, p.variant, p.model, p.productName].filter(Boolean).join(' › ')
+  }
+
+  function getProduct(id: string): ProductMeta | undefined {
+    return products.find(p => p._id === id)
+  }
+
+  // ── Lot helpers ────────────────────────────────────────────────────────────
+
+  /** Auto-generate N lot entries with default labels from a total quantity. */
+  function autoGenerateLots(item: StockInItem): LotEntry[] {
+    if (item.quantity <= 0) return []
+    // Default: one lot covering the whole quantity
+    return [{ label: 'Lot 1', quantity: item.quantity }]
+  }
+
+  function addLotRow(itemIndex: number) {
+    setItems(prev => prev.map((item, i) => {
+      if (i !== itemIndex) return item
+      const next = item.lots.length + 1
+      return { ...item, lots: [...item.lots, { label: `Lot ${next}`, quantity: 0 }] }
+    }))
+  }
+
+  function removeLotRow(itemIndex: number, lotIndex: number) {
+    setItems(prev => prev.map((item, i) => {
+      if (i !== itemIndex) return item
+      return { ...item, lots: item.lots.filter((_, li) => li !== lotIndex) }
+    }))
+  }
+
+  function updateLot(itemIndex: number, lotIndex: number, field: keyof LotEntry, value: string | number) {
+    setItems(prev => prev.map((item, i) => {
+      if (i !== itemIndex) return item
+      return {
+        ...item,
+        lots: item.lots.map((lot, li) =>
+          li === lotIndex ? { ...lot, [field]: value } : lot
+        ),
+      }
+    }))
+  }
+
+  function toggleLotsExpanded(itemIndex: number) {
+    setItems(prev => prev.map((item, i) => {
+      if (i !== itemIndex) return item
+      const willExpand = !item.lotsExpanded
+      // When expanding for the first time with no lots defined, auto-seed one row
+      const lots = willExpand && item.lots.length === 0
+        ? autoGenerateLots(item)
+        : item.lots
+      return { ...item, lotsExpanded: willExpand, lots }
+    }))
+  }
+
+  function lotsTotal(lots: LotEntry[]): number {
+    return lots.reduce((s, l) => s + (Number(l.quantity) || 0), 0)
+  }
+
+  // ── Item helpers ───────────────────────────────────────────────────────────
+
   function addItem() {
-    setItems([...items, { productId: '', productName: '', quantity: 0, unitCost: 0 }])
+    setItems(prev => [
+      ...prev,
+      { productId: '', productName: '', quantity: 0, unitCost: 0, lotsExpanded: false, lots: [] },
+    ])
   }
 
   function removeItem(index: number) {
-    if (items.length === 1) {
-      toast.error('At least one item is required')
-      return
-    }
-    setItems(items.filter((_, i) => i !== index))
+    if (items.length === 1) { toast.error('At least one item is required'); return }
+    setItems(prev => prev.filter((_, i) => i !== index))
   }
 
   function updateItem(index: number, field: keyof StockInItem, value: any) {
-    const updated = [...items]
-    
-    if (field === 'productId') {
-      const product = products.find(p => p._id === value)
-      if (product) {
-        updated[index].productId = value
-        updated[index].productName = formatProductName(product)
+    setItems(prev => prev.map((item, i) => {
+      if (i !== index) return item
+      if (field === 'productId') {
+        const product = products.find(p => p._id === value)
+        if (!product) return item
+        return {
+          ...item,
+          productId:   value,
+          productName: formatProductName(product),
+          // reset lots whenever product changes
+          lots:         [],
+          // Auto-expand the lot section for lot-tracked products so it
+          // can't be missed — staff don't have to know to click a toggle
+          lotsExpanded: product.trackLots === true,
+        }
       }
-    } else {
-      updated[index][field] = value
-    }
-    
-    setItems(updated)
-  }
-
-  function formatProductName(product: Product) {
-    const parts = [
-      product.brand,
-      product.variant,
-      product.model,
-      product.productName,
-    ].filter(Boolean)
-    return parts.join(' › ')
+      if (field === 'quantity') {
+        // When quantity changes and lots are already defined, sync the first
+        // lot's quantity to the new total if there's only one lot
+        const updated = { ...item, quantity: value }
+        if (updated.lots.length === 1) {
+          updated.lots = [{ ...updated.lots[0], quantity: value }]
+        }
+        return updated
+      }
+      return { ...item, [field]: value }
+    }))
   }
 
   function handleQuickAddSupplierSuccess(newSupplier: { _id: string; name: string }) {
-    // Add to suppliers list
     setSuppliers(prev => [...prev, newSupplier])
-    // Auto-select the new supplier
     setSupplierId(newSupplier._id)
   }
 
   function calculateTotal() {
-    return items.reduce((sum, item) => sum + (item.quantity * item.unitCost), 0)
+    return items.reduce((sum, item) => sum + item.quantity * item.unitCost, 0)
   }
 
-  async function handleSubmit() {
-    // Validation
-    if (!supplierId) {
-      toast.error('Please select a supplier')
-      return
+  // ── Validation ─────────────────────────────────────────────────────────────
+
+  function validateLots(item: StockInItem): string | null {
+    const product = getProduct(item.productId)
+    if (!product?.trackLots) return null
+    if (!item.lotsExpanded || item.lots.length === 0) return null // will auto-create one lot
+    const total = lotsTotal(item.lots)
+    if (total !== item.quantity) {
+      return `Lot quantities sum to ${total} but received quantity is ${item.quantity}`
     }
+    return null
+  }
+
+  // ── Submit ──────────────────────────────────────────────────────────────────
+
+  async function handleSubmit() {
+    if (!supplierId) { toast.error('Please select a supplier'); return }
 
     const validItems = items.filter(item => item.productId && item.quantity > 0 && item.unitCost > 0)
-    if (validItems.length === 0) {
-      toast.error('Please add at least one valid item')
-      return
+    if (validItems.length === 0) { toast.error('Please add at least one valid item'); return }
+
+    for (const item of validItems) {
+      const err = validateLots(item)
+      if (err) { toast.error(err); return }
     }
 
     setSubmitting(true)
     try {
-      const response = await fetch('/api/inventory/stock-in', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          supplierId,
-          reference,
-          notes,
-          items: validItems.map(item => ({
+      const payload = {
+        supplierId,
+        reference,
+        notes,
+        items: validItems.map(item => {
+          const product = getProduct(item.productId)
+          const base = {
             productId: item.productId,
-            quantity: item.quantity,
-            unitCost: item.unitCost,
-          })),
+            quantity:  item.quantity,
+            unitCost:  item.unitCost,
+          }
+          // Only send lots array for lot-tracked products when staff defined them
+          if (product?.trackLots && item.lots.length > 0) {
+            return { ...base, lots: item.lots }
+          }
+          return base
         }),
+      }
+
+      const response = await fetch('/api/inventory/stock-in', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
       })
 
       if (response.ok) {
         const data = await response.json()
-        toast.success(`Stock received: ${data.itemCount} items from ${data.supplier}`)
+        const batchMsg = data.batchesCreated?.length
+          ? ` (${data.batchesCreated.length} lot${data.batchesCreated.length !== 1 ? 's' : ''} created)`
+          : ''
+        toast.success(`Stock received: ${data.itemCount} item${data.itemCount !== 1 ? 's' : ''} from ${data.supplier}${batchMsg}`)
         onOpenChange(false)
         onSuccess()
       } else {
@@ -205,6 +303,8 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
       setSubmitting(false)
     }
   }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -223,21 +323,17 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
           <div className="text-center py-8">Loading...</div>
         ) : (
           <div className="space-y-6">
-            {/* Supplier Selection */}
+
+            {/* Supplier */}
             <div>
-              <Label htmlFor="supplier">Supplier *</Label>
-              <div className="flex gap-2">
+              <Label>Supplier *</Label>
+              <div className="flex gap-2 mt-1">
                 <Popover open={supplierOpen} onOpenChange={setSupplierOpen}>
                   <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={supplierOpen}
-                      className="flex-1 justify-between"
-                      type="button"
-                    >
+                    <Button variant="outline" role="combobox" aria-expanded={supplierOpen}
+                      className="flex-1 justify-between" type="button">
                       {supplierId
-                        ? suppliers.find((s) => s._id === supplierId)?.name || 'Select supplier...'
+                        ? suppliers.find(s => s._id === supplierId)?.name || 'Select supplier...'
                         : 'Select supplier...'}
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
@@ -246,28 +342,13 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
                     <Command>
                       <CommandInput placeholder="Search suppliers..." />
                       <CommandList>
-                        <CommandEmpty>
-                          {suppliers.length === 0 
-                            ? 'No suppliers available. Add a supplier first.'
-                            : 'No supplier found.'}
-                        </CommandEmpty>
+                        <CommandEmpty>No supplier found.</CommandEmpty>
                         <CommandGroup>
-                          {suppliers.map((supplier) => (
-                            <CommandItem
-                              key={supplier._id}
-                              value={supplier.name}
-                              onSelect={() => {
-                                setSupplierId(supplier._id)
-                                setSupplierOpen(false)
-                              }}
-                            >
-                              <Check
-                                className={cn(
-                                  'mr-2 h-4 w-4',
-                                  supplierId === supplier._id ? 'opacity-100' : 'opacity-0'
-                                )}
-                              />
-                              {supplier.name}
+                          {suppliers.map(s => (
+                            <CommandItem key={s._id} value={s.name}
+                              onSelect={() => { setSupplierId(s._id); setSupplierOpen(false) }}>
+                              <Check className={cn('mr-2 h-4 w-4', supplierId === s._id ? 'opacity-100' : 'opacity-0')} />
+                              {s.name}
                             </CommandItem>
                           ))}
                         </CommandGroup>
@@ -275,13 +356,8 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
                     </Command>
                   </PopoverContent>
                 </Popover>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setQuickAddSupplierOpen(true)}
-                  title="Add new supplier"
-                >
+                <Button type="button" variant="outline" size="icon"
+                  onClick={() => setQuickAddSupplierOpen(true)} title="Add new supplier">
                   <Plus size={16} />
                 </Button>
               </div>
@@ -290,142 +366,200 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
             {/* Reference */}
             <div>
               <Label htmlFor="reference">Reference / Invoice No.</Label>
-              <Input
-                id="reference"
-                value={reference}
-                onChange={(e) => setReference(e.target.value)}
-                placeholder="INV-2024-001"
-              />
+              <Input id="reference" value={reference}
+                onChange={e => setReference(e.target.value)}
+                placeholder="INV-2024-001" className="mt-1" />
             </div>
 
             {/* Products */}
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label>Products *</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addItem}
-                >
-                  <Plus size={16} className="mr-2" />
-                  Add Product
+                <Button type="button" variant="outline" size="sm" onClick={addItem}>
+                  <Plus size={16} className="mr-2" />Add Product
                 </Button>
               </div>
 
-              <div className="border rounded-lg p-4 space-y-3">
-                {items.map((item, index) => (
-                  <div key={index} className="grid grid-cols-12 gap-3 items-end">
-                    <div className="col-span-5">
-                      {index === 0 && (
-                        <Label className="text-xs text-muted-foreground mb-1">Product</Label>
-                      )}
-                      <Popover
-                        open={productOpenStates[index] || false}
-                        onOpenChange={(open) => setProductOpenStates(prev => ({ ...prev, [index]: open }))}
-                      >
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            role="combobox"
-                            aria-expanded={productOpenStates[index] || false}
-                            className="w-full justify-between"
-                            type="button"
-                          >
-                            <span className="truncate">
-                              {item.productId
-                                ? formatProductName(products.find(p => p._id === item.productId)!)
-                                : 'Select product...'}
-                            </span>
-                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              <div className="space-y-3">
+                {items.map((item, index) => {
+                  const product      = getProduct(item.productId)
+                  const isLotProduct = product?.trackLots === true
+                  const lotError     = validateLots(item)
+                  const sumLots      = lotsTotal(item.lots)
+
+                  return (
+                    <div key={index} className="border rounded-lg p-4 space-y-3">
+                      {/* Row: product / qty / cost / total / delete */}
+                      <div className="grid grid-cols-12 gap-3 items-end">
+                        <div className="col-span-5">
+                          {index === 0 && <Label className="text-xs text-muted-foreground mb-1 block">Product</Label>}
+                          <Popover
+                            open={productOpenStates[index] || false}
+                            onOpenChange={o => setProductOpenStates(prev => ({ ...prev, [index]: o }))}>
+                            <PopoverTrigger asChild>
+                              <Button variant="outline" role="combobox"
+                                aria-expanded={productOpenStates[index] || false}
+                                className="w-full justify-between" type="button">
+                                <span className="truncate">
+                                  {item.productId
+                                    ? formatProductName(products.find(p => p._id === item.productId)!)
+                                    : 'Select product...'}
+                                </span>
+                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[350px] p-0" align="start">
+                              <Command>
+                                <CommandInput placeholder="Search products..." />
+                                <CommandList>
+                                  <CommandEmpty>No product found.</CommandEmpty>
+                                  <CommandGroup>
+                                    {products.map(p => (
+                                      <CommandItem key={p._id} value={formatProductName(p)}
+                                        onSelect={() => {
+                                          updateItem(index, 'productId', p._id)
+                                          setProductOpenStates(prev => ({ ...prev, [index]: false }))
+                                        }}>
+                                        <Check className={cn('mr-2 h-4 w-4', item.productId === p._id ? 'opacity-100' : 'opacity-0')} />
+                                        <span className="flex-1 truncate">{formatProductName(p)}</span>
+                                        {p.trackLots && (
+                                          <Layers size={12} className="ml-2 text-blue-500 shrink-0" />
+                                        )}
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+
+                        <div className="col-span-2">
+                          {index === 0 && <Label className="text-xs text-muted-foreground mb-1 block">Quantity</Label>}
+                          <Input type="number" min="1"
+                            value={item.quantity || ''}
+                            onChange={e => updateItem(index, 'quantity', parseInt(e.target.value) || 0)}
+                            onFocus={e => e.target.select()}
+                            placeholder="0" />
+                        </div>
+
+                        <div className="col-span-2">
+                          {index === 0 && <Label className="text-xs text-muted-foreground mb-1 block">Unit Cost</Label>}
+                          <Input type="number" min="0" step="0.01"
+                            value={item.unitCost || ''}
+                            onChange={e => updateItem(index, 'unitCost', parseFloat(e.target.value) || 0)}
+                            onFocus={e => e.target.select()}
+                            placeholder="0.00" />
+                        </div>
+
+                        <div className="col-span-2">
+                          {index === 0 && <Label className="text-xs text-muted-foreground mb-1 block">Total</Label>}
+                          <div className="h-10 flex items-center px-3 border rounded-md bg-muted text-sm font-semibold">
+                            {(item.quantity * item.unitCost).toLocaleString()}
+                          </div>
+                        </div>
+
+                        <div className="col-span-1">
+                          {index === 0 && <div className="h-5" />}
+                          <Button type="button" variant="ghost" size="sm"
+                            onClick={() => removeItem(index)} disabled={items.length === 1}>
+                            <Trash2 size={16} className="text-red-500" />
                           </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[350px] p-0" align="start">
-                          <Command>
-                            <CommandInput placeholder="Search products..." />
-                            <CommandList>
-                              <CommandEmpty>No product found.</CommandEmpty>
-                              <CommandGroup>
-                                {products.map((product) => (
-                                  <CommandItem
-                                    key={product._id}
-                                    value={formatProductName(product)}
-                                    onSelect={() => {
-                                      updateItem(index, 'productId', product._id)
-                                      setProductOpenStates(prev => ({ ...prev, [index]: false }))
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        'mr-2 h-4 w-4',
-                                        item.productId === product._id ? 'opacity-100' : 'opacity-0'
-                                      )}
-                                    />
-                                    {formatProductName(product)}
-                                  </CommandItem>
-                                ))}
-                              </CommandGroup>
-                            </CommandList>
-                          </Command>
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-
-                    <div className="col-span-2">
-                      {index === 0 && (
-                        <Label className="text-xs text-muted-foreground mb-1">Quantity</Label>
-                      )}
-                      <Input
-                        type="number"
-                        min="1"
-                        value={item.quantity || ''}
-                        onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 0)}
-                        onFocus={(e) => e.target.select()}
-                        placeholder="0"
-                      />
-                    </div>
-
-                    <div className="col-span-2">
-                      {index === 0 && (
-                        <Label className="text-xs text-muted-foreground mb-1">Unit Cost</Label>
-                      )}
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={item.unitCost || ''}
-                        onChange={(e) => updateItem(index, 'unitCost', parseFloat(e.target.value) || 0)}
-                        onFocus={(e) => e.target.select()}
-                        placeholder="0.00"
-                      />
-                    </div>
-
-                    <div className="col-span-2">
-                      {index === 0 && (
-                        <Label className="text-xs text-muted-foreground mb-1">Total</Label>
-                      )}
-                      <div className="h-10 flex items-center px-3 border rounded-md bg-muted text-sm font-semibold">
-                        {(item.quantity * item.unitCost).toLocaleString()}
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="col-span-1">
-                      {index === 0 && <div className="h-5" />}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeItem(index)}
-                        disabled={items.length === 1}
-                      >
-                        <Trash2 size={16} className="text-red-500" />
-                      </Button>
+                      {/* Lot tracking section — only for trackLots products */}
+                      {isLotProduct && item.productId && (
+                        <div className="pt-2 border-t">
+                          {/* Toggle button */}
+                          <button
+                            type="button"
+                            onClick={() => toggleLotsExpanded(index)}
+                            className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-800 transition-colors"
+                          >
+                            <Layers size={13} />
+                            <span className="font-medium">Define individual lots</span>
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                              {item.lots.length === 0
+                                ? item.quantity > 0
+                                  ? `1 auto-lot of ${item.quantity} ${product?.lotUnit || 'units'}`
+                                  : `lot tracking enabled — enter quantity`
+                                : `${item.lots.length} lot${item.lots.length !== 1 ? 's' : ''} — ${sumLots} / ${item.quantity || '?'} ${product?.lotUnit || 'units'}`}
+                            </Badge>
+                            {item.lotsExpanded
+                              ? <ChevronUp size={13} />
+                              : <ChevronDown size={13} />}
+                          </button>
+
+                          {/* Lot rows */}
+                          {item.lotsExpanded && (
+                            <div className="mt-3 space-y-2">
+                              <div className="grid grid-cols-12 gap-2 text-xs text-muted-foreground px-1">
+                                <span className="col-span-6">Lot label</span>
+                                <span className="col-span-4">Quantity ({product?.lotUnit || 'units'})</span>
+                                <span className="col-span-2" />
+                              </div>
+
+                              {item.lots.map((lot, li) => (
+                                <div key={li} className="grid grid-cols-12 gap-2 items-center">
+                                  <div className="col-span-6">
+                                    <Input
+                                      value={lot.label}
+                                      onChange={e => updateLot(index, li, 'label', e.target.value)}
+                                      placeholder={`e.g. Roll ${li + 1}`}
+                                      className="h-8 text-sm"
+                                    />
+                                  </div>
+                                  <div className="col-span-4">
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      value={lot.quantity || ''}
+                                      onChange={e => updateLot(index, li, 'quantity', parseFloat(e.target.value) || 0)}
+                                      onFocus={e => e.target.select()}
+                                      placeholder="0"
+                                      className="h-8 text-sm"
+                                    />
+                                  </div>
+                                  <div className="col-span-2 flex justify-end">
+                                    <Button type="button" variant="ghost" size="sm"
+                                      className="h-8 w-8 p-0"
+                                      onClick={() => removeLotRow(index, li)}
+                                      disabled={item.lots.length === 1}>
+                                      <Trash2 size={13} className="text-red-400" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+
+                              <Button type="button" variant="outline" size="sm"
+                                className="w-full h-8 text-xs border-dashed"
+                                onClick={() => addLotRow(index)}>
+                                <Plus size={13} className="mr-1" /> Add another lot
+                              </Button>
+
+                              {/* Validation feedback */}
+                              {lotError ? (
+                                <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                                  <AlertCircle size={12} />
+                                  {lotError}
+                                </div>
+                              ) : sumLots === item.quantity && item.lots.length > 0 ? (
+                                <div className="flex items-center gap-1.5 text-xs text-green-600 bg-green-50 border border-green-200 rounded px-2 py-1.5">
+                                  <Check size={12} />
+                                  All {item.quantity} {product?.lotUnit || 'units'} accounted for across {item.lots.length} lot{item.lots.length !== 1 ? 's' : ''}
+                                </div>
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
 
-              {/* Total */}
+              {/* Grand total */}
               <div className="flex justify-end items-center gap-4 pt-2 border-t">
                 <span className="text-sm font-medium">Total Cost:</span>
                 <span className="text-xl font-bold text-primary">
@@ -437,32 +571,20 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
             {/* Notes */}
             <div>
               <Label htmlFor="notes">Notes</Label>
-              <Textarea
-                id="notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Additional information..."
-                rows={3}
-              />
+              <Textarea id="notes" value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="Additional information..." rows={3} className="mt-1" />
             </div>
 
             {/* Actions */}
             <div className="flex gap-3 pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                className="flex-1"
-                disabled={submitting}
-              >
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}
+                className="flex-1" disabled={submitting}>
                 Cancel
               </Button>
-              <Button
-                type="button"
-                onClick={handleSubmit}
+              <Button type="button" onClick={handleSubmit}
                 className="flex-1"
-                disabled={submitting || !supplierId || items.length === 0}
-              >
+                disabled={submitting || !supplierId || items.length === 0}>
                 {submitting ? 'Receiving Stock...' : 'Receive Stock'}
               </Button>
             </div>
@@ -470,7 +592,6 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
         )}
       </DialogContent>
 
-      {/* Quick Add Supplier Dialog */}
       <QuickAddSupplierDialog
         open={quickAddSupplierOpen}
         onOpenChange={setQuickAddSupplierOpen}
