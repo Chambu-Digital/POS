@@ -367,6 +367,28 @@ export async function POST(request: NextRequest) {
     }
 
     // ── CREATE SALE ───────────────────────────────────────────────────────────
+    // Compute COGS: fetch buying prices for all items in a single query
+    let costOfGoodsSold = 0
+    try {
+      const productIds = data.items
+        .filter((item: any) => item.productId)
+        .map((item: any) => new Types.ObjectId(item.productId))
+      if (productIds.length > 0) {
+        const products = await models.Product.find({
+          _id: { $in: productIds },
+          userId: ownerId,
+        }).select('_id buyingPrice').lean() as any[]
+        const priceMap = new Map(products.map((p: any) => [p._id.toString(), p.buyingPrice || 0]))
+        costOfGoodsSold = data.items.reduce((sum: number, item: any) => {
+          const cost = priceMap.get(item.productId?.toString()) || 0
+          return sum + (cost * item.quantity)
+        }, 0)
+      }
+    } catch (cogsError) {
+      // Non-fatal — COGS is a reporting field, sale can proceed without it
+      console.error('[sales] COGS computation failed:', cogsError)
+    }
+
     const sale = new models.Sale({
       userId: ownerId,
       branchId: branchContext || null,
@@ -401,6 +423,7 @@ export async function POST(request: NextRequest) {
       mpesaCode: payments.find((p: any) => p.method === 'mobile_money')?.mpesaCode || '',
       mpesaPhone: payments.find((p: any) => p.method === 'mobile_money')?.mpesaPhone || '',
       creditApplied: debtOffsetAmount,  // Track debt offset amount
+      costOfGoodsSold,
       
       notes: data.notes || '',
       source: data.source || 'pos',

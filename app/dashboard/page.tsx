@@ -279,6 +279,43 @@ export default function DashboardPage() {
         <Card><CardContent className="pt-6"><p className="text-sm text-muted-foreground">Staff</p><p className="text-2xl font-bold">{stats.staffCount}</p></CardContent></Card>
       </div>
 
+      {/* Stock Financial Position */}
+      {stats.stockFinancials && (
+        <div>
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Stock Financial Position</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-xs text-blue-700 font-medium mb-1">Invested This Month</p>
+              <p className="text-xl font-bold text-blue-900">KES {Math.round(stats.stockFinancials.investedThisMonth).toLocaleString()}</p>
+              <p className="text-xs text-blue-600">Paid stock receipts</p>
+            </div>
+            <div className={`rounded-lg p-3 border ${stats.stockFinancials.totalOwedToSuppliers > 0 ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200'}`}>
+              <p className={`text-xs font-medium mb-1 ${stats.stockFinancials.totalOwedToSuppliers > 0 ? 'text-amber-700' : 'text-gray-700'}`}>Owed to Suppliers</p>
+              <p className={`text-xl font-bold ${stats.stockFinancials.totalOwedToSuppliers > 0 ? 'text-amber-900' : 'text-gray-900'}`}>
+                KES {Math.round(stats.stockFinancials.totalOwedToSuppliers).toLocaleString()}
+              </p>
+              <p className={`text-xs ${stats.stockFinancials.totalOwedToSuppliers > 0 ? 'text-amber-600' : 'text-gray-500'}`}>Unpaid receipts</p>
+            </div>
+            <div className={`rounded-lg p-3 border ${stats.stockFinancials.totalAdvancesOut > 0 ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200'}`}>
+              <p className={`text-xs font-medium mb-1 ${stats.stockFinancials.totalAdvancesOut > 0 ? 'text-purple-700' : 'text-gray-700'}`}>Advances Out</p>
+              <p className={`text-xl font-bold ${stats.stockFinancials.totalAdvancesOut > 0 ? 'text-purple-900' : 'text-gray-900'}`}>
+                KES {Math.round(stats.stockFinancials.totalAdvancesOut).toLocaleString()}
+              </p>
+              <p className={`text-xs ${stats.stockFinancials.totalAdvancesOut > 0 ? 'text-purple-600' : 'text-gray-500'}`}>Awaiting delivery</p>
+            </div>
+            <div className={`rounded-lg p-3 border ${stats.stockFinancials.netSupplierPosition > 0 ? 'bg-red-50 border-red-200' : stats.stockFinancials.netSupplierPosition < 0 ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+              <p className={`text-xs font-medium mb-1 ${stats.stockFinancials.netSupplierPosition > 0 ? 'text-red-700' : stats.stockFinancials.netSupplierPosition < 0 ? 'text-green-700' : 'text-gray-700'}`}>Net Supplier Position</p>
+              <p className={`text-xl font-bold ${stats.stockFinancials.netSupplierPosition > 0 ? 'text-red-900' : stats.stockFinancials.netSupplierPosition < 0 ? 'text-green-900' : 'text-gray-900'}`}>
+                KES {Math.abs(Math.round(stats.stockFinancials.netSupplierPosition)).toLocaleString()}
+              </p>
+              <p className={`text-xs ${stats.stockFinancials.netSupplierPosition > 0 ? 'text-red-600' : stats.stockFinancials.netSupplierPosition < 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                {stats.stockFinancials.netSupplierPosition > 0 ? 'You owe more' : stats.stockFinancials.netSupplierPosition < 0 ? 'Suppliers owe you goods' : 'Balanced'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Charts + Recent */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -338,6 +375,25 @@ export default function DashboardPage() {
                 <span className="text-sm text-muted-foreground">Low Stock</span>
                 <Badge variant={stats.products.lowStockItems > 0 ? 'destructive' : 'secondary'}>{stats.products.lowStockItems}</Badge>
               </div>
+              {stats.recentPeriod.grossProfit !== undefined && (
+                <>
+                  <Separator />
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">COGS ({period}d)</span>
+                    <span className="font-semibold text-red-600">KES {Math.round(stats.recentPeriod.costOfGoodsSold).toLocaleString()}</span>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Gross Profit ({period}d)</span>
+                    <span className={`font-bold ${stats.recentPeriod.grossProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      KES {Math.round(stats.recentPeriod.grossProfit).toLocaleString()}
+                      <span className="ml-1 text-xs font-normal text-muted-foreground">
+                        ({stats.recentPeriod.grossMarginPct}%)
+                      </span>
+                    </span>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 

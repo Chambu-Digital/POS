@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
-import { generatePurchaseOrders, generatePONumber } from '@/lib/restocking/po-generator'
+import { generateRFQ, generateRFQNumber } from '@/lib/restocking/po-generator'
 import type { BasketItem } from '@/lib/restocking/basket'
 
 export async function POST(request: NextRequest) {
@@ -14,10 +14,9 @@ export async function POST(request: NextRequest) {
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
     const body = await request.json()
-    const { basketItems, notes, restockPlanId } = body as {
+    const { basketItems, notes } = body as {
       basketItems: BasketItem[]
       notes?: string
-      restockPlanId?: string
     }
 
     if (!basketItems || basketItems.length === 0) {
@@ -27,56 +26,51 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Generate POs grouped by supplier
-    const poTemplates = generatePurchaseOrders(basketItems, notes || '')
+    // Generate single RFQ (no supplier grouping)
+    const rfqTemplate = generateRFQ(basketItems, notes || '')
 
-    // Get last PO number for this user
-    const lastPO = await models.PurchaseOrder
+    // Get last record number for this user
+    const lastRecord = await models.PurchaseOrder
       .findOne({ userId: ownerId })
       .sort({ createdAt: -1 })
       .select('poNumber')
       .lean()
 
-    let currentPONumber = lastPO?.poNumber || null
-    const createdPOs = []
+    const rfqNumber = generateRFQNumber(lastRecord?.poNumber || null)
 
-    // Create PO documents
-    for (const poTemplate of poTemplates) {
-      currentPONumber = generatePONumber(currentPONumber)
+    // Create the RFQ document
+    const rfq = new models.PurchaseOrder({
+      userId: ownerId,
+      poNumber: rfqNumber,
+      supplierId: rfqTemplate.supplierId,
+      supplierName: rfqTemplate.supplierName,
+      status: 'draft',
+      items: rfqTemplate.items,
+      subtotal: rfqTemplate.subtotal,
+      total: rfqTemplate.total,
+      notes: rfqTemplate.notes,
+      createdBy: payload.userId
+    })
 
-      const po = new models.PurchaseOrder({
-        userId: ownerId,
-        poNumber: currentPONumber,
-        supplierId: poTemplate.supplierId,
-        supplierName: poTemplate.supplierName,
-        status: 'draft',
-        items: poTemplate.items,
-        subtotal: poTemplate.subtotal,
-        total: poTemplate.total,
-        notes: poTemplate.notes,
-        createdBy: payload.userId
-      })
+    await rfq.save()
 
-      await po.save()
-      createdPOs.push(po)
-    }
-
-    // If this was from a restock plan, link the POs
-    if (restockPlanId) {
-      await models.RestockPlan.findByIdAndUpdate(restockPlanId, {
-        $push: { purchaseOrderIds: { $each: createdPOs.map(po => po._id) } }
-      })
+    // Return the created RFQ with stringified IDs for client use
+    const serializedRFQ = {
+      ...rfq.toObject(),
+      _id: rfq._id.toString(),
+      userId: rfq.userId.toString(),
+      supplierId: rfq.supplierId?.toString() || null,
+      createdBy: rfq.createdBy?.toString() || null
     }
 
     return NextResponse.json({
       success: true,
-      purchaseOrders: createdPOs,
-      count: createdPOs.length
+      rfq: serializedRFQ
     })
   } catch (error: any) {
-    console.error('Create PO error:', error)
+    console.error('Create RFQ error:', error)
     return NextResponse.json(
-      { error: 'Failed to create purchase orders', details: error.message },
+      { error: 'Failed to create RFQ', details: error.message },
       { status: 500 }
     )
   }
@@ -92,16 +86,8 @@ export async function GET(request: NextRequest) {
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
 
-    const { searchParams } = new URL(request.url)
-    const status = searchParams.get('status')
-    const supplierId = searchParams.get('supplierId')
-
-    const query: any = { userId: ownerId }
-    if (status) query.status = status
-    if (supplierId) query.supplierId = supplierId
-
     const purchaseOrders = await models.PurchaseOrder
-      .find(query)
+      .find({ userId: ownerId })
       .sort({ createdAt: -1 })
       .lean()
       .then(docs => docs.map(doc => ({
@@ -114,9 +100,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ purchaseOrders })
   } catch (error: any) {
-    console.error('List POs error:', error)
+    console.error('List RFQs error:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch purchase orders', details: error.message },
+      { error: 'Failed to fetch RFQs', details: error.message },
       { status: 500 }
     )
   }

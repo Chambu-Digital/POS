@@ -26,7 +26,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
-import { Plus, Trash2, Package, Check, ChevronsUpDown, Layers, ChevronDown, ChevronUp, AlertCircle } from 'lucide-react'
+import { Plus, Trash2, Package, Check, ChevronsUpDown, Layers, ChevronDown, ChevronUp, AlertCircle, ArrowDownToLine } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { QuickAddSupplierDialog } from '@/components/suppliers/quick-add-supplier-dialog'
@@ -73,8 +73,18 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
   const [supplierId, setSupplierId]         = useState('')
   const [supplierOpen, setSupplierOpen]     = useState(false)
   const [quickAddSupplierOpen, setQuickAddSupplierOpen] = useState(false)
+  // Advance linking: if supplier has outstanding prepaid receipts, user can link to one
+  const [advanceReceipts, setAdvanceReceipts] = useState<Array<{ _id: string; receiptNumber: string; totalCost: number }>>([])
+  const [linkedAdvanceId, setLinkedAdvanceId] = useState('')
   const [reference, setReference]           = useState('')
   const [notes, setNotes]                   = useState('')
+  const [paymentStatus, setPaymentStatus]   = useState<'paid' | 'unpaid'>('paid')
+  const [paymentMethod, setPaymentMethod]   = useState('cash')
+  const [selectedBankId, setSelectedBankId]   = useState('')
+  const [selectedCustomMethodId, setSelectedCustomMethodId] = useState('')
+  const [paymentReference, setPaymentReference] = useState('')
+  const [bankProviders, setBankProviders]   = useState<Array<{ _id: string; name: string }>>([])
+  const [customMethods, setCustomMethods]   = useState<Array<{ _id: string; name: string }>>([])
   const [items, setItems]                   = useState<StockInItem[]>([
     { productId: '', productName: '', quantity: 0, unitCost: 0, lotsExpanded: false, lots: [] },
   ])
@@ -88,8 +98,15 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
     } else {
       setSupplierId('')
       setSupplierOpen(false)
+      setAdvanceReceipts([])
+      setLinkedAdvanceId('')
       setReference('')
       setNotes('')
+      setPaymentStatus('paid')
+      setPaymentMethod('cash')
+      setSelectedBankId('')
+      setSelectedCustomMethodId('')
+      setPaymentReference('')
       setItems([{ productId: '', productName: '', quantity: 0, unitCost: 0, lotsExpanded: false, lots: [] }])
       setProductOpenStates({})
     }
@@ -98,9 +115,11 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
   async function fetchInitialData() {
     try {
       setLoadingData(true)
-      const [suppliersRes, productsRes] = await Promise.all([
+      const [suppliersRes, productsRes, bankRes, customRes] = await Promise.all([
         fetch('/api/suppliers'),
         fetch('/api/products'),
+        fetch('/api/bank-providers'),
+        fetch('/api/payment-methods'),
       ])
       if (suppliersRes.ok) {
         const d = await suppliersRes.json()
@@ -109,6 +128,14 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
       if (productsRes.ok) {
         const d = await productsRes.json()
         setProducts(d.products || [])
+      }
+      if (bankRes.ok) {
+        const d = await bankRes.json()
+        setBankProviders(d.providers || [])
+      }
+      if (customRes.ok) {
+        const d = await customRes.json()
+        setCustomMethods(d.methods || [])
       }
     } catch (error) {
       toast.error('Failed to load data')
@@ -225,6 +252,18 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
   function handleQuickAddSupplierSuccess(newSupplier: { _id: string; name: string }) {
     setSuppliers(prev => [...prev, newSupplier])
     setSupplierId(newSupplier._id)
+    fetchAdvancesForSupplier(newSupplier._id)
+  }
+
+  async function fetchAdvancesForSupplier(id: string) {
+    if (!id) { setAdvanceReceipts([]); return }
+    try {
+      const res = await fetch(`/api/stock-receipts?status=prepaid&supplierId=${id}`)
+      if (res.ok) {
+        const data = await res.json()
+        setAdvanceReceipts(data.receipts || [])
+      }
+    } catch { /* silently fail */ }
   }
 
   function calculateTotal() {
@@ -259,10 +298,27 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
 
     setSubmitting(true)
     try {
+      const isCustom = paymentMethod.startsWith('custom:')
+      const normalizedMethod = isCustom ? 'custom' : paymentMethod
+      const resolvedCustomId = isCustom ? paymentMethod.split(':')[1] : selectedCustomMethodId
+      const resolvedCustomName = resolvedCustomId
+        ? customMethods.find(m => m._id === resolvedCustomId)?.name || ''
+        : ''
+      const resolvedBankName = selectedBankId
+        ? bankProviders.find(b => b._id === selectedBankId)?.name || ''
+        : ''
+
       const payload = {
         supplierId,
         reference,
         notes,
+        paymentStatus,
+        paymentMethod: paymentStatus === 'paid' ? normalizedMethod : '',
+        bankProviderId: paymentStatus === 'paid' && normalizedMethod === 'bank' ? selectedBankId : '',
+        bankProviderName: paymentStatus === 'paid' && normalizedMethod === 'bank' ? resolvedBankName : '',
+        customMethodId: paymentStatus === 'paid' && normalizedMethod === 'custom' ? resolvedCustomId : '',
+        customMethodName: paymentStatus === 'paid' && normalizedMethod === 'custom' ? resolvedCustomName : '',
+        paymentReference: paymentStatus === 'paid' ? paymentReference : '',
         items: validItems.map(item => {
           const product = getProduct(item.productId)
           const base = {
@@ -278,18 +334,38 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
         }),
       }
 
-      const response = await fetch('/api/inventory/stock-in', {
+      // If linked to an advance, use the receive endpoint instead
+      const endpoint = linkedAdvanceId
+        ? `/api/stock-receipts/${linkedAdvanceId}/receive`
+        : '/api/inventory/stock-in'
+
+      const response = await fetch(endpoint, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(payload),
+        body:    linkedAdvanceId
+          ? JSON.stringify({
+              items: validItems.map(item => ({
+                productId: item.productId,
+                quantity:  item.quantity,
+                unitCost:  item.unitCost,
+              })),
+              notes,
+            })
+          : JSON.stringify(payload),
       })
 
       if (response.ok) {
         const data = await response.json()
-        const batchMsg = data.batchesCreated?.length
-          ? ` (${data.batchesCreated.length} lot${data.batchesCreated.length !== 1 ? 's' : ''} created)`
-          : ''
-        toast.success(`Stock received: ${data.itemCount} item${data.itemCount !== 1 ? 's' : ''} from ${data.supplier}${batchMsg}`)
+        if (linkedAdvanceId) {
+          toast.success(`Goods received against advance ${data.receiptNumber}`)
+        } else {
+          const batchMsg = data.batchesCreated?.length
+            ? ` (${data.batchesCreated.length} lot${data.batchesCreated.length !== 1 ? 's' : ''} created)`
+            : ''
+          const receiptMsg = data.receiptNumber ? ` · ${data.receiptNumber}` : ''
+          const payMsg = data.paymentStatus === 'unpaid' ? ' · on credit' : ''
+          toast.success(`Stock received: ${data.itemCount} item${data.itemCount !== 1 ? 's' : ''} from ${data.supplier}${batchMsg}${receiptMsg}${payMsg}`)
+        }
         onOpenChange(false)
         onSuccess()
       } else {
@@ -346,7 +422,7 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
                         <CommandGroup>
                           {suppliers.map(s => (
                             <CommandItem key={s._id} value={s.name}
-                              onSelect={() => { setSupplierId(s._id); setSupplierOpen(false) }}>
+                              onSelect={() => { setSupplierId(s._id); setSupplierOpen(false); fetchAdvancesForSupplier(s._id); setLinkedAdvanceId('') }}>
                               <Check className={cn('mr-2 h-4 w-4', supplierId === s._id ? 'opacity-100' : 'opacity-0')} />
                               {s.name}
                             </CommandItem>
@@ -363,12 +439,134 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
               </div>
             </div>
 
+            {/* Advance linking — only shown when supplier has outstanding advances */}
+            {advanceReceipts.length > 0 && (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-medium text-purple-800 flex items-center gap-1.5">
+                  <ArrowDownToLine size={12} />
+                  This supplier has {advanceReceipts.length} outstanding advance{advanceReceipts.length !== 1 ? 's' : ''}. Apply these goods to one?
+                </p>
+                <select
+                  value={linkedAdvanceId}
+                  onChange={e => setLinkedAdvanceId(e.target.value)}
+                  className="w-full h-9 px-3 border rounded-md text-sm bg-background"
+                >
+                  <option value="">No — create a new stock receipt</option>
+                  {advanceReceipts.map(adv => (
+                    <option key={adv._id} value={adv._id}>
+                      {adv.receiptNumber} — KES {Math.round(adv.totalCost).toLocaleString()} advance
+                    </option>
+                  ))}
+                </select>
+                {linkedAdvanceId && (
+                  <p className="text-xs text-purple-600">
+                    Goods received will be linked to this advance and marked as settled.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Reference */}
             <div>
               <Label htmlFor="reference">Reference / Invoice No.</Label>
               <Input id="reference" value={reference}
                 onChange={e => setReference(e.target.value)}
                 placeholder="INV-2024-001" className="mt-1" />
+            </div>
+
+            {/* Payment */}
+            <div className="space-y-3">
+              <div>
+                <Label>Payment</Label>
+                <div className="flex gap-2 mt-1">
+                  <Button
+                    type="button"
+                    variant={paymentStatus === 'paid' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setPaymentStatus('paid')}
+                  >
+                    Paid
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={paymentStatus === 'unpaid' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setPaymentStatus('unpaid')}
+                  >
+                    On Credit
+                  </Button>
+                </div>
+              </div>
+              {paymentStatus === 'paid' && (
+                <div className="space-y-3">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Method</Label>
+                    <select
+                      value={paymentMethod}
+                      onChange={e => {
+                        setPaymentMethod(e.target.value)
+                        setSelectedBankId('')
+                        if (!e.target.value.startsWith('custom:')) setSelectedCustomMethodId('')
+                      }}
+                      className="w-full h-9 px-3 border rounded-md text-sm mt-1 bg-background"
+                    >
+                      <optgroup label="Standard Methods">
+                        <option value="cash">Cash</option>
+                        <option value="mobile_money">M-Pesa / Mobile Money</option>
+                        <option value="card">Card</option>
+                        {bankProviders.length > 0 && <option value="bank">Bank Transfer</option>}
+                      </optgroup>
+                      {customMethods.length > 0 && (
+                        <optgroup label="Custom Methods">
+                          {customMethods.map(m => (
+                            <option key={m._id} value={`custom:${m._id}`}>{m.name}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+                  {paymentMethod === 'bank' && (
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Bank</Label>
+                      <select
+                        value={selectedBankId}
+                        onChange={e => setSelectedBankId(e.target.value)}
+                        className="w-full h-9 px-3 border rounded-md text-sm mt-1 bg-background"
+                      >
+                        <option value="">Select bank…</option>
+                        {bankProviders.map(b => (
+                          <option key={b._id} value={b._id}>{b.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Reference (optional)</Label>
+                    <Input
+                      value={paymentReference}
+                      onChange={e => setPaymentReference(e.target.value)}
+                      placeholder="MPESA code, receipt no."
+                      className="mt-1"
+                    />
+                  </div>
+                </div>
+              )}
+              {paymentStatus === 'unpaid' && (
+                <p className="text-xs text-muted-foreground">
+                  Payment will be recorded later. You can settle this from the Payables section in Suppliers.
+                </p>
+              )}
+            </div>
+
+            {/* Grand total + payment summary */}
+            <div className="flex items-center justify-between border-t pt-3">
+              <span className="text-sm font-medium">Total Cost</span>
+              <div className="text-right">
+                <span className="text-lg font-bold">{calculateTotal().toLocaleString()}</span>
+                <span className="text-xs text-muted-foreground ml-2">
+                  {paymentStatus === 'paid' ? '(paid)' : '(on credit)'}
+                </span>
+              </div>
             </div>
 
             {/* Products */}

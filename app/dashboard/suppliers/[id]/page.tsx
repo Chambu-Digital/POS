@@ -1,17 +1,28 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useRouter, useParams } from 'next/navigation'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ArrowLeft, Edit2, Package, History, FileText } from 'lucide-react'
+import {
+  ArrowLeft,
+  Loader2,
+  CreditCard,
+  Package,
+  CheckCircle2,
+  Clock,
+  ArrowDownToLine,
+  Phone,
+  Mail,
+  MapPin,
+  FileText,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
+import { PayablesCard } from '@/components/inventory/payables-card'
 
-interface Supplier {
+interface SupplierDetail {
   _id: string
   name: string
   contactPerson?: string
@@ -22,62 +33,68 @@ interface Supplier {
   isActive: boolean
 }
 
-interface PurchaseHistoryItem {
+interface Balance {
+  totalOwed: number
+  totalAdvances: number
+  totalPurchased: number
+  netPosition: number
+}
+
+interface ReceiptRow {
   _id: string
-  timestamp: string
+  receiptNumber: string
+  date: string
+  paidAt: string | null
+  paymentStatus: 'paid' | 'unpaid' | 'prepaid'
+  paymentMethod: string
+  paymentReference: string
+  itemCount: number
+  totalUnits: number
+  totalCost: number
   reference: string
-  quantity: number
-  unitCost?: number
-  totalCost?: number
-  productId?: {
-    _id: string
-    productName: string
-  }
+  notes: string
 }
 
-interface Stats {
-  totalPurchases: number
-  totalValue: number
-  productsSupplied: number
+function formatKES(amount: number) {
+  return `KES ${Math.round(amount).toLocaleString('en-KE')}`
 }
 
-export default function SupplierDetailPage() {
-  return (
-    <PermissionGuard requiredPermission="core.suppliers">
-      <SupplierDetailPageContent />
-    </PermissionGuard>
-  )
+function statusBadge(status: ReceiptRow['paymentStatus']) {
+  if (status === 'paid')    return <Badge className="bg-green-100 text-green-800 border-green-200">Paid</Badge>
+  if (status === 'unpaid')  return <Badge className="bg-amber-100 text-amber-800 border-amber-200">Unpaid</Badge>
+  if (status === 'prepaid') return <Badge className="bg-purple-100 text-purple-800 border-purple-200">Advance</Badge>
+  return <Badge>{status}</Badge>
 }
 
-function SupplierDetailPageContent() {
-  const params = useParams()
+function SupplierDetailContent() {
   const router = useRouter()
-  const [supplier, setSupplier] = useState<Supplier | null>(null)
-  const [purchaseHistory, setPurchaseHistory] = useState<PurchaseHistoryItem[]>([])
-  const [stats, setStats] = useState<Stats>({ totalPurchases: 0, totalValue: 0, productsSupplied: 0 })
+  const params = useParams()
+  const id = params?.id as string
+
+  const [supplier, setSupplier] = useState<SupplierDetail | null>(null)
+  const [balance, setBalance] = useState<Balance | null>(null)
+  const [receipts, setReceipts] = useState<ReceiptRow[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (params.id) {
-      fetchSupplierDetails()
-    }
-  }, [params.id])
+    if (id) fetchSupplier()
+  }, [id])
 
-  async function fetchSupplierDetails() {
+  async function fetchSupplier() {
+    setLoading(true)
     try {
-      const response = await fetch(`/api/suppliers/${params.id}`)
-      if (response.ok) {
-        const data = await response.json()
+      const res = await fetch(`/api/suppliers/${id}`)
+      if (res.ok) {
+        const data = await res.json()
         setSupplier(data.supplier)
-        setPurchaseHistory(data.purchaseHistory || [])
-        setStats(data.stats || { totalPurchases: 0, totalValue: 0, productsSupplied: 0 })
-      } else if (response.status === 404) {
+        setBalance(data.balance)
+        setReceipts(data.receipts)
+      } else {
         toast.error('Supplier not found')
-        router.push('/dashboard/retail/suppliers')
+        router.push('/dashboard/suppliers')
       }
     } catch (error) {
-      toast.error('Failed to load supplier details')
-      console.error(error)
+      console.error('Failed to fetch supplier:', error)
     } finally {
       setLoading(false)
     }
@@ -85,253 +102,183 @@ function SupplierDetailPageContent() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[calc(100vh-200px)]">
-        <div className="text-center">Loading supplier details...</div>
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
-  if (!supplier) {
-    return null
-  }
+  if (!supplier || !balance) return null
 
-  // Group products from purchase history
-  const productsList = purchaseHistory.reduce((acc: any[], item) => {
-    if (!item.productId) return acc
-    
-    const existing = acc.find(p => p.productId === item.productId._id)
-    if (existing) {
-      existing.totalQuantity += item.quantity
-      existing.totalCost += item.totalCost || 0
-      existing.lastPurchase = item.timestamp
-    } else {
-      acc.push({
-        productId: item.productId._id,
-        productName: item.productId.productName,
-        totalQuantity: item.quantity,
-        totalCost: item.totalCost || 0,
-        lastPurchase: item.timestamp,
-        lastCost: item.unitCost || 0,
-      })
-    }
-    return acc
-  }, [])
+  const unpaid   = receipts.filter(r => r.paymentStatus === 'unpaid')
+  const prepaid  = receipts.filter(r => r.paymentStatus === 'prepaid')
+  const paid     = receipts.filter(r => r.paymentStatus === 'paid')
 
   return (
-    <div className="space-y-8">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="space-y-2">
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => router.push('/dashboard/retail/suppliers')}
+            onClick={() => router.push('/dashboard/suppliers')}
           >
-            <ArrowLeft size={16} className="mr-2" />
-            Back
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Suppliers
           </Button>
           <div>
-            <h1 className="text-3xl font-bold">{supplier.name}</h1>
-            <p className="text-muted-foreground mt-1">Supplier Details</p>
+            <h1 className="text-xl font-bold">{supplier.name}</h1>
+            {!supplier.isActive && (
+              <Badge variant="secondary" className="mt-1">Inactive</Badge>
+            )}
           </div>
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={() => router.push(`/dashboard/retail/suppliers?edit=${supplier._id}`)}
-          >
-            <Edit2 size={16} className="mr-2" />
-            Edit Supplier
-          </Button>
+      </div>
+
+      {/* Supplier Info */}
+      <div className="bg-white rounded-lg border p-4">
+        <h3 className="text-sm font-semibold text-green-700 mb-3">Contact Information</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+          {supplier.contactPerson && (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <span className="font-medium text-foreground">{supplier.contactPerson}</span>
+            </div>
+          )}
+          {supplier.phone && (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Phone className="h-3.5 w-3.5" />
+              <span>{supplier.phone}</span>
+            </div>
+          )}
+          {supplier.email && (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Mail className="h-3.5 w-3.5" />
+              <span>{supplier.email}</span>
+            </div>
+          )}
+          {supplier.address && (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <MapPin className="h-3.5 w-3.5" />
+              <span>{supplier.address}</span>
+            </div>
+          )}
+          {!supplier.contactPerson && !supplier.phone && !supplier.email && !supplier.address && (
+            <p className="text-muted-foreground col-span-2">No contact information recorded.</p>
+          )}
+        </div>
+        {supplier.notes && (
+          <p className="text-xs text-muted-foreground mt-3 border-t pt-3">{supplier.notes}</p>
+        )}
+      </div>
+
+      {/* Balance Summary */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <p className="text-xs text-blue-700 font-medium mb-1">Total Purchased</p>
+          <p className="text-xl font-bold text-blue-900">{formatKES(balance.totalPurchased)}</p>
+          <p className="text-xs text-blue-600">{paid.length} receipt{paid.length !== 1 ? 's' : ''}</p>
+        </div>
+        <div className={`rounded-lg p-3 border ${balance.totalOwed > 0 ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200'}`}>
+          <p className={`text-xs font-medium mb-1 ${balance.totalOwed > 0 ? 'text-amber-700' : 'text-gray-700'}`}>Owed</p>
+          <p className={`text-xl font-bold ${balance.totalOwed > 0 ? 'text-amber-900' : 'text-gray-900'}`}>{formatKES(balance.totalOwed)}</p>
+          <p className={`text-xs ${balance.totalOwed > 0 ? 'text-amber-600' : 'text-gray-500'}`}>{unpaid.length} unpaid</p>
+        </div>
+        <div className={`rounded-lg p-3 border ${balance.totalAdvances > 0 ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200'}`}>
+          <p className={`text-xs font-medium mb-1 ${balance.totalAdvances > 0 ? 'text-purple-700' : 'text-gray-700'}`}>Advances Out</p>
+          <p className={`text-xl font-bold ${balance.totalAdvances > 0 ? 'text-purple-900' : 'text-gray-900'}`}>{formatKES(balance.totalAdvances)}</p>
+          <p className={`text-xs ${balance.totalAdvances > 0 ? 'text-purple-600' : 'text-gray-500'}`}>{prepaid.length} pending delivery</p>
+        </div>
+        <div className={`rounded-lg p-3 border ${balance.netPosition > 0 ? 'bg-red-50 border-red-200' : balance.netPosition < 0 ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+          <p className={`text-xs font-medium mb-1 ${balance.netPosition > 0 ? 'text-red-700' : balance.netPosition < 0 ? 'text-green-700' : 'text-gray-700'}`}>Net Position</p>
+          <p className={`text-xl font-bold ${balance.netPosition > 0 ? 'text-red-900' : balance.netPosition < 0 ? 'text-green-900' : 'text-gray-900'}`}>
+            {formatKES(Math.abs(balance.netPosition))}
+          </p>
+          <p className={`text-xs ${balance.netPosition > 0 ? 'text-red-600' : balance.netPosition < 0 ? 'text-green-600' : 'text-gray-500'}`}>
+            {balance.netPosition > 0 ? 'You owe' : balance.netPosition < 0 ? 'They owe goods' : 'Clear'}
+          </p>
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Purchases</CardTitle>
-            <History className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.totalPurchases}</div>
-            <p className="text-xs text-muted-foreground">Stock-in orders</p>
-          </CardContent>
-        </Card>
+      {/* Payables card for this supplier — handles pay + record advance */}
+      <PayablesCard onPaymentRecorded={fetchSupplier} />
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Value</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">KSh {stats.totalValue.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground">All-time purchases</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Products Supplied</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.productsSupplied}</div>
-            <p className="text-xs text-muted-foreground">Unique products</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Tabs */}
-      <Tabs defaultValue="info" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="info">Information</TabsTrigger>
-          <TabsTrigger value="history">Purchase History</TabsTrigger>
-          <TabsTrigger value="products">Products</TabsTrigger>
-        </TabsList>
-
-        {/* Information Tab */}
-        <TabsContent value="info" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Supplier Information</CardTitle>
-              <CardDescription>Contact and business details</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Contact Person</p>
-                  <p className="text-base">{supplier.contactPerson || '-'}</p>
+      {/* Transaction history */}
+      {receipts.length > 0 && (
+        <div className="bg-white rounded-lg border p-4">
+          <h3 className="text-sm font-semibold text-green-700 mb-3">Transaction History</h3>
+          <div className="space-y-2">
+            {receipts.map((r) => (
+              <div key={r._id} className="flex items-center justify-between gap-3 border rounded-lg p-3 hover:bg-muted/30 transition-colors">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-medium text-sm">{r.receiptNumber}</p>
+                    {statusBadge(r.paymentStatus)}
+                    {r.paymentStatus === 'prepaid' && (
+                      <span className="flex items-center gap-1 text-xs text-purple-600">
+                        <ArrowDownToLine className="h-3 w-3" />
+                        Goods pending
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </span>
+                    {r.itemCount > 0 && (
+                      <span className="flex items-center gap-1">
+                        <Package className="h-3 w-3" />
+                        {r.itemCount} items · {r.totalUnits} units
+                      </span>
+                    )}
+                    {r.paymentMethod && (
+                      <span className="flex items-center gap-1">
+                        <CreditCard className="h-3 w-3" />
+                        {r.paymentMethod}
+                        {r.paymentReference && ` · ${r.paymentReference}`}
+                      </span>
+                    )}
+                    {r.paidAt && r.paymentStatus === 'paid' && r.date !== r.paidAt && (
+                      <span className="text-green-600 flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3" />
+                        Paid {new Date(r.paidAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                      </span>
+                    )}
+                    {r.reference && (
+                      <span className="flex items-center gap-1">
+                        <FileText className="h-3 w-3" />
+                        {r.reference}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Phone</p>
-                  <p className="text-base">{supplier.phone || '-'}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Email</p>
-                  <p className="text-base">{supplier.email || '-'}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Status</p>
-                  <Badge variant={supplier.isActive ? 'default' : 'secondary'}>
-                    {supplier.isActive ? 'Active' : 'Inactive'}
-                  </Badge>
+                <div className="text-right shrink-0">
+                  <p className="font-bold text-sm">{formatKES(r.totalCost)}</p>
                 </div>
               </div>
-              
-              {supplier.address && (
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Address</p>
-                  <p className="text-base">{supplier.address}</p>
-                </div>
-              )}
+            ))}
+          </div>
+        </div>
+      )}
 
-              {supplier.notes && (
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Notes</p>
-                  <p className="text-base whitespace-pre-wrap">{supplier.notes}</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Purchase History Tab */}
-        <TabsContent value="history" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Purchase History</CardTitle>
-              <CardDescription>Stock received from this supplier</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {purchaseHistory.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  No purchase history yet
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Product</TableHead>
-                        <TableHead>Reference</TableHead>
-                        <TableHead>Quantity</TableHead>
-                        <TableHead>Unit Cost</TableHead>
-                        <TableHead>Total</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {purchaseHistory.map((item) => (
-                        <TableRow key={item._id}>
-                          <TableCell>
-                            {new Date(item.timestamp).toLocaleDateString()}
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            {item.productId?.productName || 'Unknown'}
-                          </TableCell>
-                          <TableCell>{item.reference || '-'}</TableCell>
-                          <TableCell>{item.quantity}</TableCell>
-                          <TableCell>
-                            {item.unitCost ? `KSh ${item.unitCost.toLocaleString()}` : '-'}
-                          </TableCell>
-                          <TableCell className="font-semibold">
-                            {item.totalCost ? `KSh ${item.totalCost.toLocaleString()}` : '-'}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Products Tab */}
-        <TabsContent value="products" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Products Supplied</CardTitle>
-              <CardDescription>Products purchased from this supplier</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {productsList.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  No products yet
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Product</TableHead>
-                        <TableHead>Total Quantity</TableHead>
-                        <TableHead>Total Value</TableHead>
-                        <TableHead>Last Cost</TableHead>
-                        <TableHead>Last Purchase</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {productsList.map((product) => (
-                        <TableRow key={product.productId}>
-                          <TableCell className="font-medium">{product.productName}</TableCell>
-                          <TableCell>{product.totalQuantity}</TableCell>
-                          <TableCell>KSh {product.totalCost.toLocaleString()}</TableCell>
-                          <TableCell>KSh {product.lastCost.toLocaleString()}</TableCell>
-                          <TableCell>
-                            {new Date(product.lastPurchase).toLocaleDateString()}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      {receipts.length === 0 && (
+        <div className="bg-white rounded-lg border p-8 text-center">
+          <Package className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
+          <p className="text-sm font-medium">No transactions yet</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Stock received from this supplier will appear here.
+          </p>
+        </div>
+      )}
     </div>
+  )
+}
+
+export default function SupplierDetailPage() {
+  return (
+    <PermissionGuard requiredPermission="core.suppliers">
+      <SupplierDetailContent />
+    </PermissionGuard>
   )
 }

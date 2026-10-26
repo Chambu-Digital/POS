@@ -320,9 +320,111 @@ export async function GET(request: NextRequest) {
     const totalExpenses = expensesFormatted.reduce((sum, exp) => sum + exp.amount, 0)
     const pendingExpensesTotal = pendingExpenses.reduce((sum, exp) => sum + exp.amount, 0)
 
+    // Build per-method expense totals so the payment summary can show deductions
+    const expensesByMethod = new Map<string, number>()
+    for (const exp of expensesFormatted) {
+      const method = exp.paymentMethod || 'N/A'
+      expensesByMethod.set(method, (expensesByMethod.get(method) || 0) + exp.amount)
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
-    // 8. BUILD SUMMARY
+    // 8. STOCK RECEIPTS — purchases paid, payables settled, advances made today
     // ─────────────────────────────────────────────────────────────────────────
+    const stockReceiptsToday = await (models as any).StockReceipt.find({
+      userId: ownerId,
+      ...(branchContext ? { branchId: branchContext } : {}),
+      $or: [
+        // Goods received and paid today (pay on receipt)
+        { paymentStatus: 'paid', date: { $gte: startOfDay, $lte: endOfDay }, 'items.0': { $exists: true } },
+        // Payables settled today (paidAt is today)
+        { paymentStatus: 'paid', paidAt: { $gte: startOfDay, $lte: endOfDay }, 'items.0': { $exists: true } },
+        // Advances paid today
+        { paymentStatus: 'prepaid', paidAt: { $gte: startOfDay, $lte: endOfDay } },
+      ]
+    }).lean()
+
+    // Bucket into three categories
+    const stockPurchasesPayNow = stockReceiptsToday.filter((r: any) =>
+      r.paymentStatus === 'paid' &&
+      r.items?.length > 0 &&
+      r.paidAt && new Date(r.paidAt) >= startOfDay && new Date(r.paidAt) <= endOfDay &&
+      r.date && new Date(r.date) >= startOfDay && new Date(r.date) <= endOfDay
+    )
+
+    const supplierPaymentsSettled = stockReceiptsToday.filter((r: any) =>
+      r.paymentStatus === 'paid' &&
+      r.items?.length > 0 &&
+      r.paidAt && new Date(r.paidAt) >= startOfDay && new Date(r.paidAt) <= endOfDay &&
+      r.date && !(new Date(r.date) >= startOfDay && new Date(r.date) <= endOfDay)
+    )
+
+    const advancesPayments = stockReceiptsToday.filter((r: any) =>
+      r.paymentStatus === 'prepaid'
+    )
+
+    const resolveReceiptMethodName = (r: any): string => {
+      if (r.paymentMethod === 'cash') return 'Cash'
+      if (r.paymentMethod === 'mobile_money') return 'M-Pesa'
+      if (r.paymentMethod === 'bank' && r.bankProviderName) return r.bankProviderName
+      if (r.paymentMethod === 'custom' && r.customMethodName) return r.customMethodName
+      return r.paymentMethod || 'Cash'
+    }
+
+    const formatReceiptRow = (r: any) => ({
+      _id: r._id.toString(),
+      receiptNumber: r.receiptNumber,
+      supplierName: r.supplierName,
+      itemCount: r.items?.length || 0,
+      totalCost: r.totalCost,
+      paymentMethod: resolveReceiptMethodName(r),
+      paymentReference: r.paymentReference || '',
+      date: r.date,
+      paidAt: r.paidAt,
+    })
+
+    const totalStockPurchasesPaid = stockPurchasesPayNow.reduce((sum: number, r: any) => sum + r.totalCost, 0)
+    const totalSupplierPayments = supplierPaymentsSettled.reduce((sum: number, r: any) => sum + r.totalCost, 0)
+    const totalAdvances = advancesPayments.reduce((sum: number, r: any) => sum + r.totalCost, 0)
+
+    // Outstanding payables and advances (scoped to branch if active)
+    const allUnpaid = await (models as any).StockReceipt.find({
+      userId: ownerId,
+      ...(branchContext ? { branchId: branchContext } : {}),
+      paymentStatus: 'unpaid',
+    }).select('totalCost').lean()
+
+    const allPrepaid = await (models as any).StockReceipt.find({
+      userId: ownerId,
+      ...(branchContext ? { branchId: branchContext } : {}),
+      paymentStatus: 'prepaid',
+    }).select('totalCost').lean()
+
+    const totalOutstandingPayables = allUnpaid.reduce((sum: number, r: any) => sum + r.totalCost, 0)
+    const totalOutstandingAdvances = allPrepaid.reduce((sum: number, r: any) => sum + r.totalCost, 0)
+
+    // Total cash out for stock today (all three categories)
+    const totalStockCashOut = totalStockPurchasesPaid + totalSupplierPayments + totalAdvances
+
+    // Build per-method stock-out totals (all three buckets combined)
+    const stockOutByMethod = new Map<string, number>()
+    for (const r of stockReceiptsToday) {
+      const method = resolveReceiptMethodName(r)
+      stockOutByMethod.set(method, (stockOutByMethod.get(method) || 0) + (r.totalCost || 0))
+    }
+
+    // Build per-method net totals: collected - expenses - stockOut
+    const allOutflowMethods = new Set([
+      ...Array.from(totalsByMethod.keys()),
+      ...Array.from(expensesByMethod.keys()),
+      ...Array.from(stockOutByMethod.keys()),
+    ])
+    const netByMethod: Record<string, number> = {}
+    for (const method of allOutflowMethods) {
+      const collected = totalsByMethod.get(method) || 0
+      const expOut = expensesByMethod.get(method) || 0
+      const stockOut = stockOutByMethod.get(method) || 0
+      netByMethod[method] = collected - expOut - stockOut
+    }
     const totalSales = sales.length
     const totalSalesAmount = sales.reduce((sum, sale) => sum + sale.total, 0)
     const totalCreditIssued = sales
@@ -351,13 +453,26 @@ export async function GET(request: NextRequest) {
         totalCreditIssued,
         totalExpenses,
         pendingExpensesCount: pendingExpenses.length,
-        pendingExpensesTotal
+        pendingExpensesTotal,
+        // Stock cash out
+        totalStockCashOut,
+        totalStockPurchasesPaid,
+        totalSupplierPayments,
+        totalAdvances,
+        // Net cash (in - expenses - stock out)
+        netCash: totalCollected - totalExpenses - totalStockCashOut,
+        // Outstanding balances
+        totalOutstandingPayables,
+        totalOutstandingAdvances,
       },
       paymentMethods: {
         methods: paymentMethodsArray,
         employeeBreakdown,
         totalsByMethod: Object.fromEntries(totalsByMethod),
-        grandTotal
+        grandTotal,
+        expensesByMethod: Object.fromEntries(expensesByMethod),
+        stockOutByMethod: Object.fromEntries(stockOutByMethod),
+        netByMethod,
       },
       creditSales: creditSalesFormatted,
       creditPayments: creditPaymentsReceived,
@@ -370,7 +485,11 @@ export async function GET(request: NextRequest) {
         date: exp.date,
         staffId: exp.staffId,
         staffName: exp.staffId ? staffMap.get(exp.staffId.toString()) : 'Owner'
-      }))
+      })),
+      // Stock purchasing section
+      stockPurchases: stockPurchasesPayNow.map(formatReceiptRow),
+      supplierPayments: supplierPaymentsSettled.map(formatReceiptRow),
+      advancePayments: advancesPayments.map(formatReceiptRow),
     }
 
     return NextResponse.json({ report })

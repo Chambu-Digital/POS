@@ -1,20 +1,19 @@
 // Restock basket item type
+// The basket is a shopping list — items and quantities only.
+// Prices are estimates (from buyingPrice) and get confirmed later
+// at the purchase order level, not in the basket.
 export interface BasketItem {
   moduleItemId: string
   module: string
   itemName: string
   category: string
   quantity: number
-  unitPrice: number
-  totalCost: number
+  unitPrice: number      // estimate from buyingPrice, can be 0
+  totalCost: number      // estimate, can be 0
   supplier: {
     id: string
     name: string
   } | null
-  notes?: string
-  // Track original recommended values for visual diff
-  originalQuantity?: number
-  originalPrice?: number
 }
 
 export interface BasketState {
@@ -34,7 +33,7 @@ export function addToBasket(
   )
 
   if (existingIndex >= 0) {
-    // Update existing item - keep original values
+    // Update existing item — accumulate quantity
     const updated = [...currentBasket]
     updated[existingIndex] = {
       ...updated[existingIndex],
@@ -44,16 +43,13 @@ export function addToBasket(
     return updated
   }
 
-  // Add new item - store original values for diff tracking
+  // Add new item
   return [
     ...currentBasket,
     {
       ...newItem,
       quantity,
-      totalCost: quantity * newItem.unitPrice,
-      originalQuantity: quantity,
-      originalPrice: newItem.unitPrice,
-      notes: newItem.notes || ''
+      totalCost: quantity * newItem.unitPrice
     }
   ]
 }
@@ -74,43 +70,6 @@ export function updateBasketItemQuantity(
         ...item,
         quantity,
         totalCost: quantity * item.unitPrice
-      }
-    }
-    return item
-  })
-}
-
-export function updateBasketItemPrice(
-  basket: BasketItem[],
-  moduleItemId: string,
-  module: string,
-  unitPrice: number
-): BasketItem[] {
-  if (unitPrice < 0) return basket
-
-  return basket.map((item) => {
-    if (item.moduleItemId === moduleItemId && item.module === module) {
-      return {
-        ...item,
-        unitPrice,
-        totalCost: item.quantity * unitPrice
-      }
-    }
-    return item
-  })
-}
-
-export function updateBasketItemNotes(
-  basket: BasketItem[],
-  moduleItemId: string,
-  module: string,
-  notes: string
-): BasketItem[] {
-  return basket.map((item) => {
-    if (item.moduleItemId === moduleItemId && item.module === module) {
-      return {
-        ...item,
-        notes
       }
     }
     return item

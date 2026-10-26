@@ -26,6 +26,13 @@ interface EndOfDayReport {
     totalExpenses: number
     pendingExpensesCount: number
     pendingExpensesTotal: number
+    totalStockCashOut: number
+    totalStockPurchasesPaid: number
+    totalSupplierPayments: number
+    totalAdvances: number
+    netCash: number
+    totalOutstandingPayables: number
+    totalOutstandingAdvances: number
   }
   paymentMethods: {
     methods: string[]
@@ -37,6 +44,9 @@ interface EndOfDayReport {
     }[]
     totalsByMethod: { [key: string]: number }
     grandTotal: number
+    expensesByMethod: { [key: string]: number }
+    stockOutByMethod: { [key: string]: number }
+    netByMethod: { [key: string]: number }
   }
   creditSales: {
     _id: string
@@ -76,6 +86,39 @@ interface EndOfDayReport {
     amount: number
     date: string
     staffName: string
+  }[]
+  stockPurchases: {
+    _id: string
+    receiptNumber: string
+    supplierName: string
+    itemCount: number
+    totalCost: number
+    paymentMethod: string
+    paymentReference: string
+    date: string
+    paidAt: string
+  }[]
+  supplierPayments: {
+    _id: string
+    receiptNumber: string
+    supplierName: string
+    itemCount: number
+    totalCost: number
+    paymentMethod: string
+    paymentReference: string
+    date: string
+    paidAt: string
+  }[]
+  advancePayments: {
+    _id: string
+    receiptNumber: string
+    supplierName: string
+    itemCount: number
+    totalCost: number
+    paymentMethod: string
+    paymentReference: string
+    date: string
+    paidAt: string
   }[]
 }
 
@@ -287,22 +330,55 @@ function EndOfDayReportContent() {
           <div className="bg-white rounded-lg border p-3">
             <h3 className="text-xs font-semibold text-gray-700 mb-2">Payment Methods Summary</h3>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
-              {report.paymentMethods.methods
-                .filter(method => method.toLowerCase() !== 'credit')
-                .map((method) => {
-                const total = report.paymentMethods.totalsByMethod[method] || 0
-                
-                const getMethodColor = (method: string) => {
-                  if (method === 'Cash') return 'bg-gray-50 border-gray-300 text-gray-700'
-                  if (method === 'M-Pesa') return 'bg-green-50 border-green-300 text-green-700'
-                  if (method.includes('Equity') || method.includes('Bank')) return 'bg-blue-50 border-blue-300 text-blue-700'
-                  return 'bg-purple-50 border-purple-300 text-purple-700'
+              {/* Collect all methods that appear in collected, expenses, or stock out */}
+              {Array.from(new Set([
+                ...report.paymentMethods.methods.filter(m => m.toLowerCase() !== 'credit'),
+                ...Object.keys(report.paymentMethods.expensesByMethod || {}),
+                ...Object.keys(report.paymentMethods.stockOutByMethod || {}),
+              ])).sort().map((method) => {
+                const collected  = report.paymentMethods.totalsByMethod[method] || 0
+                const expenses   = (report.paymentMethods.expensesByMethod || {})[method] || 0
+                const stockOut   = (report.paymentMethods.stockOutByMethod || {})[method] || 0
+                const net        = (report.paymentMethods.netByMethod || {})[method] ?? (collected - expenses - stockOut)
+                const hasOutflow = expenses > 0 || stockOut > 0
+
+                const getMethodColor = (m: string) => {
+                  if (m === 'Cash') return { card: 'bg-gray-50 border-gray-300', label: 'text-gray-700', net: net >= 0 ? 'text-gray-900' : 'text-red-700' }
+                  if (m === 'M-Pesa') return { card: 'bg-green-50 border-green-300', label: 'text-green-700', net: net >= 0 ? 'text-green-900' : 'text-red-700' }
+                  if (m.includes('Equity') || m.includes('Bank')) return { card: 'bg-blue-50 border-blue-300', label: 'text-blue-700', net: net >= 0 ? 'text-blue-900' : 'text-red-700' }
+                  return { card: 'bg-purple-50 border-purple-300', label: 'text-purple-700', net: net >= 0 ? 'text-purple-900' : 'text-red-700' }
                 }
 
+                const colors = getMethodColor(method)
+
                 return (
-                  <div key={method} className={`${getMethodColor(method)} border rounded p-2`}>
-                    <p className="text-xs font-medium mb-0.5">{method}</p>
-                    <p className="text-base font-bold">{formatCurrency(total)}</p>
+                  <div key={method} className={`${colors.card} border rounded p-2`}>
+                    <p className={`text-xs font-semibold mb-1 ${colors.label}`}>{method}</p>
+                    {/* Collected */}
+                    <div className="flex items-center justify-between text-xs mb-0.5">
+                      <span className="text-muted-foreground">Collected</span>
+                      <span className="font-medium">{formatCurrency(collected)}</span>
+                    </div>
+                    {/* Expenses deduction — only shown when non-zero */}
+                    {expenses > 0 && (
+                      <div className="flex items-center justify-between text-xs mb-0.5">
+                        <span className="text-red-600">Expenses</span>
+                        <span className="text-red-600 font-medium">− {formatCurrency(expenses)}</span>
+                      </div>
+                    )}
+                    {/* Stock out deduction — only shown when non-zero */}
+                    {stockOut > 0 && (
+                      <div className="flex items-center justify-between text-xs mb-0.5">
+                        <span className="text-red-600">Stock Out</span>
+                        <span className="text-red-600 font-medium">− {formatCurrency(stockOut)}</span>
+                      </div>
+                    )}
+                    {/* Net — always shown; separator only when there were deductions */}
+                    {hasOutflow && <div className="border-t border-current opacity-20 my-1" />}
+                    <div className="flex items-center justify-between">
+                      <span className={`text-xs font-semibold ${colors.label}`}>{hasOutflow ? 'Net' : ''}</span>
+                      <span className={`text-base font-bold ${colors.net}`}>{formatCurrency(net)}</span>
+                    </div>
                   </div>
                 )
               })}
@@ -345,8 +421,8 @@ function EndOfDayReportContent() {
               
               {/* Total Row */}
               <div className="border-2 border-green-200 bg-green-50 rounded p-2 mt-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-sm">Grand Total</span>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold text-sm">Grand Total Collected</span>
                   <span className="font-bold text-base text-green-700">
                     {formatCurrency(
                       report.paymentMethods.methods
@@ -355,6 +431,28 @@ function EndOfDayReportContent() {
                     )}
                   </span>
                 </div>
+                {(report.summary.totalExpenses > 0 || report.summary.totalStockCashOut > 0) && (
+                  <>
+                    {report.summary.totalExpenses > 0 && (
+                      <div className="flex items-center justify-between text-xs text-red-600 mb-0.5">
+                        <span>Less: Expenses</span>
+                        <span className="font-medium">− {formatCurrency(report.summary.totalExpenses)}</span>
+                      </div>
+                    )}
+                    {report.summary.totalStockCashOut > 0 && (
+                      <div className="flex items-center justify-between text-xs text-red-600 mb-0.5">
+                        <span>Less: Stock Cash Out</span>
+                        <span className="font-medium">− {formatCurrency(report.summary.totalStockCashOut)}</span>
+                      </div>
+                    )}
+                    <div className="border-t border-green-300 mt-1 pt-1 flex items-center justify-between">
+                      <span className="font-bold text-sm">Net Cash Position</span>
+                      <span className={`font-bold text-base ${report.summary.netCash >= 0 ? 'text-blue-700' : 'text-red-700'}`}>
+                        {formatCurrency(report.summary.netCash)}
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -479,10 +577,114 @@ function EndOfDayReportContent() {
             </div>
           )}
 
+          {/* Stock Purchases — paid on receipt */}
+          {report.stockPurchases?.length > 0 && (
+            <div className="bg-white rounded-lg border p-3">
+              <h3 className="text-sm font-semibold mb-3 text-red-700">Stock Purchases (Paid Today)</h3>
+              <div className="space-y-2">
+                {report.stockPurchases.map((r) => (
+                  <div key={r._id} className="border border-red-200 rounded p-2 bg-red-50/30">
+                    <div className="flex items-start justify-between mb-1">
+                      <div>
+                        <p className="font-medium text-sm">{r.supplierName}</p>
+                        <p className="text-xs text-muted-foreground">{r.receiptNumber} · {r.itemCount} items</p>
+                      </div>
+                      <p className="font-bold text-sm text-red-700">{formatCurrency(r.totalCost)}</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{r.paymentMethod}{r.paymentReference && ` · ${r.paymentReference}`}</p>
+                  </div>
+                ))}
+                <div className="border-t-2 border-red-200 bg-red-50 rounded p-2 mt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm">Total Stock Paid</span>
+                    <span className="font-bold text-base text-red-700">{formatCurrency(report.summary.totalStockPurchasesPaid)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Supplier Payments — settling old payables */}
+          {report.supplierPayments?.length > 0 && (
+            <div className="bg-white rounded-lg border p-3">
+              <h3 className="text-sm font-semibold mb-3 text-orange-700">Supplier Payments (Settling Credit)</h3>
+              <div className="space-y-2">
+                {report.supplierPayments.map((r) => (
+                  <div key={r._id} className="border border-orange-200 rounded p-2 bg-orange-50/30">
+                    <div className="flex items-start justify-between mb-1">
+                      <div>
+                        <p className="font-medium text-sm">{r.supplierName}</p>
+                        <p className="text-xs text-muted-foreground">{r.receiptNumber}</p>
+                      </div>
+                      <p className="font-bold text-sm text-orange-700">{formatCurrency(r.totalCost)}</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{r.paymentMethod}{r.paymentReference && ` · ${r.paymentReference}`}</p>
+                  </div>
+                ))}
+                <div className="border-t-2 border-orange-200 bg-orange-50 rounded p-2 mt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm">Total Settled</span>
+                    <span className="font-bold text-base text-orange-700">{formatCurrency(report.summary.totalSupplierPayments)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Advance Payments */}
+          {report.advancePayments?.length > 0 && (
+            <div className="bg-white rounded-lg border p-3">
+              <h3 className="text-sm font-semibold mb-3 text-purple-700">Advance Payments (Goods Pending)</h3>
+              <div className="space-y-2">
+                {report.advancePayments.map((r) => (
+                  <div key={r._id} className="border border-purple-200 rounded p-2 bg-purple-50/30">
+                    <div className="flex items-start justify-between mb-1">
+                      <div>
+                        <p className="font-medium text-sm">{r.supplierName}</p>
+                        <p className="text-xs text-muted-foreground">{r.receiptNumber} · goods not yet received</p>
+                      </div>
+                      <p className="font-bold text-sm text-purple-700">{formatCurrency(r.totalCost)}</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{r.paymentMethod}{r.paymentReference && ` · ${r.paymentReference}`}</p>
+                  </div>
+                ))}
+                <div className="border-t-2 border-purple-200 bg-purple-50 rounded p-2 mt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm">Total Advances</span>
+                    <span className="font-bold text-base text-purple-700">{formatCurrency(report.summary.totalAdvances)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Outstanding Balances Awareness */}
+          {(report.summary.totalOutstandingPayables > 0 || report.summary.totalOutstandingAdvances > 0) && (
+            <div className="bg-white rounded-lg border p-3">
+              <h3 className="text-sm font-semibold mb-2 text-gray-700">Outstanding Balances (All Time)</h3>
+              <div className="grid grid-cols-2 gap-3">
+                {report.summary.totalOutstandingPayables > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <p className="text-xs text-amber-700 font-medium mb-1">You Owe Suppliers</p>
+                    <p className="text-xl font-bold text-amber-900">{formatCurrency(report.summary.totalOutstandingPayables)}</p>
+                    <p className="text-xs text-amber-600">Unpaid stock receipts</p>
+                  </div>
+                )}
+                {report.summary.totalOutstandingAdvances > 0 && (
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                    <p className="text-xs text-purple-700 font-medium mb-1">Awaiting Delivery</p>
+                    <p className="text-xl font-bold text-purple-900">{formatCurrency(report.summary.totalOutstandingAdvances)}</p>
+                    <p className="text-xs text-purple-600">Advance payments out</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Net Summary */}
           <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border-2 border-green-200 p-3">
             <h3 className="text-sm font-bold mb-2 text-green-800">Daily Summary</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div>
                 <p className="text-xs text-muted-foreground mb-0.5">Total Money In</p>
                 <p className="text-xl font-bold text-green-700">
@@ -490,15 +692,22 @@ function EndOfDayReportContent() {
                 </p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground mb-0.5">Total Money Out</p>
+                <p className="text-xs text-muted-foreground mb-0.5">Expenses Paid</p>
                 <p className="text-xl font-bold text-red-700">
                   {formatCurrency(report.summary.totalExpenses)}
                 </p>
               </div>
               <div>
+                <p className="text-xs text-muted-foreground mb-0.5">Stock Cash Out</p>
+                <p className="text-xl font-bold text-red-700">
+                  {formatCurrency(report.summary.totalStockCashOut || 0)}
+                </p>
+                <p className="text-xs text-muted-foreground">purchases + payments + advances</p>
+              </div>
+              <div>
                 <p className="text-xs text-muted-foreground mb-0.5">Net Cash Position</p>
-                <p className="text-xl font-bold text-blue-700">
-                  {formatCurrency(report.summary.totalCollected - report.summary.totalExpenses)}
+                <p className={`text-xl font-bold ${(report.summary.netCash ?? (report.summary.totalCollected - report.summary.totalExpenses)) >= 0 ? 'text-blue-700' : 'text-red-700'}`}>
+                  {formatCurrency(report.summary.netCash ?? (report.summary.totalCollected - report.summary.totalExpenses))}
                 </p>
               </div>
             </div>

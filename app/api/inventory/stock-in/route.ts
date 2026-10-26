@@ -1,8 +1,8 @@
 // ─── /api/inventory/stock-in ──────────────────────────────────────────────────
 // Receive stock from suppliers.
-// Creates STOCK_IN movements in ledger and updates product stock.
-// For products with trackLots=true, also creates individual ProductBatch records
-// — one per physical lot (roll, box, carton, etc.) — with a generated lotId.
+// Creates STOCK_IN movements in ledger, updates product stock + buyingPrice,
+// and creates a StockReceipt document for cost + payment tracking.
+// For products with trackLots=true, also creates individual ProductBatch records.
 
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
@@ -15,12 +15,9 @@ interface StockInItem {
   productId: string
   quantity: number
   unitCost: number
-  // Lot-tracked products: optional array of individual lots being received.
-  // If omitted but product.trackLots===true, a single lot is auto-created for
-  // the whole quantity.
   lots?: Array<{
-    label: string      // e.g. "Roll A", "Box 2"  — editable by staff
-    quantity: number   // how much this physical unit contains
+    label: string
+    quantity: number
   }>
 }
 
@@ -29,6 +26,18 @@ function generateLotId(): string {
   const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '') // YYMMDD
   const rand    = Math.random().toString(36).substring(2, 6).toUpperCase()
   return `LOT-${dateStr}-${rand}`
+}
+
+/** Generates a sequential receipt number: SR-YYYY-NNNN */
+function generateReceiptNumber(lastNumber: string | null): string {
+  const currentYear = new Date().getFullYear()
+  if (!lastNumber) return `SR-${currentYear}-0001`
+  const match = lastNumber.match(/^SR-(\d{4})-(\d+)$/)
+  if (!match) return `SR-${currentYear}-0001`
+  const lastYear = parseInt(match[1])
+  const lastNum = parseInt(match[2])
+  if (lastYear < currentYear) return `SR-${currentYear}-0001`
+  return `SR-${currentYear}-${(lastNum + 1).toString().padStart(4, '0')}`
 }
 
 export async function POST(request: NextRequest) {
@@ -42,7 +51,19 @@ export async function POST(request: NextRequest) {
     const staffId     = payload.type === 'staff' ? payload.userId : null
 
     const body = await request.json()
-    const { supplierId, reference, notes, items } = body
+    const {
+      supplierId,
+      reference,
+      notes,
+      items,
+      paymentStatus = 'paid',
+      paymentMethod = '',
+      bankProviderId = '',
+      bankProviderName = '',
+      customMethodId = '',
+      customMethodName = '',
+      paymentReference = '',
+    } = body
 
     // ── Validation ────────────────────────────────────────────────────────────
     if (!supplierId || !items || items.length === 0) {
@@ -70,6 +91,7 @@ export async function POST(request: NextRequest) {
     // ── Process each line item ────────────────────────────────────────────────
     const movements: any[]  = []
     const batchesCreated: any[] = []
+    const receiptItems: any[] = []
     const totalCost = items.reduce(
       (sum: number, item: StockInItem) => sum + item.quantity * item.unitCost, 0
     )
@@ -82,7 +104,16 @@ export async function POST(request: NextRequest) {
       const previousStock = product.stock || 0
       const newStock      = previousStock + item.quantity
 
-      // ── 1. Update aggregate stock counters (unchanged behaviour) ──────────
+      // ── 1. Update stock + buyingPrice ────────────────────────────────────
+      const productUpdate: any = {
+        stock: newStock,
+        updatedAt: new Date(),
+      }
+      // Update buyingPrice to the actual cost paid (if > 0)
+      if (item.unitCost > 0) {
+        productUpdate.buyingPrice = item.unitCost
+      }
+
       if (branchContext) {
         const inventory = await models.ProductInventory.findOne({
           userId: ownerId,
@@ -105,26 +136,18 @@ export async function POST(request: NextRequest) {
           })
         }
 
-        await models.Product.findByIdAndUpdate(productObjId, {
-          stock:     newStock,
-          updatedAt: new Date(),
-        })
+        await models.Product.findByIdAndUpdate(productObjId, productUpdate)
       } else {
-        await models.Product.findByIdAndUpdate(productObjId, {
-          stock:     newStock,
-          updatedAt: new Date(),
-        })
+        await models.Product.findByIdAndUpdate(productObjId, productUpdate)
       }
 
       // ── 2. For lot-tracked products: create ProductBatch records ──────────
       const createdBatchIds: Types.ObjectId[] = []
 
       if (product.trackLots) {
-        // Resolve the effective branch — required for ProductBatch
         let effectiveBranchId: string | null = branchContext
 
         if (!effectiveBranchId) {
-          // Single-branch / legacy tenants: find or create default branch
           let defaultBranch = await models.Branch.findOne({ userId: ownerId, isDefault: true })
           if (!defaultBranch) {
             defaultBranch = await models.Branch.create({
@@ -137,9 +160,6 @@ export async function POST(request: NextRequest) {
           effectiveBranchId = defaultBranch._id.toString()
         }
 
-        // Build the list of lots to create.
-        // If the caller did not supply a lots[] array, auto-create one lot for
-        // the entire received quantity.
         const lotsToCreate: Array<{ label: string; quantity: number }> =
           item.lots && item.lots.length > 0
             ? item.lots
@@ -149,7 +169,6 @@ export async function POST(request: NextRequest) {
           const lot = lotsToCreate[i]
           const lotId = generateLotId()
 
-          // Auto-generate a label when the caller left it blank
           const lotLabel = lot.label?.trim()
             || `Lot ${i + 1} — ${new Date().toLocaleDateString()}`
 
@@ -182,8 +201,6 @@ export async function POST(request: NextRequest) {
       }
 
       // ── 3. Write stock ledger entry ───────────────────────────────────────
-      // For lot-tracked products with a single auto-created batch, link the
-      // ledger entry to that batch for full traceability.
       const singleBatchId =
         product.trackLots && createdBatchIds.length === 1 ? createdBatchIds[0] : undefined
 
@@ -202,9 +219,28 @@ export async function POST(request: NextRequest) {
         totalCost:    item.quantity * item.unitCost,
         reference:    reference || '',
         notes:        notes || '',
-        // lot fields — only populated for lot-tracked products
         ...(singleBatchId && { batchId: singleBatchId }),
         timestamp:    new Date(),
+      })
+
+      // ── 4. Collect receipt line item ─────────────────────────────────────
+      const itemBatchId = createdBatchIds.length === 1 ? createdBatchIds[0] : undefined
+
+      // Build descriptive item name with brand/model/variant
+      const descriptor = [product.brand, product.model, product.variant]
+        .filter(Boolean).join(' ')
+      const itemDisplayName = descriptor
+        ? `${product.productName} (${descriptor})`
+        : product.productName
+
+      receiptItems.push({
+        moduleItemId: item.productId,
+        module:       'retail',
+        itemName:     itemDisplayName,
+        quantity:     item.quantity,
+        unitPrice:    item.unitCost,
+        lineTotal:    item.quantity * item.unitCost,
+        ...(itemBatchId && { batchId: itemBatchId }),
       })
 
       movements.push({
@@ -220,6 +256,38 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // ── Create StockReceipt ──────────────────────────────────────────────────
+    const lastReceipt = await (models as any).StockReceipt
+      .findOne({ userId: ownerId })
+      .sort({ createdAt: -1 })
+      .select('receiptNumber')
+      .lean()
+
+    const receiptNumber = generateReceiptNumber(lastReceipt?.receiptNumber || null)
+
+    const receipt = await (models as any).StockReceipt.create({
+      userId:          ownerId,
+      branchId:        branchContext ? new Types.ObjectId(branchContext) : null,
+      receiptNumber,
+      date:            new Date(),
+      supplierId:      new Types.ObjectId(supplierId),
+      supplierName:    supplier.name,
+      reference:       reference || '',
+      items:           receiptItems,
+      totalCost,
+      paymentStatus,
+      paymentMethod,
+      bankProviderId:  bankProviderId ? new Types.ObjectId(bankProviderId) : null,
+      bankProviderName: bankProviderName || '',
+      customMethodId:  customMethodId ? new Types.ObjectId(customMethodId) : null,
+      customMethodName: customMethodName || '',
+      paymentReference,
+      paidAt:          paymentStatus === 'paid' ? new Date() : null,
+      notes:           notes || '',
+      createdBy:       staffId ? new Types.ObjectId(staffId) : new Types.ObjectId(ownerId),
+      createdByModel:  payload.type === 'staff' ? 'Staff' : 'User',
+    })
+
     return NextResponse.json({
       success: true,
       supplier:     supplier.name,
@@ -228,6 +296,9 @@ export async function POST(request: NextRequest) {
       totalCost,
       movements,
       batchesCreated,
+      receiptNumber,
+      receiptId:    receipt._id.toString(),
+      paymentStatus,
     }, { status: 201 })
 
   } catch (error) {

@@ -112,6 +112,10 @@ export const saleSchema = new mongoose.Schema(
     mpesaPhone:    String,
     creditApplied: { type: Number, default: 0 },
     
+    // Cost of goods sold — sum of (quantity × buyingPrice) for each line item.
+    // Recorded at sale time so profit can be computed without re-querying products.
+    costOfGoodsSold: { type: Number, default: 0 },
+    
     // Debt tracking
     debt:          { type: Number, default: 0 },  // total - sum(payments.amount)
     paymentStatus: { type: String, enum: ['paid', 'partial', 'unpaid'], default: 'paid' },
@@ -643,6 +647,64 @@ export const supplierSchema = new mongoose.Schema(
 supplierSchema.index({ userId: 1, isActive: 1 })
 supplierSchema.index({ userId: 1, name: 1 })
 
+// ── StockReceipt ──────────────────────────────────────────────────────────────
+// Groups a stock-in session into a single receipt document with cost tracking.
+// Created when stock is received from a supplier. Tracks payment status so
+// the business can see money spent (paid) and money owed (unpaid = payables).
+// For advance payments (prepaid), see Phase 3 — the schema accommodates it now.
+export const stockReceiptSchema = new mongoose.Schema(
+  {
+    userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
+    receiptNumber:   { type: String, required: true, trim: true },  // SR-YYYY-NNNN
+    date:            { type: Date, default: Date.now },
+
+    // Supplier (who goods came from)
+    supplierId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier' },
+    supplierName:    { type: String, required: true, default: 'Unknown' },
+    reference:       { type: String, default: '' },  // supplier's invoice/PO number
+
+    // Line items
+    items: [{
+      moduleItemId: { type: String, required: true },  // product ID
+      module:       { type: String, default: 'retail' },
+      itemName:     { type: String, required: true },
+      quantity:     { type: Number, required: true, min: 1 },
+      unitPrice:    { type: Number, default: 0, min: 0 },
+      lineTotal:    { type: Number, default: 0, min: 0 },
+      batchId:      { type: mongoose.Schema.Types.ObjectId, ref: 'ProductBatch' },
+    }],
+
+    totalCost:       { type: Number, required: true, default: 0 },
+
+    // Payment tracking — mirrors Sale.payments[] shape so the end-of-day
+    // report's resolveMethodName() works on stock receipts without changes.
+    paymentStatus:   { type: String, enum: ['paid', 'unpaid', 'prepaid'], default: 'paid' },
+    paymentMethod:   { type: String, enum: ['cash', 'mobile_money', 'bank', 'custom', ''], default: '' },
+    bankProviderId:  { type: mongoose.Schema.Types.ObjectId, ref: 'BankProvider' },
+    bankProviderName:{ type: String, default: '' },
+    customMethodId:  { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentMethod' },
+    customMethodName:{ type: String, default: '' },
+    paymentReference:{ type: String, default: '' },  // mpesa code, receipt number
+    paidAt:          { type: Date },
+    // Who settled/paid — populated when a payable is settled or advance is recorded
+    settledBy:       { type: mongoose.Schema.Types.ObjectId },
+    settledByModel:  { type: String, enum: ['User', 'Staff'], default: 'User' },
+
+    notes:           { type: String, default: '' },
+    createdBy:       { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    createdByModel:  { type: String, enum: ['User', 'Staff'], default: 'User' },
+    createdAt:       { type: Date, default: Date.now },
+    updatedAt:       { type: Date, default: Date.now },
+  },
+  { collection: 'stock_receipts' }
+)
+stockReceiptSchema.index({ userId: 1, createdAt: -1 })
+stockReceiptSchema.index({ userId: 1, paymentStatus: 1, createdAt: -1 })
+stockReceiptSchema.index({ userId: 1, supplierId: 1, createdAt: -1 })
+stockReceiptSchema.index({ userId: 1, receiptNumber: 1 }, { unique: true })
+stockReceiptSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })
+
 // ── ProductBatch ───────────────────────────────────────────────────────────────
 // Tracks individual physical lots/units of a retail product.
 // Only used when Product.trackLots === true.
@@ -908,8 +970,8 @@ const purchaseOrderItemSchema = new mongoose.Schema(
     module:       { type: String, required: true },  // 'retail', 'bar', 'pharmacy', etc.
     itemName:     { type: String, required: true },
     quantity:     { type: Number, required: true, min: 1 },
-    unitPrice:    { type: Number, required: true, min: 0 },
-    lineTotal:    { type: Number, required: true, min: 0 },
+    unitPrice:    { type: Number, default: 0, min: 0 },  // estimate — confirmed at receiving/quote
+    lineTotal:    { type: Number, default: 0, min: 0 },  // estimate — confirmed at receiving/quote
   },
   { _id: false }
 )

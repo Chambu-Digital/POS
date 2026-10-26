@@ -15,10 +15,11 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Plus, Search, Edit2, Trash2, Eye, Package } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, Eye, Package, CreditCard } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { useRouter } from 'next/navigation'
+import { PayablesCard } from '@/components/inventory/payables-card'
 
 interface Supplier {
   _id: string
@@ -220,6 +221,9 @@ function SuppliersPageContent() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Payables — unpaid stock receipts */}
+      <PayablesCard />
 
       {/* Suppliers Table */}
       <Card>

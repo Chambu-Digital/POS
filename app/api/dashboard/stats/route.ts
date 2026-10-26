@@ -73,6 +73,9 @@ export async function GET(request: NextRequest) {
     const periodSaleMatch = { ...baseSaleMatch, createdAt: { $gte: periodStart } }
     const last7SaleMatch  = { ...baseSaleMatch, createdAt: { $gte: last7Start } }
 
+    // ── Date ranges for stock financials ─────────────────────────────────────
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+
     // ── Parallelise all independent DB calls ──────────────────────────────────
     const [
       todaySales,
@@ -116,7 +119,7 @@ export async function GET(request: NextRequest) {
 
       // Period sales (for charts + payment methods) — populate only for top products
       canSeeReports ? models.Sale.find(periodSaleMatch)
-        .select('total discount debt source payments paymentMethod items createdAt')
+        .select('total discount debt source payments paymentMethod items costOfGoodsSold createdAt')
         .populate('items.productId', 'productName')
         .lean() : Promise.resolve([]),
 
@@ -199,6 +202,40 @@ export async function GET(request: NextRequest) {
         userId: ownerObjId, branchId: branchObjId,
       }).select('productId stock').lean() : Promise.resolve([]),
     ])
+
+    // ── Stock financial data (owner view only, non-blocking) ─────────────────
+    let stockFinancials = {
+      investedThisMonth: 0,    // cash spent on stock this month (paid receipts)
+      totalOwedToSuppliers: 0, // all unpaid receipts
+      totalAdvancesOut: 0,     // all prepaid receipts awaiting goods
+      netSupplierPosition: 0,  // owed - advances (positive = you owe more than outstanding advances)
+    }
+    if (canSeeReports && !isStaff) {
+      const stockMatch = branchObjId ? { userId: ownerObjId, branchId: branchObjId } : { userId: ownerObjId }
+      const [monthlyPaid, allUnpaid, allPrepaid] = await Promise.all([
+        (models as any).StockReceipt.aggregate([
+          { $match: { ...stockMatch, paymentStatus: 'paid', paidAt: { $gte: monthStart } } },
+          { $group: { _id: null, total: { $sum: '$totalCost' } } }
+        ]),
+        (models as any).StockReceipt.aggregate([
+          { $match: { ...stockMatch, paymentStatus: 'unpaid' } },
+          { $group: { _id: null, total: { $sum: '$totalCost' } } }
+        ]),
+        (models as any).StockReceipt.aggregate([
+          { $match: { ...stockMatch, paymentStatus: 'prepaid' } },
+          { $group: { _id: null, total: { $sum: '$totalCost' } } }
+        ]),
+      ])
+      const invested = monthlyPaid[0]?.total || 0
+      const owed     = allUnpaid[0]?.total   || 0
+      const advances = allPrepaid[0]?.total  || 0
+      stockFinancials = {
+        investedThisMonth:    invested,
+        totalOwedToSuppliers: owed,
+        totalAdvancesOut:     advances,
+        netSupplierPosition:  owed - advances,
+      }
+    }
 
     // ── Today's credit collected ──────────────────────────────────────────────
     let creditCollected = 0
@@ -362,6 +399,17 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // ── COGS + gross profit for period (retail sales only — hosp has no COGS) ─
+    const periodCOGS = (periodSalesRaw as any[]).reduce(
+      (sum: number, s: any) => sum + (s.costOfGoodsSold || 0), 0
+    )
+    const periodRevenue = (periodSalesRaw as any[]).reduce((s: number, x: any) => s + x.total, 0)
+      + (periodHospSales as any[]).reduce((s: number, x: any) => s + x.total, 0)
+    const grossProfit   = periodRevenue - periodCOGS
+    const grossMarginPct = periodRevenue > 0
+      ? Math.round((grossProfit / periodRevenue) * 100)
+      : 0
+
     // ── Recent orders ─────────────────────────────────────────────────────────
     const recentOrders = [
       ...(recentRetailOrders as any[]).map((o: any) => ({ ...o, source: 'retail', orderNum: o._id.toString().slice(-6).toUpperCase() })),
@@ -392,8 +440,11 @@ export async function GET(request: NextRequest) {
         recentPeriod: {
           days,
           totalSales: (periodSalesRaw as any[]).length + (periodHospSales as any[]).length,
-          revenue: (periodSalesRaw as any[]).reduce((s: number, x: any) => s + x.total, 0) + (periodHospSales as any[]).reduce((s: number, x: any) => s + x.total, 0),
+          revenue: periodRevenue,
           discount: (periodSalesRaw as any[]).reduce((s: number, x: any) => s + (x.discount || 0), 0) + (periodHospSales as any[]).reduce((s: number, x: any) => s + (x.discount || 0), 0),
+          costOfGoodsSold: periodCOGS,
+          grossProfit,
+          grossMarginPct,
         },
         products: productStats,
         staffCount,
@@ -405,6 +456,7 @@ export async function GET(request: NextRequest) {
         recentOrders,
         todayStats,
         rentalStats,
+        stockFinancials,
         kdsStats: {
           todayTotal: (todayKitchenOrders as any[]).length,
           todayCompleted: completedKds.length,

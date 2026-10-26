@@ -1,16 +1,21 @@
-// ─── /api/suppliers/[id] ───────────────────────────────────────────────────────
-// Single supplier operations: get, update, delete
-
+import { NextRequest, NextResponse } from 'next/server'
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
-import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
-// ── GET /api/suppliers/[id] ────────────────────────────────────────────────────
-// Get supplier details with purchase history
+// ── helpers ───────────────────────────────────────────────────────────────────
+function resolveMethodName(r: any): string {
+  if (r.paymentMethod === 'cash') return 'Cash'
+  if (r.paymentMethod === 'mobile_money') return 'M-Pesa'
+  if (r.paymentMethod === 'bank' && r.bankProviderName) return r.bankProviderName
+  if (r.paymentMethod === 'custom' && r.customMethodName) return r.customMethodName
+  return r.paymentMethod || ''
+}
+
+// ── GET /api/suppliers/[id] ───────────────────────────────────────────────────
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const payload = await getAuthPayload()
@@ -18,55 +23,75 @@ export async function GET(
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const { id } = await context.params
+
+    if (!id || !Types.ObjectId.isValid(id)) {
+      return NextResponse.json({ error: 'Invalid supplier ID' }, { status: 400 })
+    }
 
     const supplier = await models.Supplier.findOne({
-      _id: params.id,
+      _id: new Types.ObjectId(id),
       userId: ownerId,
-    }).lean()
+    }).lean() as any
 
     if (!supplier) {
       return NextResponse.json({ error: 'Supplier not found' }, { status: 404 })
     }
 
-    // Get purchase history from StockLedger
-    const purchaseHistory = await (models as any).StockLedger.find({
+    // All stock receipts for this supplier
+    const receipts = await (models as any).StockReceipt.find({
       userId: ownerId,
-      supplierId: new Types.ObjectId(params.id),
-      type: 'STOCK_IN',
-    })
-      .sort({ timestamp: -1 })
-      .limit(100)
-      .populate('productId', 'productName')
-      .lean()
+      supplierId: new Types.ObjectId(id),
+    }).sort({ createdAt: -1 }).lean()
 
-    // Calculate stats
-    const totalPurchases = purchaseHistory.length
-    const totalValue = purchaseHistory.reduce((sum: number, h: any) => sum + (h.totalCost || 0), 0)
-    
-    // Get unique products supplied
-    const productIds = new Set(purchaseHistory.map((h: any) => h.productId?._id?.toString()).filter(Boolean))
-    const productsSupplied = productIds.size
+    // Balance breakdown
+    const unpaid   = receipts.filter((r: any) => r.paymentStatus === 'unpaid')
+    const prepaid  = receipts.filter((r: any) => r.paymentStatus === 'prepaid')
+    const paid     = receipts.filter((r: any) => r.paymentStatus === 'paid')
+
+    const totalOwed      = unpaid.reduce((s: number, r: any) => s + r.totalCost, 0)
+    const totalAdvances  = prepaid.reduce((s: number, r: any) => s + r.totalCost, 0)
+    const totalPurchased = paid.reduce((s: number, r: any) => s + r.totalCost, 0)
+
+    const serializedReceipts = receipts.map((r: any) => ({
+      _id:              r._id.toString(),
+      receiptNumber:    r.receiptNumber,
+      date:             r.date,
+      paidAt:           r.paidAt || null,
+      paymentStatus:    r.paymentStatus,
+      paymentMethod:    resolveMethodName(r),
+      paymentReference: r.paymentReference || '',
+      itemCount:        r.items?.length || 0,
+      totalUnits:       (r.items || []).reduce((s: number, i: any) => s + i.quantity, 0),
+      totalCost:        r.totalCost,
+      reference:        r.reference || '',
+      notes:            r.notes || '',
+    }))
 
     return NextResponse.json({
-      supplier,
-      purchaseHistory,
-      stats: {
-        totalPurchases,
-        totalValue,
-        productsSupplied,
+      supplier: {
+        ...supplier,
+        _id: supplier._id.toString(),
+        userId: supplier.userId.toString(),
       },
+      balance: {
+        totalOwed,
+        totalAdvances,
+        totalPurchased,
+        netPosition: totalOwed - totalAdvances,
+      },
+      receipts: serializedReceipts,
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error('[suppliers/id] GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch supplier' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to fetch supplier', details: error.message }, { status: 500 })
   }
 }
 
-// ── PUT /api/suppliers/[id] ────────────────────────────────────────────────────
-// Update supplier information
+// ── PUT /api/suppliers/[id] ───────────────────────────────────────────────────
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const payload = await getAuthPayload()
@@ -74,54 +99,42 @@ export async function PUT(
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const { id } = await context.params
     const body = await request.json()
 
-    // Validate required fields
-    if (!body.name || body.name.trim() === '') {
+    if (!body.name?.trim()) {
       return NextResponse.json({ error: 'Supplier name is required' }, { status: 400 })
     }
 
-    // Check for duplicate name (excluding current supplier)
-    const existing = await models.Supplier.findOne({
-      userId: ownerId,
-      name: { $regex: `^${body.name.trim()}$`, $options: 'i' },
-      isActive: true,
-      _id: { $ne: params.id },
-    })
-    if (existing) {
-      return NextResponse.json({ error: 'Supplier with this name already exists' }, { status: 400 })
-    }
-
     const supplier = await models.Supplier.findOneAndUpdate(
-      { _id: params.id, userId: ownerId },
+      { _id: new Types.ObjectId(id), userId: ownerId },
       {
-        name: body.name.trim(),
-        contactPerson: body.contactPerson?.trim() || '',
-        phone: body.phone?.trim() || '',
-        email: body.email?.trim() || '',
-        address: body.address?.trim() || '',
-        notes: body.notes?.trim() || '',
-        updatedAt: new Date(),
+        $set: {
+          name:          body.name.trim(),
+          contactPerson: body.contactPerson?.trim() || '',
+          phone:         body.phone?.trim() || '',
+          email:         body.email?.trim() || '',
+          address:       body.address?.trim() || '',
+          notes:         body.notes?.trim() || '',
+          updatedAt:     new Date(),
+        }
       },
       { new: true }
     )
 
-    if (!supplier) {
-      return NextResponse.json({ error: 'Supplier not found' }, { status: 404 })
-    }
+    if (!supplier) return NextResponse.json({ error: 'Supplier not found' }, { status: 404 })
 
     return NextResponse.json({ supplier })
-  } catch (error) {
+  } catch (error: any) {
     console.error('[suppliers/id] PUT error:', error)
     return NextResponse.json({ error: 'Failed to update supplier' }, { status: 500 })
   }
 }
 
-// ── DELETE /api/suppliers/[id] ─────────────────────────────────────────────────
-// Soft delete supplier (set isActive = false)
+// ── DELETE /api/suppliers/[id] ────────────────────────────────────────────────
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const payload = await getAuthPayload()
@@ -129,22 +142,19 @@ export async function DELETE(
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const { id } = await context.params
 
+    // Soft delete — mark inactive rather than hard delete
     const supplier = await models.Supplier.findOneAndUpdate(
-      { _id: params.id, userId: ownerId },
-      {
-        isActive: false,
-        updatedAt: new Date(),
-      },
+      { _id: new Types.ObjectId(id), userId: ownerId },
+      { $set: { isActive: false, updatedAt: new Date() } },
       { new: true }
     )
 
-    if (!supplier) {
-      return NextResponse.json({ error: 'Supplier not found' }, { status: 404 })
-    }
+    if (!supplier) return NextResponse.json({ error: 'Supplier not found' }, { status: 404 })
 
-    return NextResponse.json({ success: true, supplier })
-  } catch (error) {
+    return NextResponse.json({ success: true })
+  } catch (error: any) {
     console.error('[suppliers/id] DELETE error:', error)
     return NextResponse.json({ error: 'Failed to delete supplier' }, { status: 500 })
   }

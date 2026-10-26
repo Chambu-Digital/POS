@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { getBranchContext } from '@/lib/branch-context'
 import {
   calculateVelocity,
   calculateCoverage,
@@ -19,8 +20,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { modules = ['retail'] } = body
 
-    const { models } = await getTenantDB()
-    
+    const { models } = await getTenantDB(request)
+
     const userId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
 
     // Fetch user settings for restocking configuration
@@ -28,36 +29,68 @@ export async function POST(request: NextRequest) {
       settings?: Record<string, any>
     } | null
 
-    // Use provided values or fall back to user settings or defaults
     const restockingSettings = user?.settings?.restocking || {}
     const leadTimeDays = body.leadTimeDays ?? restockingSettings.defaultLeadTime ?? 7
     const safetyBufferDays = body.safetyBufferDays ?? restockingSettings.safetyBuffer ?? 2
 
-    // Get all products from retail
-    const products = await models.Product.find({})
-      .populate('supplierId', 'name')
-      .lean()
+    const branchContext = await getBranchContext(request)
+
+    // Fetch products — branch-aware if branch context exists
+    let products: any[]
+
+    if (branchContext) {
+      const inventories = await models.ProductInventory.find({
+        userId,
+        branchId: branchContext,
+      }).lean()
+
+      const inventoryMap = new Map(
+        inventories.map((inv: any) => [inv.productId.toString(), inv])
+      )
+
+      products = (await models.Product.find({
+        userId,
+        _id: { $in: inventories.map((inv: any) => inv.productId) }
+      })
+        .populate('supplierId', 'name')
+        .lean())
+        .map((product: any) => ({
+          ...product,
+          stock: inventoryMap.get(product._id.toString())?.stock ?? 0
+        }))
+    } else {
+      products = await models.Product.find({ userId })
+        .populate('supplierId', 'name')
+        .lean()
+    }
+
+    // Batch fetch all stock movements (last 30 days) — avoids N+1 queries
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - 30)
+
+    const productIds = products.map((p: any) => p._id)
+    const allMovements = await models.StockLedger.find({
+      productId: { $in: productIds },
+      timestamp: { $gte: startDate }
+    }).lean()
+
+    const movementsByProduct = new Map<string, any[]>()
+    for (const m of allMovements) {
+      const pid = m.productId.toString()
+      if (!movementsByProduct.has(pid)) {
+        movementsByProduct.set(pid, [])
+      }
+      movementsByProduct.get(pid)!.push(m)
+    }
 
     const recommendations = []
 
-    // Analyze each product
     for (const product of products) {
-      // Use product-specific settings if available, otherwise fall back to global
       const productLeadTime = product.restocking?.customLeadTime ?? leadTimeDays
       const productSafetyBuffer = product.restocking?.safetyBuffer ?? safetyBufferDays
 
-      // Fetch movements for this product (last 30 days)
-      const startDate = new Date()
-      startDate.setDate(startDate.getDate() - 30)
+      const movements = movementsByProduct.get(product._id.toString()) || []
 
-      const movements = await models.StockLedger.find({
-        productId: product._id,
-        timestamp: { $gte: startDate }
-      })
-        .sort({ timestamp: 1 })
-        .lean()
-
-      // Transform to standard format
       const standardMovements: StockMovement[] = movements.map((m: any) => ({
         timestamp: m.timestamp,
         type: ['SALE', 'RETURN', 'DAMAGE', 'WASTAGE', 'EXPIRED', 'LOSS'].includes(m.type)
@@ -67,27 +100,22 @@ export async function POST(request: NextRequest) {
         reason: m.type
       }))
 
-      // Calculate velocity
       const velocity = calculateVelocity(standardMovements, 30)
 
-      // Skip if no sales data
       if (!velocity.hasSufficientData || velocity.averageDailySales === 0) {
         continue
       }
 
-      // Calculate coverage
       const coverage = calculateCoverage(
         product.stock || 0,
         velocity.averageDailySales,
         productLeadTime
       )
 
-      // Only recommend if will stock out before lead time
       if (!coverage.willStockOut) {
         continue
       }
 
-      // Calculate recommended quantity using product-specific settings
       const recommendedQty = calculateRecommendedQuantity(
         product.stock || 0,
         velocity.averageDailySales,
@@ -99,7 +127,6 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      // Generate explanation
       const reason = explainRecommendation(
         product.stock || 0,
         velocity,
@@ -108,10 +135,15 @@ export async function POST(request: NextRequest) {
         productLeadTime
       )
 
+      // Build descriptive name including brand, model, and variant
+      const descriptor = [product.brand, product.model, product.variant]
+        .filter(Boolean)
+        .join(' ')
+
       recommendations.push({
         moduleItemId: product._id.toString(),
         module: 'retail',
-        itemName: product.productName + (product.variant ? ` (${product.variant})` : ''),
+        itemName: descriptor ? `${product.productName} (${descriptor})` : product.productName,
         category: product.category || 'Uncategorized',
         currentStock: product.stock || 0,
         velocity: velocity.averageDailySales,
@@ -132,7 +164,6 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Sort by urgency (descending)
     recommendations.sort((a, b) => b.urgency - a.urgency)
 
     const totalCost = recommendations.reduce((sum, r) => sum + r.totalCost, 0)

@@ -12,7 +12,11 @@ import { NetworkStatusProvider } from '@/components/network-status-provider'
 import { Toaster } from 'sonner'
 import PaymentNotificationOverlay from '@/components/payment-notification-overlay'
 
+const SIDEBAR_STORAGE_KEY = 'sidebar-collapsed'
+
 export default function DashboardLayout({ children }: { children: ReactNode }) {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
   const [paymentNotification, setPaymentNotification] = useState<{
     enabled: boolean
     paymentUrl: string
@@ -21,20 +25,29 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   } | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // Rehydrate from localStorage on mount (avoids SSR mismatch)
   useEffect(() => {
-    // Fetch tenant configuration on mount
+    try {
+      const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY)
+      if (stored !== null) setSidebarCollapsed(stored === 'true')
+    } catch {}
+  }, [])
+
+  function handleCollapsedChange(v: boolean) {
+    setSidebarCollapsed(v)
+    try { localStorage.setItem(SIDEBAR_STORAGE_KEY, String(v)) } catch {}
+  }
+
+  useEffect(() => {
     fetch('/api/tenant/config')
       .then(res => res.ok ? res.json() : null)
       .then(data => {
-        if (data?.paymentNotification) {
-          setPaymentNotification(data.paymentNotification)
-        }
+        if (data?.paymentNotification) setPaymentNotification(data.paymentNotification)
         setLoading(false)
       })
       .catch(() => setLoading(false))
   }, [])
 
-  // Show overlay if payment notification is enabled
   const showOverlay = !loading && paymentNotification?.enabled && paymentNotification?.paymentUrl
 
   return (
@@ -45,8 +58,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         <ConflictNotification />
         <InstallPrompt />
         <Toaster position="top-right" />
-        <Sidebar />
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <Sidebar collapsed={sidebarCollapsed} onCollapsedChange={handleCollapsedChange} />
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           <DemoBanner />
           <TopNav />
           <main className="flex-1 overflow-auto">
@@ -56,7 +69,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </main>
         </div>
 
-        {/* Payment notification overlay - blocks everything */}
         {showOverlay && (
           <PaymentNotificationOverlay
             paymentUrl={paymentNotification.paymentUrl}

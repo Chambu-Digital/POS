@@ -1,7 +1,7 @@
-// Purchase Order generation service
+// RFQ generation service
 import type { BasketItem } from './basket'
 
-export interface POItem {
+export interface RFQItem {
   moduleItemId: string
   module: string
   itemName: string
@@ -10,93 +10,79 @@ export interface POItem {
   lineTotal: number
 }
 
-export interface PurchaseOrder {
+export interface RFQ {
   supplierId: string | null
   supplierName: string
-  items: POItem[]
+  items: RFQItem[]
   subtotal: number
   total: number
   notes: string
 }
 
 /**
- * Generate purchase orders grouped by supplier from basket items
+ * Generate a single RFQ from basket items — no supplier grouping.
+ * All items go into one restock list.
  */
-export function generatePurchaseOrders(
+export function generateRFQ(
   basketItems: BasketItem[],
   notes: string = ''
-): PurchaseOrder[] {
+): RFQ {
   if (basketItems.length === 0) {
-    return []
-  }
-
-  // Group items by supplier
-  const supplierGroups = new Map<string, BasketItem[]>()
-
-  for (const item of basketItems) {
-    const supplierId = item.supplier?.id || null
-    const supplierName = item.supplier?.name || 'No Supplier'
-    const key = supplierId || 'no-supplier'
-
-    if (!supplierGroups.has(key)) {
-      supplierGroups.set(key, [])
-    }
-    supplierGroups.get(key)!.push(item)
-  }
-
-  // Create PO for each supplier
-  const purchaseOrders: PurchaseOrder[] = []
-
-  for (const [supplierId, items] of supplierGroups.entries()) {
-    const poItems: POItem[] = items.map((item) => ({
-      moduleItemId: item.moduleItemId,
-      module: item.module,
-      itemName: item.itemName,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      lineTotal: item.totalCost
-    }))
-
-    const subtotal = poItems.reduce((sum, item) => sum + item.lineTotal, 0)
-
-    purchaseOrders.push({
-      supplierId: supplierId === 'no-supplier' ? null : supplierId,
-      supplierName: items[0].supplier?.name || 'No Supplier',
-      items: poItems,
-      subtotal,
-      total: subtotal, // Can add tax/shipping later
+    return {
+      supplierId: null,
+      supplierName: 'Restock List',
+      items: [],
+      subtotal: 0,
+      total: 0,
       notes
-    })
+    }
   }
 
-  return purchaseOrders
+  const items: RFQItem[] = basketItems.map((item) => ({
+    moduleItemId: item.moduleItemId,
+    module: item.module,
+    itemName: item.itemName,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    lineTotal: item.totalCost
+  }))
+
+  const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0)
+
+  return {
+    supplierId: null,
+    supplierName: 'Restock List',
+    items,
+    subtotal,
+    total: subtotal,
+    notes
+  }
 }
 
 /**
- * Generate PO number in format: PO-YYYY-NNNN
+ * Generate RFQ number in format: RFQ-YYYY-NNNN
+ * Handles legacy PO- prefixed numbers for continuity.
  */
-export function generatePONumber(lastPONumber: string | null): string {
+export function generateRFQNumber(lastNumber: string | null): string {
   const currentYear = new Date().getFullYear()
-  
-  if (!lastPONumber) {
-    return `PO-${currentYear}-0001`
+
+  if (!lastNumber) {
+    return `RFQ-${currentYear}-0001`
   }
 
-  // Parse last PO number
-  const match = lastPONumber.match(/^PO-(\d{4})-(\d+)$/)
+  // Parse last number (supports both PO- and RFQ- prefixes)
+  const match = lastNumber.match(/^(?:PO|RFQ)-(\d{4})-(\d+)$/)
   if (!match) {
-    return `PO-${currentYear}-0001`
+    return `RFQ-${currentYear}-0001`
   }
 
   const lastYear = parseInt(match[1])
-  const lastNumber = parseInt(match[2])
+  const lastNum = parseInt(match[2])
 
-  // Reset counter if new year
   if (lastYear < currentYear) {
-    return `PO-${currentYear}-0001`
+    return `RFQ-${currentYear}-0001`
   }
 
-  // Increment counter
-  const nextNumber = lastNumber + 1
-  return `PO-${currentYear}-${nextNumber.toString().padStart(4, '0')}`
+  const nextNumber = lastNum + 1
+  return `RFQ-${currentYear}-${nextNumber.toString().padStart(4, '0')}`
 }
