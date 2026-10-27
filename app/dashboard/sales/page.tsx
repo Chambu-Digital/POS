@@ -123,6 +123,7 @@ function SalesPageContent() {
   const [loading, setLoading] = useState(true)
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
   const [shopSettings, setShopSettings] = useState<any>(null)
+  const [activeBranch, setActiveBranch] = useState<{ name: string; phone?: string; address?: string } | null>(null)
   const [isCartModalOpen, setIsCartModalOpen] = useState(false)
   const [showCompletionDialog, setShowCompletionDialog] = useState(false)
   const [lastSale, setLastSale] = useState<any>(null)
@@ -340,6 +341,27 @@ function SalesPageContent() {
       if (res.ok) {
         const data = await res.json()
         setShopSettings(data.settings)
+      }
+    } catch {
+      // Ignore errors
+    }
+    // Fetch active branch for receipt contact info
+    try {
+      const branchId = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('selected_branch='))
+        ?.split('=')[1]
+      if (branchId) {
+        const res = await fetch(`/api/branches/${branchId}`)
+        if (res.ok) {
+          const data = await res.json()
+          const phones = (data.branch.phones || []).filter((p: string) => p.trim())
+          setActiveBranch({
+            name: data.branch.name,
+            phone: phones.length > 0 ? phones.join(' / ') : (data.branch.phone || ''),
+            address: data.branch.address || '',
+          })
+        }
       }
     } catch {
       // Ignore errors
@@ -984,7 +1006,9 @@ function SalesPageContent() {
                             {formatProductName(product)}
                           </p>
                           {product.trackLots && (
-                            <Layers size={11} className="text-blue-500 shrink-0" title="Lot tracked — picker will open" />
+                            <span title="Lot tracked — picker will open" className="inline-flex">
+                              <Layers size={11} className="text-blue-500 shrink-0" />
+                            </span>
                           )}
                         </div>
                         {product.model && (
@@ -1361,9 +1385,10 @@ function SalesPageContent() {
           paymentMethod={lastSale.paymentMethod}
           date={lastSale.date}
           receiptNumber={lastSale.receiptNumber}
-          shopPhone={shopSettings?.general?.phone}
+          shopPhone={activeBranch?.phone || shopSettings?.general?.phone}
           shopEmail={shopSettings?.general?.email}
-          shopAddress={shopSettings?.general?.address}
+          shopAddress={activeBranch?.address || shopSettings?.general?.address}
+          branchName={activeBranch?.name}
           mpesaPaybill={shopSettings?.payment?.mpesaPaybill}
           mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}
           paperSize={shopSettings?.receipt?.paperSize || '58mm'}

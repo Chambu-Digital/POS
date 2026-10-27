@@ -1228,6 +1228,7 @@ function PaymentPageContent() {
           paymentMethod={lastSale.paymentMethod}
           date={lastSale.date}
           receiptNumber={lastSale.receiptNumber}
+          branchName={activeBranch?.name}
           shopPhone={activeBranch?.phone || shopSettings?.general?.phone}
           shopEmail={shopSettings?.general?.email}
           shopAddress={activeBranch?.address || shopSettings?.general?.address}

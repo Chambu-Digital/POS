@@ -5,7 +5,7 @@ import { getAuthPayload } from '@/lib/jwt'
 // Get single quotation
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const payload = await getAuthPayload()
@@ -15,9 +15,10 @@ export async function GET(
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const { id } = await params
 
     const quotation = await models.Quotation
-      .findOne({ _id: params.id, userId: ownerId })
+      .findOne({ _id: id, userId: ownerId })
       .lean()
 
     if (!quotation) {
@@ -47,7 +48,7 @@ export async function GET(
 // Update quotation
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const payload = await getAuthPayload()
@@ -57,8 +58,9 @@ export async function PUT(
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const { id } = await params
 
-    const quotation = await models.Quotation.findOne({ _id: params.id, userId: ownerId })
+    const quotation = await models.Quotation.findOne({ _id: id, userId: ownerId })
     if (!quotation) {
       return NextResponse.json({ error: 'Quotation not found' }, { status: 404 })
     }
@@ -137,7 +139,7 @@ export async function PUT(
 // Delete quotation
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const payload = await getAuthPayload()
@@ -147,8 +149,9 @@ export async function DELETE(
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const { id } = await params
 
-    const quotation = await models.Quotation.findOne({ _id: params.id, userId: ownerId })
+    const quotation = await models.Quotation.findOne({ _id: id, userId: ownerId })
     if (!quotation) {
       return NextResponse.json({ error: 'Quotation not found' }, { status: 404 })
     }

@@ -201,7 +201,7 @@ function SupplierDetailContent() {
       </div>
 
       {/* Payables card for this supplier — handles pay + record advance */}
-      <PayablesCard onPaymentRecorded={fetchSupplier} />
+      <PayablesCard supplierId={id} onPaymentRecorded={fetchSupplier} />
 
       {/* Transaction history */}
       {receipts.length > 0 && (

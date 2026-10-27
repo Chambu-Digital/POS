@@ -6,8 +6,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { CreditCard, Loader2, Clock, Plus, ArrowDownToLine } from 'lucide-react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
+import { cn } from '@/lib/utils'
+import { CreditCard, Loader2, Clock, Plus, ArrowDownToLine, PackageSearch, ChevronsUpDown, Check } from 'lucide-react'
 import { toast } from 'sonner'
+import { QuickAddSupplierDialog } from '@/components/suppliers/quick-add-supplier-dialog'
 
 interface Payable {
   _id: string
@@ -25,22 +29,45 @@ interface Payable {
   notes: string
 }
 
+interface Advance {
+  _id: string
+  receiptNumber: string
+  supplierName: string
+  date: string
+  paidAt: string
+  totalCost: number
+  paymentMethod: string
+  bankProviderName?: string
+  customMethodName?: string
+  notes: string
+}
+
+interface SupplierOption {
+  _id: string
+  name: string
+}
+
 function formatKES(amount: number): string {
   return `KES ${Math.round(amount).toLocaleString('en-KE')}`
 }
 
 interface PayablesCardProps {
   onPaymentRecorded?: () => void
+  supplierId?: string   // when set, scopes payables + advances to this supplier only
 }
 
-export function PayablesCard({ onPaymentRecorded }: PayablesCardProps) {
+export function PayablesCard({ onPaymentRecorded, supplierId }: PayablesCardProps) {
   const [payables, setPayables] = useState<Payable[]>([])
+  const [advances, setAdvances] = useState<Advance[]>([])
   const [loading, setLoading] = useState(true)
   const [payingReceipt, setPayingReceipt] = useState<Payable | null>(null)
   const [payMethod, setPayMethod] = useState('cash')
   // Advance dialog state
   const [showAdvance, setShowAdvance] = useState(false)
-  const [advSupplierName, setAdvSupplierName] = useState('')
+  const [advSupplierId, setAdvSupplierId]   = useState('')
+  const [advSuppliers, setAdvSuppliers]     = useState<SupplierOption[]>([])
+  const [advSupOpen, setAdvSupOpen]         = useState(false)
+  const [advQuickAdd, setAdvQuickAdd]       = useState(false)
   const [advAmount, setAdvAmount] = useState('')
   const [advMethod, setAdvMethod] = useState('cash')
   const [advBankId, setAdvBankId] = useState('')
@@ -57,8 +84,17 @@ export function PayablesCard({ onPaymentRecorded }: PayablesCardProps) {
 
   useEffect(() => {
     fetchPayables()
+    fetchAdvances()
     fetchPaymentMethods()
+    fetchSuppliers()
   }, [])
+
+  async function fetchSuppliers() {
+    try {
+      const res = await fetch('/api/suppliers')
+      if (res.ok) setAdvSuppliers((await res.json()).suppliers || [])
+    } catch { /* silent */ }
+  }
 
   async function fetchPaymentMethods() {
     try {
@@ -76,7 +112,8 @@ export function PayablesCard({ onPaymentRecorded }: PayablesCardProps) {
   async function fetchPayables() {
     setLoading(true)
     try {
-      const res = await fetch('/api/stock-receipts?status=unpaid')
+      const qs = supplierId ? `?status=unpaid&supplierId=${supplierId}` : '?status=unpaid'
+      const res = await fetch(`/api/stock-receipts${qs}`)
       if (res.ok) {
         const data = await res.json()
         setPayables(data.receipts || [])
@@ -85,6 +122,19 @@ export function PayablesCard({ onPaymentRecorded }: PayablesCardProps) {
       console.error('Failed to load payables:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function fetchAdvances() {
+    try {
+      const qs = supplierId ? `?status=prepaid&supplierId=${supplierId}` : '?status=prepaid'
+      const res = await fetch(`/api/stock-receipts${qs}`)
+      if (res.ok) {
+        const data = await res.json()
+        setAdvances(data.receipts || [])
+      }
+    } catch (error) {
+      console.error('Failed to load advances:', error)
     }
   }
 
@@ -147,7 +197,7 @@ export function PayablesCard({ onPaymentRecorded }: PayablesCardProps) {
   }
 
   async function handleRecordAdvance() {
-    if (!advSupplierName.trim()) { toast.error('Enter a supplier name'); return }
+    if (!advSupplierId) { toast.error('Select a supplier'); return }
     if (!advAmount || parseFloat(advAmount) <= 0) { toast.error('Enter a valid amount'); return }
     if (!advMethod) { toast.error('Select a payment method'); return }
 
@@ -163,33 +213,37 @@ export function PayablesCard({ onPaymentRecorded }: PayablesCardProps) {
 
     if (normalizedMethod === 'bank' && !advBankId) { toast.error('Select a bank'); return }
 
+    const selectedSupplier = advSuppliers.find(s => s._id === advSupplierId)
+
     setRecordingAdvance(true)
     try {
       const res = await fetch('/api/stock-receipts/advance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          supplierName: advSupplierName.trim(),
-          amount: parseFloat(advAmount),
-          paymentMethod: normalizedMethod,
-          bankProviderId: normalizedMethod === 'bank' ? advBankId : '',
+          supplierId:       advSupplierId,
+          supplierName:     selectedSupplier?.name || '',
+          amount:           parseFloat(advAmount),
+          paymentMethod:    normalizedMethod,
+          bankProviderId:   normalizedMethod === 'bank' ? advBankId : '',
           bankProviderName: normalizedMethod === 'bank' ? resolvedBankName : '',
-          customMethodId: normalizedMethod === 'custom' ? resolvedCustomId : '',
+          customMethodId:   normalizedMethod === 'custom' ? resolvedCustomId : '',
           customMethodName: normalizedMethod === 'custom' ? resolvedCustomName : '',
           paymentReference: advReference,
-          notes: advNotes,
+          notes:            advNotes,
         }),
       })
 
       if (res.ok) {
-        toast.success(`Advance of ${formatKES(parseFloat(advAmount))} recorded for ${advSupplierName.trim()}`)
+        toast.success(`Advance of ${formatKES(parseFloat(advAmount))} recorded for ${selectedSupplier?.name}`)
         setShowAdvance(false)
-        setAdvSupplierName('')
+        setAdvSupplierId('')
         setAdvAmount('')
         setAdvMethod('cash')
         setAdvBankId('')
         setAdvReference('')
         setAdvNotes('')
+        fetchAdvances()
         onPaymentRecorded?.()
       } else {
         const data = await res.json()
@@ -204,6 +258,15 @@ export function PayablesCard({ onPaymentRecorded }: PayablesCardProps) {
   }
 
   const totalOwed = payables.reduce((sum, p) => sum + p.totalCost, 0)
+  const totalAdvances = advances.reduce((sum, a) => sum + a.totalCost, 0)
+
+  function resolveAdvanceMethod(a: Advance): string {
+    if (a.paymentMethod === 'cash') return 'Cash'
+    if (a.paymentMethod === 'mobile_money') return 'M-Pesa'
+    if (a.paymentMethod === 'bank' && a.bankProviderName) return a.bankProviderName
+    if (a.paymentMethod === 'custom' && a.customMethodName) return a.customMethodName
+    return a.paymentMethod || 'Unknown'
+  }
 
   return (
     <>
@@ -232,7 +295,8 @@ export function PayablesCard({ onPaymentRecorded }: PayablesCardProps) {
             </div>
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {/* ── Payables section ─────────────────────────────────────────── */}
           {loading ? (
             <div className="flex items-center gap-2 py-2">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -279,6 +343,50 @@ export function PayablesCard({ onPaymentRecorded }: PayablesCardProps) {
                   </div>
                 )
               })}
+            </div>
+          )}
+
+          {/* ── Advances pending delivery ─────────────────────────────────── */}
+          {advances.length > 0 && (
+            <div>
+              {(payables.length > 0) && <div className="border-t" />}
+              <div className="flex items-center justify-between mb-2 pt-1">
+                <span className="flex items-center gap-1.5 text-xs font-medium text-purple-700">
+                  <PackageSearch className="h-3.5 w-3.5" />
+                  Advances Pending Delivery
+                </span>
+                <span className="text-xs font-medium text-purple-600">
+                  {formatKES(totalAdvances)} out
+                </span>
+              </div>
+              <div className="space-y-2">
+                {advances.map((adv) => (
+                  <div
+                    key={adv._id}
+                    className="flex items-center justify-between gap-3 border border-purple-100 bg-purple-50/40 rounded-lg p-3"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-sm">{adv.receiptNumber}</p>
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Clock className="h-3 w-3" />
+                          {new Date(adv.paidAt || adv.date).toLocaleDateString('en-GB', {
+                            day: '2-digit',
+                            month: 'short',
+                          })}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {adv.supplierName} · {resolveAdvanceMethod(adv)}
+                        {adv.notes ? ` · ${adv.notes}` : ''}
+                      </p>
+                    </div>
+                    <div className="shrink-0">
+                      <span className="text-sm font-bold text-purple-700">{formatKES(adv.totalCost)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </CardContent>
@@ -406,15 +514,42 @@ export function PayablesCard({ onPaymentRecorded }: PayablesCardProps) {
             <DialogDescription>Pay a supplier now for goods arriving later</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            {/* Supplier combobox */}
             <div>
-              <Label className="text-xs text-muted-foreground">Supplier Name</Label>
-              <Input
-                value={advSupplierName}
-                onChange={e => setAdvSupplierName(e.target.value)}
-                placeholder="e.g. Ali from Gikomba"
-                className="mt-1"
-                autoFocus
-              />
+              <Label className="text-xs text-muted-foreground">Supplier *</Label>
+              <div className="flex gap-2 mt-1">
+                <Popover open={advSupOpen} onOpenChange={setAdvSupOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" role="combobox" className="flex-1 justify-between font-normal" type="button">
+                      {advSupplierId
+                        ? advSuppliers.find(s => s._id === advSupplierId)?.name || 'Select supplier…'
+                        : 'Select supplier…'}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[240px] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search suppliers…" />
+                      <CommandList>
+                        <CommandEmpty>No supplier found.</CommandEmpty>
+                        <CommandGroup>
+                          {advSuppliers.filter((s: any) => s.isActive !== false).map(s => (
+                            <CommandItem key={s._id} value={s.name}
+                              onSelect={() => { setAdvSupplierId(s._id); setAdvSupOpen(false) }}>
+                              <Check className={cn('mr-2 h-4 w-4', advSupplierId === s._id ? 'opacity-100' : 'opacity-0')} />
+                              {s.name}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                <Button type="button" variant="outline" size="icon"
+                  onClick={() => setAdvQuickAdd(true)} title="Add new supplier">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
             <div>
               <Label className="text-xs text-muted-foreground">Amount Paid (KES)</Label>
@@ -493,6 +628,15 @@ export function PayablesCard({ onPaymentRecorded }: PayablesCardProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      <QuickAddSupplierDialog
+        open={advQuickAdd}
+        onOpenChange={setAdvQuickAdd}
+        onSuccess={s => {
+          setAdvSuppliers(prev => [...prev, s as any])
+          setAdvSupplierId(s._id)
+        }}
+      />
     </>
   )
 }

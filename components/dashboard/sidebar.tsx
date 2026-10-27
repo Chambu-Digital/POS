@@ -10,7 +10,7 @@ import {
   UserCog, Settings, BedDouble, Pill, UtensilsCrossed,
   Repeat2, Building2, RefreshCcw, FileText, Smartphone,
   FlaskConical, CalendarDays, CreditCard, Layers,
-  TrendingUp, ChefHat, Warehouse,
+  TrendingUp, ChefHat, Warehouse, ShoppingBag,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -32,6 +32,7 @@ const HREF_ICONS: Record<string, LucideIcon> = {
   '/dashboard/retail/expenses':      Receipt,
   '/dashboard/customers':            Users,
   '/dashboard/suppliers':            Truck,
+  '/dashboard/purchases':            ShoppingBag,
   '/dashboard/restocking':           RefreshCcw,
   '/dashboard/quotations':           FileText,
   '/dashboard/staff':                UserCog,

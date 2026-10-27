@@ -84,6 +84,14 @@ export const CORE_MODULE: ModuleDefinition = {
       defaultOn: true,
     },
     {
+      key: 'core.purchases',
+      label: 'Purchases',
+      description: 'Stock receipt history and purchase tracking',
+      href: '/dashboard/purchases',
+      adminOnly: false,
+      defaultOn: true,
+    },
+    {
       key: 'core.restocking',
       label: 'Restocking',
       description: 'Purchase order generation and intelligent restocking analysis',

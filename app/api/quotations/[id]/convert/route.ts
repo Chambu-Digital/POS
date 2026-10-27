@@ -7,7 +7,7 @@ import { Types } from 'mongoose'
 // Convert quotation to sale
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const payload = await getAuthPayload()
@@ -17,9 +17,10 @@ export async function POST(
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const { id } = await params
     const branchContext = await getBranchContext(request)
 
-    const quotation = await models.Quotation.findOne({ _id: params.id, userId: ownerId })
+    const quotation = await models.Quotation.findOne({ _id: id, userId: ownerId })
     if (!quotation) {
       return NextResponse.json({ error: 'Quotation not found' }, { status: 404 })
     }

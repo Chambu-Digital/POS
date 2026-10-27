@@ -74,8 +74,15 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
   const [supplierOpen, setSupplierOpen]     = useState(false)
   const [quickAddSupplierOpen, setQuickAddSupplierOpen] = useState(false)
   // Advance linking: if supplier has outstanding prepaid receipts, user can link to one
-  const [advanceReceipts, setAdvanceReceipts] = useState<Array<{ _id: string; receiptNumber: string; totalCost: number }>>([])
+  const [advanceReceipts, setAdvanceReceipts] = useState<Array<{ _id: string; receiptNumber: string; totalCost: number; paymentMethod?: string; bankProviderName?: string; customMethodName?: string; paidAt?: string }>>([])
   const [linkedAdvanceId, setLinkedAdvanceId] = useState('')
+
+  // Variance handling (when goods total ≠ advance amount)
+  type VarianceAction = 'none' | 'payable' | 'pay_now' | 'refund' | 'credit'
+  const [varianceAction, setVarianceAction]   = useState<VarianceAction>('none')
+  const [varPayMethod,   setVarPayMethod]     = useState('cash')
+  const [varBankId,      setVarBankId]        = useState('')
+  const [varPayRef,      setVarPayRef]        = useState('')
   const [reference, setReference]           = useState('')
   const [notes, setNotes]                   = useState('')
   const [paymentStatus, setPaymentStatus]   = useState<'paid' | 'unpaid'>('paid')
@@ -100,6 +107,10 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
       setSupplierOpen(false)
       setAdvanceReceipts([])
       setLinkedAdvanceId('')
+      setVarianceAction('none')
+      setVarPayMethod('cash')
+      setVarBankId('')
+      setVarPayRef('')
       setReference('')
       setNotes('')
       setPaymentStatus('paid')
@@ -339,6 +350,40 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
         ? `/api/stock-receipts/${linkedAdvanceId}/receive`
         : '/api/inventory/stock-in'
 
+      // Validate variance decision before submitting
+      if (linkedAdvanceId) {
+        const adv = advanceReceipts.find(a => a._id === linkedAdvanceId)
+        if (adv) {
+          const goodsTotal = calculateTotal()
+          const variance   = goodsTotal - adv.totalCost
+          if (Math.abs(variance) > 0.01 && varianceAction === 'none') {
+            toast.error(
+              variance > 0
+                ? 'Goods cost more than the advance — choose how to handle the shortfall'
+                : 'Goods cost less than the advance — choose what to do with the surplus'
+            )
+            setSubmitting(false)
+            return
+          }
+          if (varianceAction === 'pay_now' && varPayMethod === 'bank' && !varBankId) {
+            toast.error('Select a bank for the shortfall payment')
+            setSubmitting(false)
+            return
+          }
+          if (varianceAction === 'refund' && varPayMethod === 'bank' && !varBankId) {
+            toast.error('Select a bank for the refund')
+            setSubmitting(false)
+            return
+          }
+        }
+      }
+
+      const isVarCustom   = varPayMethod.startsWith('custom:')
+      const varNormMethod = isVarCustom ? 'custom' : varPayMethod
+      const varCustomId   = isVarCustom ? varPayMethod.split(':')[1] : ''
+      const varCustomName = varCustomId ? customMethods.find(m => m._id === varCustomId)?.name || '' : ''
+      const varBankName   = varBankId   ? bankProviders.find(b => b._id === varBankId)?.name || ''   : ''
+
       const response = await fetch(endpoint, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -350,6 +395,13 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
                 unitCost:  item.unitCost,
               })),
               notes,
+              varianceAction,
+              variancePaymentMethod:    varNormMethod,
+              varianceBankProviderId:   varNormMethod === 'bank' ? varBankId   : '',
+              varianceBankProviderName: varNormMethod === 'bank' ? varBankName : '',
+              varianceCustomMethodId:   varNormMethod === 'custom' ? varCustomId   : '',
+              varianceCustomMethodName: varNormMethod === 'custom' ? varCustomName : '',
+              variancePaymentReference: varPayRef,
             })
           : JSON.stringify(payload),
       })
@@ -357,7 +409,12 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
       if (response.ok) {
         const data = await response.json()
         if (linkedAdvanceId) {
-          toast.success(`Goods received against advance ${data.receiptNumber}`)
+          const varMsg = data.varianceAction === 'payable'  ? ` · shortfall KES ${Math.round(Math.abs(data.variance)).toLocaleString()} recorded as payable`
+                       : data.varianceAction === 'pay_now'  ? ` · shortfall KES ${Math.round(Math.abs(data.variance)).toLocaleString()} paid`
+                       : data.varianceAction === 'credit'   ? ` · KES ${Math.round(Math.abs(data.variance)).toLocaleString()} left as supplier credit`
+                       : data.varianceAction === 'refund'   ? ` · KES ${Math.round(Math.abs(data.variance)).toLocaleString()} refunded`
+                       : ''
+          toast.success(`Goods received against advance ${data.receiptNumber}${varMsg}`)
         } else {
           const batchMsg = data.batchesCreated?.length
             ? ` (${data.batchesCreated.length} lot${data.batchesCreated.length !== 1 ? 's' : ''} created)`
@@ -448,7 +505,7 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
                 </p>
                 <select
                   value={linkedAdvanceId}
-                  onChange={e => setLinkedAdvanceId(e.target.value)}
+                  onChange={e => { setLinkedAdvanceId(e.target.value); setVarianceAction('none'); setVarPayMethod('cash'); setVarBankId(''); setVarPayRef('') }}
                   className="w-full h-9 px-3 border rounded-md text-sm bg-background"
                 >
                   <option value="">No — create a new stock receipt</option>
@@ -474,7 +531,8 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
                 placeholder="INV-2024-001" className="mt-1" />
             </div>
 
-            {/* Payment */}
+            {/* Payment — hidden when an advance is linked (money already went out) */}
+            {!linkedAdvanceId && (
             <div className="space-y-3">
               <div>
                 <Label>Payment</Label>
@@ -557,6 +615,159 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
                 </p>
               )}
             </div>
+            )}
+
+            {/* Advance settled — show payment info + variance decision when needed */}
+            {linkedAdvanceId && (() => {
+              const adv = advanceReceipts.find(a => a._id === linkedAdvanceId)
+              if (!adv) return null
+              const goodsTotal = calculateTotal()
+              const variance   = goodsTotal - adv.totalCost // positive=shortfall, negative=surplus
+              const hasVariance = Math.abs(variance) > 0.01 && goodsTotal > 0
+
+              function fmtAmt(n: number) {
+                return `KES ${Math.round(Math.abs(n)).toLocaleString()}`
+              }
+
+              return (
+                <div className="space-y-3">
+                  {/* Settled info */}
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm space-y-1">
+                    <p className="font-medium text-purple-800 flex items-center gap-1.5">
+                      <ArrowDownToLine size={14} />
+                      No new payment — settled against advance {adv.receiptNumber}
+                    </p>
+                    <p className="text-xs text-purple-600">
+                      Advance paid: {fmtAmt(adv.totalCost)}
+                      {adv.paymentMethod === 'cash' ? ' · Cash'
+                        : adv.paymentMethod === 'mobile_money' ? ' · M-Pesa'
+                        : adv.bankProviderName ? ` · ${adv.bankProviderName}`
+                        : adv.customMethodName ? ` · ${adv.customMethodName}`
+                        : ''}
+                    </p>
+                  </div>
+
+                  {/* Variance decision — only appears once goods are entered */}
+                  {hasVariance && (
+                    <div className={`border rounded-lg p-3 space-y-3 ${
+                      variance > 0
+                        ? 'bg-amber-50 border-amber-300'
+                        : 'bg-green-50 border-green-300'
+                    }`}>
+                      {variance > 0 ? (
+                        <>
+                          <p className="text-sm font-semibold text-amber-800">
+                            Shortfall: {fmtAmt(variance)} more than the advance
+                          </p>
+                          <p className="text-xs text-amber-700">How do you want to handle the extra {fmtAmt(variance)}?</p>
+                          <div className="flex flex-col gap-2">
+                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                              <input type="radio" name="varAction" value="payable"
+                                checked={varianceAction === 'payable'}
+                                onChange={() => setVarianceAction('payable')} />
+                              Record as payable — settle with {adv.receiptNumber?.split('-')[0] ? 'the supplier' : 'supplier'} later
+                            </label>
+                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                              <input type="radio" name="varAction" value="pay_now"
+                                checked={varianceAction === 'pay_now'}
+                                onChange={() => setVarianceAction('pay_now')} />
+                              Pay now
+                            </label>
+                          </div>
+                          {varianceAction === 'pay_now' && (
+                            <div className="space-y-2 pt-1">
+                              <div>
+                                <label className="text-xs text-muted-foreground">Payment Method</label>
+                                <select value={varPayMethod}
+                                  onChange={e => { setVarPayMethod(e.target.value); setVarBankId('') }}
+                                  className="w-full h-9 px-3 border rounded-md text-sm mt-1 bg-background">
+                                  <option value="cash">Cash</option>
+                                  <option value="mobile_money">M-Pesa / Mobile Money</option>
+                                  <option value="card">Card</option>
+                                  {bankProviders.length > 0 && <option value="bank">Bank Transfer</option>}
+                                  {customMethods.map(m => (
+                                    <option key={m._id} value={`custom:${m._id}`}>{m.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              {varPayMethod === 'bank' && (
+                                <div>
+                                  <label className="text-xs text-muted-foreground">Bank</label>
+                                  <select value={varBankId} onChange={e => setVarBankId(e.target.value)}
+                                    className="w-full h-9 px-3 border rounded-md text-sm mt-1 bg-background">
+                                    <option value="">Select bank…</option>
+                                    {bankProviders.map(b => <option key={b._id} value={b._id}>{b.name}</option>)}
+                                  </select>
+                                </div>
+                              )}
+                              <div>
+                                <label className="text-xs text-muted-foreground">Reference (optional)</label>
+                                <Input value={varPayRef} onChange={e => setVarPayRef(e.target.value)}
+                                  placeholder="M-Pesa code, receipt no." className="mt-1 h-9 text-sm" />
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm font-semibold text-green-800">
+                            Surplus: {fmtAmt(variance)} less than the advance
+                          </p>
+                          <p className="text-xs text-green-700">The supplier has {fmtAmt(variance)} of yours. What should happen to it?</p>
+                          <div className="flex flex-col gap-2">
+                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                              <input type="radio" name="varAction" value="credit"
+                                checked={varianceAction === 'credit'}
+                                onChange={() => setVarianceAction('credit')} />
+                              Leave as supplier credit — apply to next order
+                            </label>
+                            <label className="flex items-center gap-2 text-sm cursor-pointer">
+                              <input type="radio" name="varAction" value="refund"
+                                checked={varianceAction === 'refund'}
+                                onChange={() => setVarianceAction('refund')} />
+                              Supplier refunded the difference
+                            </label>
+                          </div>
+                          {varianceAction === 'refund' && (
+                            <div className="space-y-2 pt-1">
+                              <div>
+                                <label className="text-xs text-muted-foreground">Refund Method</label>
+                                <select value={varPayMethod}
+                                  onChange={e => { setVarPayMethod(e.target.value); setVarBankId('') }}
+                                  className="w-full h-9 px-3 border rounded-md text-sm mt-1 bg-background">
+                                  <option value="cash">Cash</option>
+                                  <option value="mobile_money">M-Pesa / Mobile Money</option>
+                                  <option value="card">Card</option>
+                                  {bankProviders.length > 0 && <option value="bank">Bank Transfer</option>}
+                                  {customMethods.map(m => (
+                                    <option key={m._id} value={`custom:${m._id}`}>{m.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              {varPayMethod === 'bank' && (
+                                <div>
+                                  <label className="text-xs text-muted-foreground">Bank</label>
+                                  <select value={varBankId} onChange={e => setVarBankId(e.target.value)}
+                                    className="w-full h-9 px-3 border rounded-md text-sm mt-1 bg-background">
+                                    <option value="">Select bank…</option>
+                                    {bankProviders.map(b => <option key={b._id} value={b._id}>{b.name}</option>)}
+                                  </select>
+                                </div>
+                              )}
+                              <div>
+                                <label className="text-xs text-muted-foreground">Reference (optional)</label>
+                                <Input value={varPayRef} onChange={e => setVarPayRef(e.target.value)}
+                                  placeholder="M-Pesa code, receipt no." className="mt-1 h-9 text-sm" />
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* Grand total + payment summary */}
             <div className="flex items-center justify-between border-t pt-3">
@@ -564,7 +775,7 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
               <div className="text-right">
                 <span className="text-lg font-bold">{calculateTotal().toLocaleString()}</span>
                 <span className="text-xs text-muted-foreground ml-2">
-                  {paymentStatus === 'paid' ? '(paid)' : '(on credit)'}
+                  {linkedAdvanceId ? '(settled via advance)' : paymentStatus === 'paid' ? '(paid)' : '(on credit)'}
                 </span>
               </div>
             </div>

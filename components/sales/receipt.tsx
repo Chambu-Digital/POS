@@ -49,6 +49,7 @@ interface ReceiptProps {
   date: Date
   receiptNumber: string
   // Contact / payment details
+  branchName?: string
   shopPhone?: string
   shopEmail?: string
   shopAddress?: string
@@ -121,6 +122,7 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
   payments,
   termsEnabled,
   termsText,
+  branchName,
 }, ref) => {
   const receiptRef = useRef<HTMLDivElement>(null)
 
@@ -255,6 +257,9 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
           <img src={resolveMediaUrl(shopLogo)} alt={shopName} className="logo" />
         )}
         <div className="company-name">{shopName}</div>
+        {branchName && (
+          <div style={{ fontSize: '12px', fontWeight: 'normal', marginTop: '2px', marginBottom: '2px' }}>{branchName}</div>
+        )}
         <div className="company-details">
           {shopPhone && <div>Phone: {shopPhone}</div>}
           {shopEmail && <div>Email: {shopEmail}</div>}
