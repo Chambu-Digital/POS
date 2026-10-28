@@ -22,6 +22,7 @@ interface Product {
   category: string
   brand?: string
   variant?: string
+  model?: string
   sku: string
   sellingPrice: number
   stock: number // Current branch stock from ProductInventory
@@ -88,9 +89,13 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
   }
 
   function formatProductName(product: Product) {
-    const variant = product.variant ? ` ${product.variant}` : ''
-    const brand = product.brand ? ` ${product.brand}` : ''
-    return `${product.category} › ${brand}${variant} ${product.productName}`.trim()
+    // Compose a unique display name from brand / variant / model / productName
+    // so two items that share a productName but differ by brand/model/variant
+    // don't look like the same item. Matches the format used by the Stock In
+    // and Stock Count modals.
+    return [product.brand, product.variant, product.model, product.productName]
+      .filter(Boolean)
+      .join(' › ')
   }
 
   function addItem(product: Product) {
@@ -106,7 +111,7 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
 
     setItems([...items, {
       productId: product._id,
-      itemName: product.productName,
+      itemName: formatProductName(product),
       quantitySent: 1,
       unitPrice: product.sellingPrice,
       availableStock: product.stock,
@@ -174,10 +179,18 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
     }
   }
 
-  const filteredProducts = products.filter(p =>
-    p.productName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.sku?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredProducts = products.filter((p) => {
+    if (!searchQuery) return true
+    const q = searchQuery.toLowerCase()
+    // Match against the full composite name (brand › variant › model ›
+    // productName) plus category and SKU, so an item can be found by brand,
+    // model or variant alone — not just by product name.
+    return (
+      formatProductName(p).toLowerCase().includes(q) ||
+      p.category?.toLowerCase().includes(q) ||
+      p.sku?.toLowerCase().includes(q)
+    )
+  })
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -212,7 +225,7 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
             <Label>Add Products</Label>
             <div className="relative">
               <Input
-                placeholder="Search products by name or SKU..."
+                placeholder="Search by name, brand, model, variant or SKU..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pr-10"
