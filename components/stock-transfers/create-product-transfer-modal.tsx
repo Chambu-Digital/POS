@@ -233,13 +233,13 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
               <Package className="absolute right-3 top-2.5 h-5 w-5 text-gray-400" />
             </div>
             {searchQuery && (
-              <div className="mt-2 border rounded-lg max-h-40 overflow-y-auto">
+              <div className="mt-2 border rounded-lg max-h-72 overflow-y-auto">
                 {filteredProducts.length === 0 ? (
                   <div className="p-4 text-sm text-gray-500 text-center">
                     No products found
                   </div>
                 ) : (
-                  filteredProducts.slice(0, 10).map(product => (
+                  filteredProducts.map(product => (
                     <button
                       key={product._id}
                       onClick={() => addItem(product)}
