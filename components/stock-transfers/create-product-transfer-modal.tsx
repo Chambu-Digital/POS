@@ -112,7 +112,7 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
     setItems([...items, {
       productId: product._id,
       itemName: formatProductName(product),
-      quantitySent: 1,
+      quantitySent: 0,
       unitPrice: product.sellingPrice,
       availableStock: product.stock,
     }])
@@ -122,7 +122,7 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
   function updateItemQuantity(productId: string, quantity: number) {
     setItems(items.map(item =>
       item.productId === productId
-        ? { ...item, quantitySent: Math.min(Math.max(1, quantity), item.availableStock) }
+        ? { ...item, quantitySent: Math.min(Math.max(0, quantity), item.availableStock) }
         : item
     ))
   }
@@ -139,6 +139,12 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
 
     if (items.length === 0) {
       toast.error('Please add at least one item')
+      return
+    }
+
+    const invalid = items.find(item => item.quantitySent < 1)
+    if (invalid) {
+      toast.error(`Enter a quantity of at least 1 for ${invalid.itemName}`)
       return
     }
 
@@ -276,10 +282,11 @@ export function CreateProductTransferModal({ isOpen, onClose, onSuccess }: Creat
                     <div className="w-28">
                       <Input
                         type="number"
-                        min="1"
+                        min="0"
                         max={item.availableStock}
-                        value={item.quantitySent}
-                        onChange={(e) => updateItemQuantity(item.productId, parseInt(e.target.value) || 1)}
+                        value={item.quantitySent || ''}
+                        placeholder="Qty"
+                        onChange={(e) => updateItemQuantity(item.productId, parseInt(e.target.value) || 0)}
                         className="text-center"
                       />
                     </div>
