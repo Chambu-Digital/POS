@@ -4,6 +4,7 @@ import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 import { normalisePermissions } from '@/lib/modules'
 import { Types } from 'mongoose'
+import { processLedgerEntries, mergeByPayment } from '@/lib/dashboard-ledger'
 
 // ── helper: cap a payment amount at its actual revenue share (strips cash change) ──
 function cappedPaymentAmount(payment: any, allPayments: any[], saleTotal: number): number {
@@ -15,19 +16,6 @@ function cappedPaymentAmount(payment: any, allPayments: any[], saleTotal: number
     })
     .reduce((s: number, op: any) => s + (op.amount || 0), 0)
   return Math.min(payment.amount || 0, Math.max(0, saleTotal - otherTotal))
-}
-
-// ── helper: resolve a customer-ledger entry's payment-method display name ─────
-// Used for 'deposit' (received) and 'deposit_refund' (outflow) ledger entries,
-// which carry paymentMethod + bank/custom method fields. Mirrors the same
-// resolution in the end-of-day report so dashboard and report agree.
-function resolveLedgerMethodName(entry: any): string {
-  if (entry.paymentMethod === 'cash') return 'Cash'
-  if (entry.paymentMethod === 'mobile_money') return 'M-Pesa'
-  if (entry.paymentMethod === 'bank' && entry.bankProviderName) return entry.bankProviderName
-  if (entry.paymentMethod === 'custom' && entry.customMethodName) return entry.customMethodName
-  if (entry.paymentMethod) return entry.paymentMethod
-  return 'Cash'
 }
 
 // ── helper: compute byPayment from a list of sales ────────────────────────────
@@ -132,7 +120,7 @@ export async function GET(request: NextRequest) {
       models.Customer.find({
         userId: ownerObjId,
         'ledger.date': { $gte: todayStart, $lte: todayEnd },
-        'ledger.type': { $in: ['payment', 'deposit'] },
+        'ledger.type': { $in: ['payment', 'deposit', 'deposit_refund'] },
       }).select('name ledger').lean(),
 
       // Period sales (for charts + payment methods) — populate only for top products
@@ -177,7 +165,7 @@ export async function GET(request: NextRequest) {
       canSeeReports ? models.Customer.find({
         userId: ownerObjId,
         'ledger.date': { $gte: periodStart },
-        'ledger.type': { $in: ['payment', 'deposit'] },
+        'ledger.type': { $in: ['payment', 'deposit', 'deposit_refund'] },
       }).select('ledger').lean() : Promise.resolve([]),
 
       // Rental aggregate — count + revenue, no full fetch
@@ -256,35 +244,21 @@ export async function GET(request: NextRequest) {
     }
 
     // ── Today's credit collected + deposits received ─────────────────────────────
-    let creditCollected = 0
-    const depositsReceivedByMethod: Record<string, number> = {}
-    let depositsReceivedTotal = 0
-    for (const customer of todayCustomers as any[]) {
-      for (const entry of customer.ledger) {
-        const d = new Date(entry.date)
-        if (d < todayStart || d > todayEnd) continue
-
-        if (entry.type === 'payment' && entry.amount < 0) {
-          // Credit settlement — real cash in by method
-          if (isStaff && entry.collectedBy?.toString() !== payload.userId) continue
-          creditCollected += Math.abs(entry.amount)
-        } else if (entry.type === 'deposit' && entry.amount > 0) {
-          // Customer prepayment received — real cash in by method (e.g. Family
-          // Bank 5,000). Must show on the Today's Summary so the till reconciles.
-          if (isStaff && entry.collectedBy?.toString() !== payload.userId) continue
-          const methodName = resolveLedgerMethodName(entry)
-          depositsReceivedByMethod[methodName] = (depositsReceivedByMethod[methodName] || 0) + entry.amount
-          depositsReceivedTotal += entry.amount
-        }
-      }
-    }
+    // Use the shared processLedgerEntries helper so today's byPayment matches
+    // the breakdown route exactly — same query, same logic, same keys.
+    const staffScopeIdForToday = isStaff ? payload.userId : null
+    const {
+      creditCollectedTotal: creditCollected,
+      byPaymentFromLedger:  todayByPaymentFromLedger,
+      depositsReceivedTotal,
+    } = processLedgerEntries(todayCustomers as any[], todayStart, todayEnd, staffScopeIdForToday)
 
     // ── Today stats ───────────────────────────────────────────────────────────
-    const todayAll = [...(todaySales as any[]), ...(todayHospitalitySales as any[])]
+    const todayAll     = [...(todaySales as any[]), ...(todayHospitalitySales as any[])]
     const salesRevenue = todayAll.reduce((s: number, x: any) => s + x.total, 0)
 
     const todayStats = {
-      totalOrders: todayAll.length,
+      totalOrders:  todayAll.length,
       totalRevenue: salesRevenue + creditCollected,
       bySource: {
         pos:         (todaySales as any[]).filter((s: any) => !s.source || s.source === 'pos').reduce((s: number, x: any) => s + x.total, 0),
@@ -292,17 +266,10 @@ export async function GET(request: NextRequest) {
         rental:      (todaySales as any[]).filter((s: any) => s.source === 'rental').reduce((s: number, x: any) => s + x.total, 0),
         hospitality: (todayHospitalitySales as any[]).reduce((s: number, x: any) => s + x.total, 0),
       },
-      byPayment: {
-        // Sale payments by method (cash/mpesa/bank/custom) — 'credit' and
-        // 'deposit' sale-payments are excluded by computeByPayment (internal
-        // transfers, not new cash). We then ADD deposit receipts (real cash in
-        // by method, e.g. Family Bank 5,000) so the Today's Summary reconciles
-        // with the till. Without this, the owner counting cash would see 5,000
-        // in the bank that the dashboard doesn't reflect.
-        ...computeByPayment(todayAll),
-        ...depositsReceivedByMethod,
-      },
-      creditIssued:    (todaySales as any[]).reduce((s: number, x: any) => s + (x.debt || 0), 0),
+      // mergeByPayment adds deposit receipt cash inflows to the sales cash totals
+      // under the same raw method key — no case-mismatch, no overwrite.
+      byPayment:    mergeByPayment(computeByPayment(todayAll), todayByPaymentFromLedger),
+      creditIssued: (todaySales as any[]).reduce((s: number, x: any) => s + (x.debt || 0), 0),
       creditCollected,
       depositsReceivedTotal,
     }
@@ -427,26 +394,17 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    let periodCreditCollected = 0
-    const periodDepositsReceivedByMethod: Record<string, number> = {}
-    for (const customer of customers as any[]) {
-      for (const entry of customer.ledger) {
-        if (new Date(entry.date) < periodStart) continue
-        if (entry.type === 'payment' && entry.amount < 0) {
-          // Credit settlement — real cash in
-          if (isStaff && entry.collectedBy?.toString() !== payload.userId) continue
-          periodCreditCollected += Math.abs(entry.amount)
-        } else if (entry.type === 'deposit' && entry.amount > 0) {
-          // Customer prepayment received — real cash in by method. Merge into the
-          // 30-day payment-methods chart so it stays consistent with Today's
-          // Summary and the end-of-day report.
-          if (isStaff && entry.collectedBy?.toString() !== payload.userId) continue
-          const methodName = resolveLedgerMethodName(entry)
-          if (!paymentMethods[methodName]) paymentMethods[methodName] = { method: methodName, count: 0, total: 0 }
-          paymentMethods[methodName].count += 1
-          paymentMethods[methodName].total += entry.amount
-        }
-      }
+    // Use shared helper for period customer ledger — credit settlements + deposit receipts
+    const periodStaffScopeId = isStaff ? payload.userId : null
+    const {
+      creditCollectedTotal: periodCreditCollected,
+      byPaymentFromLedger:  periodByPaymentFromLedger,
+    } = processLedgerEntries(customers as any[], periodStart, new Date(), periodStaffScopeId)
+
+    // Merge period deposit inflows into the paymentMethods chart
+    for (const [method, amount] of Object.entries(periodByPaymentFromLedger)) {
+      if (!paymentMethods[method]) paymentMethods[method] = { method, count: 0, total: 0 }
+      paymentMethods[method].total += amount
     }
 
     // ── COGS + gross profit for period (retail sales only — hosp has no COGS) ─

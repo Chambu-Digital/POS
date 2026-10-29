@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
-import { ArrowLeft, Search, X, Receipt, CreditCard, Wallet } from 'lucide-react'
+import { ArrowLeft, Search, X, Receipt, CreditCard, Wallet, PiggyBank } from 'lucide-react'
 import { LoadingOrOffline } from '@/components/offline-indicator'
 import { apiGet } from '@/lib/api-client'
 
@@ -48,6 +48,19 @@ interface CreditPayment {
   date: string
 }
 
+interface DepositReceipt {
+  _id: string
+  customerName: string
+  customerId: string
+  depositId: string | null
+  amount: number
+  methodKey: string
+  methodLabel: string
+  paymentReference: string
+  date: string
+  note: string
+}
+
 interface Summary {
   totalOrders: number
   totalRevenue: number
@@ -55,12 +68,14 @@ interface Summary {
   byPayment: Record<string, number>
   creditIssued: number
   creditCollected: number
+  depositsReceived: number
 }
 
 interface BreakdownData {
   summary: Summary
   transactions: Transaction[]
   creditPayments: CreditPayment[]
+  depositReceipts: DepositReceipt[]
   filter: string
 }
 
@@ -79,6 +94,7 @@ function filterLabel(filter: string): string {
   if (!filter) return 'All Transactions'
   if (filter === 'credit_issued') return 'Credit Issued'
   if (filter === 'credit_collected') return 'Credit Collected'
+  if (filter === 'deposit_receipts') return 'Customer Deposits'
   if (filter.startsWith('source_')) return `Source: ${filter.replace('source_', '').toUpperCase()}`
   return formatMethodName(filter)
 }
@@ -149,6 +165,16 @@ function BreakdownPageInner() {
     return cp.customerName.toLowerCase().includes(q) || cp.note.toLowerCase().includes(q)
   })
 
+  const visibleDepositReceipts = (data?.depositReceipts ?? []).filter(dr => {
+    if (!q) return true
+    return (
+      dr.customerName.toLowerCase().includes(q) ||
+      dr.methodLabel.toLowerCase().includes(q) ||
+      dr.paymentReference.toLowerCase().includes(q) ||
+      dr.note.toLowerCase().includes(q)
+    )
+  })
+
   // When a filter is active, sum only the filtered payment amounts (not the full sale total)
   // For cash: cap at the sale total minus non-cash payments (excludes change given back)
   // For other methods: p.amount is always exact (no change scenario)
@@ -171,7 +197,8 @@ function BreakdownPageInner() {
 
   const totalShown =
     filteredPaymentTotal(visibleTransactions) +
-    visibleCreditPayments.reduce((s, c) => s + c.amount, 0)
+    visibleCreditPayments.reduce((s, c) => s + c.amount, 0) +
+    visibleDepositReceipts.reduce((s, d) => s + d.amount, 0)
 
   return (
     <LoadingOrOffline
@@ -257,7 +284,7 @@ function BreakdownPageInner() {
         </div>
 
         {/* Transactions table */}
-        {(visibleTransactions.length > 0 || (!filter && visibleCreditPayments.length === 0)) && (
+        {(visibleTransactions.length > 0 || (!filter && visibleCreditPayments.length === 0 && visibleDepositReceipts.length === 0)) && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -325,8 +352,48 @@ function BreakdownPageInner() {
           </Card>
         )}
 
+        {/* Deposit receipts section — customer prepayments received today */}
+        {visibleDepositReceipts.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <PiggyBank className="h-4 w-4 text-teal-600" />
+                Customer Deposits Received
+                <span className="ml-auto text-sm font-normal text-muted-foreground">
+                  {visibleDepositReceipts.length} receipt{visibleDepositReceipts.length !== 1 ? 's' : ''}
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="divide-y">
+                {visibleDepositReceipts.map(dr => (
+                  <div key={dr._id} className="flex items-center justify-between px-4 py-3 text-sm">
+                    <div>
+                      <p className="font-medium">{dr.customerName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {dr.methodLabel}
+                        {dr.paymentReference && ` · ${dr.paymentReference}`}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(dr.date).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}
+                        {dr.note && ` · ${dr.note}`}
+                      </p>
+                    </div>
+                    <span className="font-semibold text-teal-600">KES {dr.amount.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between items-center px-4 py-3 bg-muted/40 rounded-b-lg text-sm font-semibold">
+                <span>Total received ({visibleDepositReceipts.length} receipt{visibleDepositReceipts.length !== 1 ? 's' : ''})</span>
+                <span className="text-teal-600">KES {visibleDepositReceipts.reduce((s, d) => s + d.amount, 0).toLocaleString()}</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Grand total when multiple sections */}
-        {visibleTransactions.length > 0 && visibleCreditPayments.length > 0 && (
+        {(visibleTransactions.length + visibleCreditPayments.length + visibleDepositReceipts.length) > 1 &&
+         (visibleCreditPayments.length > 0 || visibleDepositReceipts.length > 0) && (
           <div className="flex justify-between items-center px-4 py-3 rounded-lg border bg-amber-50 border-amber-200 text-sm font-bold">
             <span>Grand Total</span>
             <span>KES {totalShown.toLocaleString()}</span>
@@ -334,7 +401,7 @@ function BreakdownPageInner() {
         )}
 
         {/* Empty state */}
-        {!loading && visibleTransactions.length === 0 && visibleCreditPayments.length === 0 && (
+        {!loading && visibleTransactions.length === 0 && visibleCreditPayments.length === 0 && visibleDepositReceipts.length === 0 && (
           <div className="text-center py-16 text-muted-foreground">
             <CreditCard className="h-10 w-10 mx-auto mb-3 opacity-30" />
             <p className="font-medium">No transactions found</p>
@@ -478,6 +545,10 @@ function buildChips(summary: Summary) {
   }
   if (summary.creditCollected > 0) {
     chips.push({ key: 'credit_collected', label: 'Credit Collected', amount: summary.creditCollected, accent: 'text-blue-600' })
+  }
+  // Customer deposits received today (shown as a dedicated chip for quick access)
+  if (summary.depositsReceived > 0) {
+    chips.push({ key: 'deposit_receipts', label: 'Deposits Received', amount: summary.depositsReceived, accent: 'text-teal-600' })
   }
 
   return chips
