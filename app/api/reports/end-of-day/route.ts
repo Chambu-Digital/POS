@@ -81,6 +81,11 @@ export async function GET(request: NextRequest) {
     const allPaymentMethods = new Set<string>()
     const staffIds = new Set<string>()
 
+    // Sales paid via 'deposit' (customer prepayment drawdown). These are NOT
+    // cash — they're recorded here for the "Deposits Used Today" report section
+    // and excluded from the per-method cash totals to avoid double-counting.
+    const depositsUsed: any[] = []
+
     for (const sale of sales) {
       const saleStaffId = sale.staffId ? sale.staffId.toString() : 'owner'
       staffIds.add(saleStaffId)
@@ -94,7 +99,28 @@ export async function GET(request: NextRequest) {
       // share so we never count cash change as revenue (mirrors dashboard stats).
       if (sale.payments && Array.isArray(sale.payments)) {
         for (const payment of sale.payments) {
+          // 'credit' and 'deposit' are both non-cash for totals purposes:
+          //  - credit  → debt created, no cash today (settled later as 'payment')
+          //  - deposit → internal transfer drawing a customer prepayment; the
+          //              cash was already counted on the day the deposit was
+          //              taken (see the deposits-received block below). Counting
+          //              it here would double-count the same money.
           if ((payment.method || '').toLowerCase() === 'credit') continue
+          if ((payment.method || '').toLowerCase() === 'deposit') {
+            // Collect for the "Deposits Used Today" view — no cash, just records
+            // which sale drew down which deposit.
+            depositsUsed.push({
+              _id: sale._id,
+              orderNumber: sale.orderNumber,
+              customerName: sale.customerName || 'Walk-in',
+              amount: parseFloat(payment.amount) || 0,
+              depositId: payment.depositId || null,
+              cashierId: saleStaffId,
+              cashierName: '', // resolved below from staffMap
+              timestamp: sale.createdAt,
+            })
+            continue
+          }
 
           const methodName = resolveMethodName(payment)
           const capped = cappedPaymentAmount(payment, sale.payments, sale.total)
@@ -189,6 +215,80 @@ export async function GET(request: NextRequest) {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // 3b. FETCH CUSTOMER DEPOSITS — received & refunded today
+    // ─────────────────────────────────────────────────────────────────────────
+    // A deposit received is REAL CASH by method (already in the customer's
+    // hand), so it must flow INTO totalsByMethod exactly like a credit payment
+    // does — otherwise the Equity/cash total for the day would be wrong. The
+    // matching "deposits used" sale-payment (method 'deposit') is skipped in
+    // section 2 to avoid double-counting the same money.
+    //
+    // A deposit refunded is a REAL CASH OUTFLOW by method, tracked in
+    // depositRefundsByMethod and subtracted in netByMethod below.
+    const depositLedgerCustomers = await models.Customer.find({
+      userId: ownerId,
+      'ledger.date': { $gte: startOfDay, $lte: endOfDay },
+      'ledger.type': { $in: ['deposit', 'deposit_refund'] },
+    }).lean()
+
+    const depositsReceived: any[] = []
+    const depositRefundsByMethod = new Map<string, number>()
+
+    // helper: resolve a ledger entry's method display name (mirrors the credit
+    // payment logic above so totals stay consistent).
+    const resolveLedgerMethodName = (entry: any): string => {
+      if (entry.paymentMethod === 'cash') return 'Cash'
+      if (entry.paymentMethod === 'mobile_money') return 'M-Pesa'
+      if (entry.paymentMethod === 'bank' && entry.bankProviderName) return entry.bankProviderName
+      if (entry.paymentMethod === 'custom' && entry.customMethodName) return entry.customMethodName
+      if (entry.paymentMethod) return entry.paymentMethod
+      return 'Cash'
+    }
+
+    for (const customer of depositLedgerCustomers) {
+      for (const entry of customer.ledger) {
+        const entryDate = new Date(entry.date)
+        if (entryDate < startOfDay || entryDate > endOfDay) continue
+
+        if (entry.type === 'deposit' && entry.amount > 0) {
+          // Scope to this staff member's collections if not full-report view
+          if (staffScopeId && entry.collectedBy?.toString() !== staffScopeId) continue
+
+          const methodName = resolveLedgerMethodName(entry)
+          const collectorId = entry.collectedBy?.toString() || 'owner'
+          staffIds.add(collectorId)
+          if (!paymentsByEmployee.has(collectorId)) {
+            paymentsByEmployee.set(collectorId, new Map())
+          }
+          allPaymentMethods.add(methodName)
+          const empMap = paymentsByEmployee.get(collectorId)!
+          empMap.set(methodName, (empMap.get(methodName) || 0) + entry.amount)
+
+          depositsReceived.push({
+            customerId: customer._id,
+            customerName: customer.name,
+            depositId: entry.depositId || null,
+            amount: entry.amount,
+            paymentMethod: methodName,
+            mpesaCode: entry.mpesaCode || '',
+            remainingDepositBalance: entry.balance,
+            timestamp: entry.date,
+            note: entry.note,
+            collectedBy: collectorId,
+          })
+        } else if (entry.type === 'deposit_refund' && entry.amount < 0) {
+          // Refunds are outflows; do NOT add to totalsByMethod. Track separately
+          // and subtract in netByMethod.
+          if (staffScopeId && entry.collectedBy?.toString() !== staffScopeId) continue
+
+          const methodName = resolveLedgerMethodName(entry)
+          const refundAmount = Math.abs(entry.amount)
+          depositRefundsByMethod.set(methodName, (depositRefundsByMethod.get(methodName) || 0) + refundAmount)
+        }
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // 4. FETCH STAFF DETAILS
     // ─────────────────────────────────────────────────────────────────────────
     const staffIdsArray = Array.from(staffIds).filter(id => id !== 'owner')
@@ -213,6 +313,12 @@ export async function GET(request: NextRequest) {
       ? `${owner.firstName} ${owner.lastName}`.trim()
       : owner?.shopName || owner?.name || owner?.email || 'Owner'
     staffMap.set('owner', ownerName)
+
+    // Resolve cashier display names for the deposits-used section (the sales
+    // loop in section 2 runs before staffMap exists, so names are filled here).
+    for (const d of depositsUsed) {
+      d.cashierName = staffMap.get(d.cashierId) || ownerName
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // 5. BUILD PAYMENT METHODS TABLE
@@ -412,19 +518,37 @@ export async function GET(request: NextRequest) {
       stockOutByMethod.set(method, (stockOutByMethod.get(method) || 0) + (r.totalCost || 0))
     }
 
-    // Build per-method net totals: collected - expenses - stockOut
+    // Build per-method net totals: collected - expenses - stockOut - depositRefunds
+    // Deposit refunds are a real cash OUTFLOW (money returned to the customer)
+    // so they reduce each method's net, exactly like stock-out and expenses.
     const allOutflowMethods = new Set([
       ...Array.from(totalsByMethod.keys()),
       ...Array.from(expensesByMethod.keys()),
       ...Array.from(stockOutByMethod.keys()),
+      ...Array.from(depositRefundsByMethod.keys()),
     ])
     const netByMethod: Record<string, number> = {}
     for (const method of allOutflowMethods) {
       const collected = totalsByMethod.get(method) || 0
       const expOut = expensesByMethod.get(method) || 0
       const stockOut = stockOutByMethod.get(method) || 0
-      netByMethod[method] = collected - expOut - stockOut
+      const depRefund = depositRefundsByMethod.get(method) || 0
+      netByMethod[method] = collected - expOut - stockOut - depRefund
     }
+
+    // ── Outstanding deposits: money we're holding for customers (a liability) ──
+    // Sum of all active/partial Deposit balances for this branch. This is NOT
+    // the business's money — it's prepayment we owe customers — so it's surfaced
+    // as a liability alongside "You Owe Suppliers".
+    const outstandingDepositsAgg = await models.Deposit.aggregate([
+      { $match: {
+        userId: new Types.ObjectId(ownerId),
+        ...(branchContext ? { branchId: new Types.ObjectId(branchContext) } : {}),
+        status: { $in: ['active', 'partial'] },
+      }},
+      { $group: { _id: null, total: { $sum: '$balance' } } },
+    ])
+    const totalOutstandingDeposits = outstandingDepositsAgg[0]?.total || 0
     const totalSales = sales.length
     const totalSalesAmount = sales.reduce((sum, sale) => sum + sale.total, 0)
     const totalCreditIssued = sales
@@ -464,6 +588,8 @@ export async function GET(request: NextRequest) {
         // Outstanding balances
         totalOutstandingPayables,
         totalOutstandingAdvances,
+        // Customer prepayments we owe (a liability — not our money)
+        totalOutstandingDeposits,
       },
       paymentMethods: {
         methods: paymentMethodsArray,
@@ -473,9 +599,20 @@ export async function GET(request: NextRequest) {
         expensesByMethod: Object.fromEntries(expensesByMethod),
         stockOutByMethod: Object.fromEntries(stockOutByMethod),
         netByMethod,
+        // Real cash OUTFLOW today from returning customer prepayments, by method.
+        // Reduces netByMethod so the per-method cash position stays honest.
+        depositRefundsByMethod: Object.fromEntries(depositRefundsByMethod),
       },
       creditSales: creditSalesFormatted,
       creditPayments: creditPaymentsReceived,
+      // ── Customer deposits ───────────────────────────────────────────────────
+      // Received = real cash by method (already in totalsByMethod). Shown
+      // separately so the day's Equity/cash total can be reconciled against the
+      // deposit slips.
+      depositsReceived,
+      // Used = sales that drew down deposits. No cash; listed for audit so each
+      // pickup can be traced back to the deposit it consumed.
+      depositsUsed,
       expenses: expensesFormatted,
       pendingExpenses: pendingExpenses.map(exp => ({
         _id: exp._id,

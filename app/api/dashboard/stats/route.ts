@@ -17,6 +17,19 @@ function cappedPaymentAmount(payment: any, allPayments: any[], saleTotal: number
   return Math.min(payment.amount || 0, Math.max(0, saleTotal - otherTotal))
 }
 
+// ── helper: resolve a customer-ledger entry's payment-method display name ─────
+// Used for 'deposit' (received) and 'deposit_refund' (outflow) ledger entries,
+// which carry paymentMethod + bank/custom method fields. Mirrors the same
+// resolution in the end-of-day report so dashboard and report agree.
+function resolveLedgerMethodName(entry: any): string {
+  if (entry.paymentMethod === 'cash') return 'Cash'
+  if (entry.paymentMethod === 'mobile_money') return 'M-Pesa'
+  if (entry.paymentMethod === 'bank' && entry.bankProviderName) return entry.bankProviderName
+  if (entry.paymentMethod === 'custom' && entry.customMethodName) return entry.customMethodName
+  if (entry.paymentMethod) return entry.paymentMethod
+  return 'Cash'
+}
+
 // ── helper: compute byPayment from a list of sales ────────────────────────────
 function computeByPayment(sales: any[]): Record<string, number> {
   const acc: Record<string, number> = {}
@@ -25,11 +38,16 @@ function computeByPayment(sales: any[]): Record<string, number> {
       for (const p of s.payments) {
         const name = p.customMethodName || p.method || 'cash'
         if (name.toLowerCase() === 'credit') continue
+        // 'deposit' is an internal transfer drawing a customer prepayment, NOT
+        // new cash today (the cash was received on the deposit day). Skip it from
+        // the per-method cash breakdown so it isn't mistaken for a collection.
+        if (name.toLowerCase() === 'deposit') continue
         acc[name] = (acc[name] || 0) + cappedPaymentAmount(p, s.payments, s.total)
       }
     } else {
       const m = s.paymentMethod || 'cash'
       if (m.toLowerCase() === 'credit') continue
+      if (m.toLowerCase() === 'deposit') continue
       acc[m] = (acc[m] || 0) + s.total
     }
   }
@@ -110,11 +128,11 @@ export async function GET(request: NextRequest) {
         ...(isStaff ? { servedBy: payload.userId } : {}),
       }).select('total discount payments paymentMethod createdAt').lean() : Promise.resolve([]),
 
-    // Today's credit payments from customer ledger
+    // Today's credit payments AND customer deposits received from customer ledger
       models.Customer.find({
         userId: ownerObjId,
         'ledger.date': { $gte: todayStart, $lte: todayEnd },
-        'ledger.type': 'payment',
+        'ledger.type': { $in: ['payment', 'deposit'] },
       }).select('name ledger').lean(),
 
       // Period sales (for charts + payment methods) — populate only for top products
@@ -155,11 +173,11 @@ export async function GET(request: NextRequest) {
         ? models.Staff.countDocuments({ userId: ownerObjId, branchId: branchObjId, active: true })
         : models.Staff.countDocuments({ userId: ownerObjId, active: true }),
 
-      // Credit payments for period
+      // Credit payments + customer deposits for period
       canSeeReports ? models.Customer.find({
         userId: ownerObjId,
         'ledger.date': { $gte: periodStart },
-        'ledger.type': 'payment',
+        'ledger.type': { $in: ['payment', 'deposit'] },
       }).select('ledger').lean() : Promise.resolve([]),
 
       // Rental aggregate — count + revenue, no full fetch
@@ -237,15 +255,26 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ── Today's credit collected ──────────────────────────────────────────────
+    // ── Today's credit collected + deposits received ─────────────────────────────
     let creditCollected = 0
+    const depositsReceivedByMethod: Record<string, number> = {}
+    let depositsReceivedTotal = 0
     for (const customer of todayCustomers as any[]) {
       for (const entry of customer.ledger) {
         const d = new Date(entry.date)
-        if (d >= todayStart && d <= todayEnd && entry.type === 'payment' && entry.amount < 0) {
-          // Staff only see credit they personally collected
+        if (d < todayStart || d > todayEnd) continue
+
+        if (entry.type === 'payment' && entry.amount < 0) {
+          // Credit settlement — real cash in by method
           if (isStaff && entry.collectedBy?.toString() !== payload.userId) continue
           creditCollected += Math.abs(entry.amount)
+        } else if (entry.type === 'deposit' && entry.amount > 0) {
+          // Customer prepayment received — real cash in by method (e.g. Family
+          // Bank 5,000). Must show on the Today's Summary so the till reconciles.
+          if (isStaff && entry.collectedBy?.toString() !== payload.userId) continue
+          const methodName = resolveLedgerMethodName(entry)
+          depositsReceivedByMethod[methodName] = (depositsReceivedByMethod[methodName] || 0) + entry.amount
+          depositsReceivedTotal += entry.amount
         }
       }
     }
@@ -263,9 +292,19 @@ export async function GET(request: NextRequest) {
         rental:      (todaySales as any[]).filter((s: any) => s.source === 'rental').reduce((s: number, x: any) => s + x.total, 0),
         hospitality: (todayHospitalitySales as any[]).reduce((s: number, x: any) => s + x.total, 0),
       },
-      byPayment: computeByPayment(todayAll),
+      byPayment: {
+        // Sale payments by method (cash/mpesa/bank/custom) — 'credit' and
+        // 'deposit' sale-payments are excluded by computeByPayment (internal
+        // transfers, not new cash). We then ADD deposit receipts (real cash in
+        // by method, e.g. Family Bank 5,000) so the Today's Summary reconciles
+        // with the till. Without this, the owner counting cash would see 5,000
+        // in the bank that the dashboard doesn't reflect.
+        ...computeByPayment(todayAll),
+        ...depositsReceivedByMethod,
+      },
       creditIssued:    (todaySales as any[]).reduce((s: number, x: any) => s + (x.debt || 0), 0),
       creditCollected,
+      depositsReceivedTotal,
     }
 
     // ── Staff-only minimal response ───────────────────────────────────────────
@@ -389,12 +428,23 @@ export async function GET(request: NextRequest) {
     }
 
     let periodCreditCollected = 0
+    const periodDepositsReceivedByMethod: Record<string, number> = {}
     for (const customer of customers as any[]) {
       for (const entry of customer.ledger) {
-        if (new Date(entry.date) >= periodStart && entry.type === 'payment' && entry.amount < 0) {
-          // Staff only see credit they personally collected
+        if (new Date(entry.date) < periodStart) continue
+        if (entry.type === 'payment' && entry.amount < 0) {
+          // Credit settlement — real cash in
           if (isStaff && entry.collectedBy?.toString() !== payload.userId) continue
           periodCreditCollected += Math.abs(entry.amount)
+        } else if (entry.type === 'deposit' && entry.amount > 0) {
+          // Customer prepayment received — real cash in by method. Merge into the
+          // 30-day payment-methods chart so it stays consistent with Today's
+          // Summary and the end-of-day report.
+          if (isStaff && entry.collectedBy?.toString() !== payload.userId) continue
+          const methodName = resolveLedgerMethodName(entry)
+          if (!paymentMethods[methodName]) paymentMethods[methodName] = { method: methodName, count: 0, total: 0 }
+          paymentMethods[methodName].count += 1
+          paymentMethods[methodName].total += entry.amount
         }
       }
     }

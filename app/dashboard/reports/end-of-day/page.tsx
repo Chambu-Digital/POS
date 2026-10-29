@@ -33,6 +33,7 @@ interface EndOfDayReport {
     netCash: number
     totalOutstandingPayables: number
     totalOutstandingAdvances: number
+    totalOutstandingDeposits: number
   }
   paymentMethods: {
     methods: string[]
@@ -47,6 +48,7 @@ interface EndOfDayReport {
     expensesByMethod: { [key: string]: number }
     stockOutByMethod: { [key: string]: number }
     netByMethod: { [key: string]: number }
+    depositRefundsByMethod: { [key: string]: number }
   }
   creditSales: {
     _id: string
@@ -68,6 +70,26 @@ interface EndOfDayReport {
     remainingBalance: number
     timestamp: string
     note: string
+  }[]
+  depositsReceived: {
+    customerId: string
+    customerName: string
+    depositId: string | null
+    amount: number
+    paymentMethod: string
+    mpesaCode: string
+    remainingDepositBalance: number
+    timestamp: string
+    note: string
+  }[]
+  depositsUsed: {
+    _id: string
+    orderNumber: string
+    customerName: string
+    amount: number
+    depositId: string | null
+    cashierName: string
+    timestamp: string
   }[]
   expenses: {
     _id: string
@@ -530,6 +552,87 @@ function EndOfDayReportContent() {
             </div>
           )}
 
+          {/* Deposits Received Today — real cash by method (already in totals) */}
+          {report.depositsReceived?.length > 0 && (
+            <div className="bg-white rounded-lg border p-3">
+              <h3 className="text-sm font-semibold mb-3 text-teal-700">Customer Deposits Received Today</h3>
+              <p className="text-xs text-muted-foreground mb-2">
+                Prepayments received (already included in the per-method totals above). Customer holds this as store credit.
+              </p>
+              <div className="space-y-2">
+                {report.depositsReceived.map((d, idx) => (
+                  <div key={idx} className="border border-teal-200 rounded p-2 bg-teal-50/30">
+                    <div className="flex items-start justify-between mb-1">
+                      <div>
+                        <p className="font-medium text-sm">{d.customerName}</p>
+                        <p className="text-xs text-muted-foreground">{formatTime(d.timestamp)}</p>
+                      </div>
+                      <p className="font-bold text-sm text-teal-700">{formatCurrency(d.amount)}</p>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <Wallet size={12} className="text-muted-foreground" />
+                        <span>{d.paymentMethod}</span>
+                        {d.mpesaCode && <span className="text-muted-foreground">({d.mpesaCode})</span>}
+                      </div>
+                      <span className="text-muted-foreground">
+                        Balance after deposit: {formatCurrency(d.remainingDepositBalance)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Deposits Used Today — sales that drew down prepayments (no cash) */}
+          {report.depositsUsed?.length > 0 && (
+            <div className="bg-white rounded-lg border p-3">
+              <h3 className="text-sm font-semibold mb-3 text-cyan-700">Deposits Used Today</h3>
+              <p className="text-xs text-muted-foreground mb-2">
+                Sales settled by drawing down customer prepayments. No cash collected — the money was received on the deposit day. Excluded from the per-method totals above to avoid double-counting.
+              </p>
+              <div className="space-y-2">
+                {report.depositsUsed.map((d, idx) => (
+                  <div key={idx} className="border border-cyan-200 rounded p-2 bg-cyan-50/30">
+                    <div className="flex items-start justify-between mb-1">
+                      <div>
+                        <p className="font-medium text-sm">{d.customerName}</p>
+                        <p className="text-xs text-muted-foreground">Order #{d.orderNumber} · {formatTime(d.timestamp)}</p>
+                      </div>
+                      <p className="font-bold text-sm text-cyan-700">{formatCurrency(d.amount)}</p>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Served by: {d.cashierName}</span>
+                      <span>From store credit</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Deposit Refunds Today — cash returned to customers (outflow) */}
+          {report.paymentMethods.depositRefundsByMethod &&
+            Object.values(report.paymentMethods.depositRefundsByMethod).some((v: number) => v > 0) && (
+            <div className="bg-white rounded-lg border p-3">
+              <h3 className="text-sm font-semibold mb-3 text-orange-700">Deposit Refunds Today</h3>
+              <p className="text-xs text-muted-foreground mb-2">
+                Prepayments returned to customers. Real cash outflow — reduces each method's net position.
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {Object.entries(report.paymentMethods.depositRefundsByMethod)
+                  .filter(([, v]) => (v as number) > 0)
+                  .map(([method, amount]) => (
+                    <div key={method} className="border border-orange-200 rounded p-2 bg-orange-50/30">
+                      <p className="text-xs text-muted-foreground">{method}</p>
+                      <p className="font-bold text-sm text-orange-700">− {formatCurrency(amount as number)}</p>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
           {/* Expenses */}
           {report.expenses.length > 0 && (
             <div className="bg-white rounded-lg border p-3">
@@ -659,7 +762,7 @@ function EndOfDayReportContent() {
           )}
 
           {/* Outstanding Balances Awareness */}
-          {(report.summary.totalOutstandingPayables > 0 || report.summary.totalOutstandingAdvances > 0) && (
+          {(report.summary.totalOutstandingPayables > 0 || report.summary.totalOutstandingAdvances > 0 || report.summary.totalOutstandingDeposits > 0) && (
             <div className="bg-white rounded-lg border p-3">
               <h3 className="text-sm font-semibold mb-2 text-gray-700">Outstanding Balances (All Time)</h3>
               <div className="grid grid-cols-2 gap-3">
@@ -675,6 +778,13 @@ function EndOfDayReportContent() {
                     <p className="text-xs text-purple-700 font-medium mb-1">Awaiting Delivery</p>
                     <p className="text-xl font-bold text-purple-900">{formatCurrency(report.summary.totalOutstandingAdvances)}</p>
                     <p className="text-xs text-purple-600">Advance payments out</p>
+                  </div>
+                )}
+                {report.summary.totalOutstandingDeposits > 0 && (
+                  <div className="bg-teal-50 border border-teal-200 rounded-lg p-3">
+                    <p className="text-xs text-teal-700 font-medium mb-1">Customer Deposits Held</p>
+                    <p className="text-xl font-bold text-teal-900">{formatCurrency(report.summary.totalOutstandingDeposits)}</p>
+                    <p className="text-xs text-teal-600">Prepayments owed to customers</p>
                   </div>
                 )}
               </div>

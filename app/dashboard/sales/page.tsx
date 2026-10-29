@@ -29,6 +29,7 @@ import {
   cacheProducts,
   getCachedProducts,
   isOnline,
+  cacheCustomers,
 } from '@/lib/indexeddb'
 import { initAutoSync } from '@/lib/sync'
 import { useBarcodeScanner } from '@/hooks/use-barcode-scanner'
@@ -365,6 +366,17 @@ function SalesPageContent() {
       }
     } catch {
       // Ignore errors
+    }
+    // Cache customers to IndexedDB so the payment page can search them offline.
+    // Runs silently on mount — errors are non-fatal.
+    try {
+      const res = await fetch('/api/customers')
+      if (res.ok) {
+        const data = await res.json()
+        await cacheCustomers(data.customers || []).catch(() => {})
+      }
+    } catch {
+      // Ignore — customers will be available from a previous cache
     }
   }
 

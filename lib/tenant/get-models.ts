@@ -14,6 +14,7 @@ import {
   hospitalityCategorySchema,
   stockTransferSchema, notificationSchema, bankProviderSchema,
   paymentMethodSchema,
+  depositSchema,
 } from '@/lib/models/schemas'
 
 export function getModels(conn: mongoose.Connection) {
@@ -58,5 +59,6 @@ export function getModels(conn: mongoose.Connection) {
     Notification:               conn.models.Notification               || conn.model('Notification',               notificationSchema),
     BankProvider:               conn.models.BankProvider               || conn.model('BankProvider',               bankProviderSchema),
     PaymentMethod:              conn.models.PaymentMethod              || conn.model('PaymentMethod',              paymentMethodSchema),
+    Deposit:                    conn.models.Deposit                    || conn.model('Deposit',                    depositSchema),
   }
 }

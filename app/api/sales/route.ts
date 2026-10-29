@@ -178,20 +178,86 @@ export async function POST(request: NextRequest) {
     }
 
     const totalPaid = payments.reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0)
-    
+
+    // ── DEPOSIT PAYMENT VALIDATION ────────────────────────────────────────────
+    // A 'deposit' payment draws down a customer prepayment. It is an internal
+    // transfer, NOT new cash, so it is exempt from the walk-in underpayment and
+    // cash-only-overpayment guards below. We validate ownership + balance here.
+    const depositPayments = payments.filter((p: any) => p.method === 'deposit')
+    const nonDepositPaid = payments
+      .filter((p: any) => p.method !== 'deposit')
+      .reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0)
+
+    // Deposit payments require a registered customer (you can't draw a
+    // walk-in's non-existent prepayment).
+    if (depositPayments.length > 0 && !data.customerId) {
+      return NextResponse.json({
+        error: 'Deposit payments require a registered customer.',
+      }, { status: 400 })
+    }
+
+    // Validate each deposit payment against the actual Deposit doc(s)
+    // We collect the validated deposits to mutate later, after the sale is saved.
+    const validatedDeposits: { doc: any; drawAmount: number }[] = []
+    for (const dp of depositPayments) {
+      if (!dp.depositId) {
+        return NextResponse.json({ error: 'Deposit payment is missing depositId' }, { status: 400 })
+      }
+      const draw = parseFloat(dp.amount) || 0
+      if (draw <= 0) {
+        return NextResponse.json({ error: 'Deposit payment amount must be greater than 0' }, { status: 400 })
+      }
+      let depositDoc
+      try {
+        depositDoc = await models.Deposit.findById(new Types.ObjectId(dp.depositId))
+      } catch {
+        depositDoc = null
+      }
+      if (!depositDoc) {
+        return NextResponse.json({ error: `Deposit not found (id: ${dp.depositId})` }, { status: 404 })
+      }
+      if (depositDoc.userId.toString() !== ownerId.toString()) {
+        return NextResponse.json({ error: 'Deposit not found' }, { status: 404 })
+      }
+      if (!depositDoc.customerId || depositDoc.customerId.toString() !== String(data.customerId)) {
+        return NextResponse.json({
+          error: 'Deposit does not belong to the selected customer',
+        }, { status: 400 })
+      }
+      if (!['active', 'partial'].includes(depositDoc.status)) {
+        return NextResponse.json({
+          error: `Deposit ${depositDoc.receiptNo} is not available (status: ${depositDoc.status})`,
+        }, { status: 400 })
+      }
+      if (draw > depositDoc.balance) {
+        return NextResponse.json({
+          error: `Deposit ${depositDoc.receiptNo} balance (KSh ${depositDoc.balance}) is less than the requested KSh ${draw}`,
+        }, { status: 400 })
+      }
+      validatedDeposits.push({ doc: depositDoc, drawAmount: draw })
+    }
+
     // ── EARLY WALK-IN VALIDATION: Reject walk-in for any underpayment ─────────
-    const debt = Math.max(0, saleTotal - totalPaid)
+    // Only consider real cash payments when computing debt; deposit drawdowns
+    // are an internal transfer and can cover part/all of the sale without
+    // creating debt.
+    const realCashPaid = nonDepositPaid
+    const debt = Math.max(0, saleTotal - (realCashPaid + depositPayments.reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)))
     if (debt > 0 && !data.customerId) {
       return NextResponse.json({ 
         error: 'Walk-in customers cannot have unpaid balances. Please select a registered customer or pay the full amount.' 
       }, { status: 400 })
     }
     
-    // Allow overpayment for cash (change scenario), but prevent for other methods
-    const hasCashPayment = payments.some((p: any) => p.method === 'cash')
-    if (totalPaid > saleTotal && !hasCashPayment) {
+    // Allow overpayment for cash (change scenario), but prevent for other methods.
+    // Deposit payments are excluded from this check (they are capped at deposit
+    // balance by the validation above and cannot overpay).
+    const realCashPayments = payments.filter((p: any) => p.method !== 'deposit')
+    const hasCashPayment = realCashPayments.some((p: any) => p.method === 'cash')
+    const realCashTotal = realCashPayments.reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)
+    if (realCashTotal > saleTotal && !hasCashPayment) {
       return NextResponse.json({ 
-        error: `Payment amount (${totalPaid.toFixed(2)}) exceeds sale total (${saleTotal.toFixed(2)}). Overpayment only allowed for cash payments.` 
+        error: `Payment amount (${realCashTotal.toFixed(2)}) exceeds sale total (${saleTotal.toFixed(2)}). Overpayment only allowed for cash payments.` 
       }, { status: 400 })
     }
 
@@ -413,6 +479,8 @@ export async function POST(request: NextRequest) {
         mpesaPhone: p.mpesaPhone || '',
         mpesaType: p.mpesaType || 'manual',
         timestamp: p.timestamp || new Date(),
+        // Deposit drawdown reference (only when method === 'deposit')
+        depositId: p.method === 'deposit' && p.depositId ? new Types.ObjectId(p.depositId) : null,
       })),
       debt,
       paymentStatus,
@@ -441,12 +509,71 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // ── DEPOSIT DRAWDOWN ──────────────────────────────────────────────────────
+    // For each validated deposit payment, decrement the deposit balance, push
+    // a consumption entry on the deposit doc, and push a 'deposit_use' ledger
+    // entry on the customer (NO paymentMethod — internal transfer, not cash).
+    // Stock has already decremented above via the normal sale path; this block
+    // only adjusts the deposit + customer prepayment balances.
+    let depositDrawnTotal = 0
+    if (validatedDeposits.length > 0 && customerId) {
+      const depositCustomer = await models.Customer.findById(customerId)
+      const cashierId = payload.type === 'staff' ? new Types.ObjectId(payload.userId) : new Types.ObjectId(payload.userId)
+      const cashierModel = payload.type === 'staff' ? 'Staff' : 'User'
+
+      for (const { doc: depositDoc, drawAmount } of validatedDeposits) {
+        // Re-fetch the deposit to get the freshest balance (defensive against
+        // concurrent drawdowns; the per-deposit validation above is the
+        // authoritative guard, this is the write).
+        const deposit = await models.Deposit.findById(depositDoc._id)
+        if (!deposit) continue
+
+        const cappedDraw = Math.min(drawAmount, deposit.balance)
+        if (cappedDraw <= 0) continue
+
+        // Decrement deposit balance + push consumption
+        deposit.balance = Math.max(0, deposit.balance - cappedDraw)
+        deposit.status = deposit.balance === 0 ? 'used' : 'partial'
+        deposit.consumptions.push({
+          saleId: sale._id,
+          orderNumber,
+          amount: cappedDraw,
+          date: new Date(),
+          cashierId,
+          cashierModel,
+          note: `Applied to sale ${orderNumber}`,
+        })
+        await deposit.save()
+
+        // Customer ledger: 'deposit_use' entry (internal transfer, no method)
+        if (depositCustomer) {
+          depositCustomer.depositBalance = Math.max(0, (depositCustomer.depositBalance || 0) - cappedDraw)
+          depositCustomer.ledger.push({
+            date: new Date(),
+            type: 'deposit_use',
+            amount: -cappedDraw, // negative = prepayment consumed
+            balance: depositCustomer.depositBalance,
+            saleId: sale._id,
+            note: `Sale ${orderNumber} — deposit ${deposit.receiptNo}`,
+            depositId: deposit._id,
+            // No paymentMethod — this is an internal transfer, not new cash.
+            collectedBy: cashierId,
+            collectedByType: payload.type === 'staff' ? 'staff' : 'user',
+          })
+        }
+        depositDrawnTotal += cappedDraw
+      }
+      if (depositCustomer) await depositCustomer.save()
+    }
+
     // Fetch updated customer balance for receipt
     let customerBalance: number | null = null
+    let depositBalance: number | null = null
     if (customerId) {
-      const updatedCustomer = await models.Customer.findById(customerId).select('creditBalance').lean() as any
+      const updatedCustomer = await models.Customer.findById(customerId).select('creditBalance depositBalance').lean() as any
       if (updatedCustomer) {
         customerBalance = updatedCustomer.creditBalance
+        depositBalance = updatedCustomer.depositBalance ?? 0
       }
     }
 
@@ -457,9 +584,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ 
       sale, 
       customerBalance,
+      depositBalance,
       paymentBreakdown: {
         cashPaid,
         debtCreated,
+        depositDrawn: depositDrawnTotal,  // how much was drawn from deposits
       }
     }, { status: 201 })
   } catch (error) {

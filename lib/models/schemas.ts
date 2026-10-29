@@ -93,7 +93,7 @@ export const saleSchema = new mongoose.Schema(
     
     // Multiple payments support
     payments: [{
-      method:            { type: String, enum: ['cash', 'card', 'mobile_money', 'bank', 'credit', 'custom'], required: true },
+      method:            { type: String, enum: ['cash', 'card', 'mobile_money', 'bank', 'credit', 'custom', 'deposit'], required: true },
       amount:            { type: Number, required: true },
       bankProviderId:    { type: mongoose.Schema.Types.ObjectId, ref: 'BankProvider' },
       bankProviderName:  { type: String, default: '' },
@@ -103,6 +103,11 @@ export const saleSchema = new mongoose.Schema(
       mpesaPhone:        { type: String, default: '' },
       mpesaType:         { type: String, enum: ['stk_push', 'manual'], default: 'manual' },
       timestamp:         { type: Date, default: Date.now },
+      // ── Customer deposit consumption ────────────────────────────────────────
+      // Populated when method = 'deposit' (a pickup drawing down a customer
+      // prepayment). This is an internal transfer, NOT a real cash inflow —
+      // the report's per-method rollup must exclude it from cash totals.
+      depositId:         { type: mongoose.Schema.Types.ObjectId, ref: 'Deposit' },
     }],
     
     // Legacy fields (kept for backward compatibility)
@@ -223,10 +228,19 @@ export const customerSchema = new mongoose.Schema(
     idNumber:      { type: String, default: '', trim: true }, // ID number required for credit
     creditBalance: { type: Number, default: 0 }, // positive = owes us, negative = we owe them
     creditLimit:   { type: Number, default: 0 }, // maximum credit allowed (0 = no credit)
+    depositBalance: { type: Number, default: 0 }, // prepayment we owe the customer (always >= 0).
+                                                  // Tracked SEPARATELY from creditBalance so debt
+                                                  // and prepayment never net — every cent stays
+                                                  // attributable to its payment method in reports.
     ledger: [{
       date:             { type: Date, default: Date.now },
-      type:             { type: String, enum: ['purchase', 'payment', 'adjustment'] },
+      type:             { type: String, enum: ['purchase', 'payment', 'adjustment', 'deposit', 'deposit_use', 'deposit_refund', 'deposit_return'] },
       amount:           Number,   // positive = debt added, negative = debt reduced
+                          // For 'deposit':           positive = prepayment received (we owe them)
+                          // For 'deposit_use':       negative = prepayment consumed at pickup (no cash)
+                          // For 'deposit_refund':    negative = prepayment returned to customer (cash outflow)
+                          // For 'deposit_return':    positive = prepayment credited back when deposit-funded
+                          //                          goods are returned (no cash; reverses a deposit_use)
       balance:          Number,   // running balance after this entry
       saleId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' },
       note:             String,
@@ -238,6 +252,20 @@ export const customerSchema = new mongoose.Schema(
       bankProviderName: { type: String, default: '' },
       customMethodId:   { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentMethod' },
       customMethodName: { type: String, default: '' },
+      // ── Customer deposit audit fields ────────────────────────────────────────
+      // Populated for type = 'deposit' | 'deposit_use' | 'deposit_refund'.
+      depositId:          { type: mongoose.Schema.Types.ObjectId, ref: 'Deposit' },
+      // For 'deposit_refund' only: when refund is paid out via a method different
+      // from the original deposit method, this captures the override for audit.
+      // Empty string = refunded to original method (no override).
+      refundMethodOverride: { type: String, default: '' },
+      approvedBy:         { type: mongoose.Schema.Types.ObjectId },   // User/Staff who approved override/refund
+      // ── Cashier attribution (deposit + payment entries) ──────────────────────
+      // Who collected/processed this entry, for per-staff accountability in
+      // the end-of-day report. Used by 'payment' (credit settlement), 'deposit',
+      // 'deposit_use', and 'deposit_refund' ledger types.
+      collectedBy:      { type: mongoose.Schema.Types.ObjectId },
+      collectedByType:  { type: String, enum: ['user', 'staff'], default: undefined },
     }],
     createdAt:     { type: Date, default: Date.now },
   },
@@ -245,6 +273,7 @@ export const customerSchema = new mongoose.Schema(
 )
 customerSchema.index({ userId: 1, name: 1 })
 customerSchema.index({ userId: 1, phone: 1 })
+customerSchema.index({ userId: 1, depositBalance: 1 })  // "customers with active prepayments" lookup
 
 // ── Category ──────────────────────────────────────────────────────────────────
 export const categorySchema = new mongoose.Schema(
@@ -1421,3 +1450,99 @@ export const paymentMethodSchema = new mongoose.Schema(
 )
 paymentMethodSchema.index({ userId: 1, name: 1 }, { unique: true })
 paymentMethodSchema.index({ userId: 1, isActive: 1 })
+
+// ── Deposit ────────────────────────────────────────────────────────────────────
+// Customer prepayments ("store credit / wallet"). A deposit is money the
+// customer pays UPFRONT (real cash by method — already counted in the day's
+// per-method totals) that they later draw down against one or more pickups.
+//
+// Lifecycle:
+//   Day 1 — POST /api/deposits      → status 'active',  balance = amount
+//   Day N — pickup (sale, deposit)  → status 'partial' | 'used',  balance -= draw
+//                                     (one consumptions[] entry per pickup)
+//   Day M — refund                  → balance -= refund,  status 'refunded' when 0
+//                                     (one refunds[] entry per refund event)
+//
+// The Customer.depositBalance field mirrors the sum of all active Deposit
+// balances for that customer; the two are kept in sync by the deposit APIs.
+// NEVER net depositBalance against creditBalance (debt) — every cent must stay
+// attributable to its original payment method in reports.
+
+// One pickup drawing down a deposit. Append-only; never edited.
+const depositConsumptionSchema = new mongoose.Schema(
+  {
+    saleId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Sale', required: true },
+    orderNumber:{ type: String, default: '' },          // denormalized for receipts/reports
+    amount:     { type: Number, required: true, min: 0 },
+    date:       { type: Date, default: Date.now },
+    cashierId:  { type: mongoose.Schema.Types.ObjectId },           // who processed the pickup
+    cashierModel:{ type: String, enum: ['User', 'Staff'], default: 'User' },
+    note:       { type: String, default: '' },
+  },
+  { _id: true }
+)
+
+// One refund event returning prepayment to the customer. Real cash OUTFLOW on
+// the refund day — tracked by method in reports. Multiple partial refunds are
+// allowed, hence the array.
+const depositRefundSchema = new mongoose.Schema(
+  {
+    amount:            { type: Number, required: true, min: 0 },
+    // Method used to pay the refund out. Defaults to the deposit's original
+    // method; an override requires approval (approvedBy).
+    method:            { type: String, enum: ['cash', 'card', 'mobile_money', 'bank', 'custom'], required: true },
+    bankProviderId:    { type: mongoose.Schema.Types.ObjectId, ref: 'BankProvider' },
+    bankProviderName:  { type: String, default: '' },
+    customMethodId:    { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentMethod' },
+    customMethodName:  { type: String, default: '' },
+    paymentReference:  { type: String, default: '' },   // mpesa code, receipt no, etc.
+    reason:            { type: String, required: true },
+    refundedBy:        { type: mongoose.Schema.Types.ObjectId, required: true },
+    refundedByModel:   { type: String, enum: ['User', 'Staff'], default: 'User' },
+    approvedBy:        { type: mongoose.Schema.Types.ObjectId },  // required when method differs from deposit.method
+    approvedByModel:   { type: String, enum: ['User', 'Staff'], default: 'User' },
+    refundedAt:        { type: Date, default: Date.now },
+  },
+  { _id: true }
+)
+
+export const depositSchema = new mongoose.Schema(
+  {
+    userId:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    branchId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },           // where deposit was taken
+    receiptNo:     { type: String, required: true, trim: true },                       // DEP-YYYY-NNNN
+    customerId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
+    customerName:  { type: String, default: '' },                                      // denormalized for reports/receipts
+    customerPhone: { type: String, default: '' },
+
+    amount:        { type: Number, required: true, min: 0.01 },                        // original prepayment
+    balance:       { type: Number, required: true, default: 0, min: 0 },               // remaining (amount − consumptions − refunds)
+    status:        { type: String, enum: ['active', 'partial', 'used', 'refunded', 'void'], default: 'active' },
+
+    // Original payment method — this is what the day-1 per-method report counts.
+    method:              { type: String, enum: ['cash', 'card', 'mobile_money', 'bank', 'custom'], required: true },
+    bankProviderId:      { type: mongoose.Schema.Types.ObjectId, ref: 'BankProvider' },
+    bankProviderName:    { type: String, default: '' },
+    customMethodId:      { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentMethod' },
+    customMethodName:    { type: String, default: '' },
+    mpesaCode:           { type: String, default: '' },
+    mpesaPhone:          { type: String, default: '' },
+    paymentReference:    { type: String, default: '' },                                // generic reference (cheque no, etc.)
+
+    // Append-only history
+    consumptions: { type: [depositConsumptionSchema], default: [] },
+    refunds:      { type: [depositRefundSchema], default: [] },
+
+    note:          { type: String, default: '' },
+    createdBy:      { type: mongoose.Schema.Types.ObjectId, required: true },
+    createdByModel: { type: String, enum: ['User', 'Staff'], default: 'User' },
+    createdAt:     { type: Date, default: Date.now },
+    updatedAt:     { type: Date, default: Date.now },
+  },
+  { collection: 'deposits' }
+)
+depositSchema.index({ userId: 1, createdAt: -1 })
+depositSchema.index({ userId: 1, customerId: 1, status: 1, createdAt: -1 })  // active deposits for a customer
+depositSchema.index({ userId: 1, branchId: 1, status: 1, createdAt: -1 })   // report scope
+depositSchema.index({ userId: 1, receiptNo: 1 }, { unique: true })
+depositSchema.pre('save', function (next) { (this as any).updatedAt = new Date(); next() })

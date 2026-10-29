@@ -76,6 +76,8 @@ interface ReceiptProps {
   // Payment breakdown
   cashPaid?: number         // actual cash received
   debtCreated?: number      // amount added to customer account
+  depositBalance?: number   // remaining store credit AFTER this sale
+  depositDrawn?: number     // store credit used by this sale (internal transfer)
   // Multi-payment support
   payments?: PaymentEntry[] // array of payment methods used
   // Terms / after-sale message
@@ -111,7 +113,6 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
   depositPaymentMethod,
   paperSize = '58mm',
   onPrintComplete,
-  returns,
   totalReturned,
   isPartiallyReturned,
   isFullyReturned,
@@ -119,6 +120,8 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
   creditCleared,
   cashPaid,
   debtCreated,
+  depositBalance,
+  depositDrawn,
   payments,
   termsEnabled,
   termsText,
@@ -129,14 +132,54 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
   const isRental = receiptType === 'rental_slip' || receiptType === 'rental_return'
   const isSlip = receiptType === 'rental_slip'
 
-  // Build @page CSS based on paper size
+  // Paper sizing — narrower paper gets a slightly smaller base font.
   const pageCSS = paperSize === '80mm'
     ? `@page { size: 80mm auto; margin: 4mm; }`
     : `@page { size: 58mm auto; margin: 3mm; }`
-
-  // Body width matches paper
   const bodyWidth  = paperSize === '80mm' ? '72mm' : '52mm'
-  const baseFontSize = '10px'
+  const baseFont = paperSize === '80mm' ? '11px' : '10px'
+
+  // ── Print styles: deposit-receipt design language ───────────────────────────
+  // Key|value rows (label left / value right), dashed dividers between sections,
+  // small type, no background boxes, bold TOTAL under a heavier divider.
+  const styles = `
+    @media print { ${pageCSS} body { margin: 0; padding: 0; } }
+    body { font-family: Arial, Helvetica, sans-serif; max-width: ${bodyWidth}; margin: 0 auto; padding: 4px; font-size: ${baseFont}; line-height: 1.4; color: #111; }
+    .header { text-align: center; border-bottom: 1px dashed #999; padding-bottom: 6px; margin-bottom: 6px; }
+    .logo { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; margin: 0 auto 4px; display: block; }
+    .company-name { font-size: 13px; font-weight: bold; }
+    .branch { font-size: 11px; font-weight: normal; margin: 1px 0; }
+    .company-details { font-size: 10px; color: #555; line-height: 1.3; }
+    .doc-type { font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
+    .section { border-top: 1px dashed #bbb; padding-top: 5px; margin-top: 6px; }
+    .kv { display: flex; justify-content: space-between; margin: 1px 0; }
+    .kv .lbl { color: #666; }
+    .kv .val { font-weight: 600; }
+    .meta { font-size: 10px; color: #555; }
+    .item { margin: 4px 0; }
+    .item-name { font-weight: 600; }
+    .item-total-row { text-align: right; font-weight: 600; margin-top: 2px; }
+    .item-meta { font-size: 9px; color: #777; margin-top: 1px; }
+    .item-sub { font-size: 9px; color: #777; }
+    .returned-item { text-decoration: line-through; color: #999; }
+    .returned-badge { display: inline-block; background: #fee; color: #c00; padding: 1px 4px; border-radius: 2px; font-size: 8px; font-weight: bold; margin-left: 4px; }
+    .return-note { font-size: 8px; color: #c00; margin-top: 1px; }
+    .totals .total-final { border-top: 2px solid #333; padding-top: 3px; margin-top: 4px; font-size: 12px; }
+    .totals .total-final .val { font-size: 12px; }
+    .notice { margin: 6px 0; padding: 5px 6px; text-align: center; font-size: 9px; font-weight: bold; border-radius: 3px; }
+    .notice-warn { background: #fff8e1; border: 1px dashed #f0c040; color: #78350f; }
+    .notice-return { background: #fee; border: 1px dashed #faa; color: #c00; }
+    .notice-credit { background: #dcfce7; border: 1px dashed #86efac; color: #166534; }
+    .notice-debt { background: #fef08a; border: 1px dashed #facc15; color: #78350f; }
+    .mpesa { font-size: 10px; margin: 6px 0; }
+    .mpesa .lbl { color: #666; }
+    .footer { border-top: 1px dashed #999; padding-top: 6px; margin-top: 8px; text-align: center; }
+    .thank-you { font-weight: bold; font-size: 10px; margin-bottom: 3px; }
+    .served-by { font-style: italic; font-size: 10px; margin: 3px 0; }
+    .terms { font-size: 9px; color: #444; text-align: left; white-space: pre-wrap; border-top: 1px dashed #ccc; padding-top: 4px; margin-top: 4px; }
+    .powered { font-size: 9px; color: #888; margin-top: 6px; }
+    .balance-line { margin-top: 4px; padding-top: 4px; border-top: 1px dashed #ddd; font-weight: bold; }
+  `
 
   const handlePrint = () => {
     if (receiptRef.current) {
@@ -146,58 +189,14 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
           <html>
             <head>
               <title>${isSlip ? 'Rental Slip' : 'Receipt'} - ${receiptNumber}</title>
-              <style>
-                @media print {
-                  ${pageCSS}
-                  body { margin: 0; padding: 0; }
-                }
-                body {
-                  font-family: Arial, sans-serif;
-                  max-width: ${bodyWidth};
-                  margin: 0 auto;
-                  padding: 4px;
-                  font-size: ${baseFontSize};
-                  line-height: 1.4;
-                }
-                .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 15px; }
-                .logo { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; margin: 0 auto 8px; display: block; }
-                .company-name { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
-                .company-details { font-size: 11px; line-height: 1.4; }
-                .doc-type { font-size: 14px; font-weight: bold; text-transform: uppercase; margin: 8px 0 0; letter-spacing: 1px; }
-                .order-info { margin: 15px 0; font-size: 11px; }
-                .order-info div { margin: 3px 0; }
-                .customer-info { margin: 10px 0; padding: 8px; background: #f5f5f5; border-radius: 4px; font-size: 11px; }
-                .customer-info div { margin: 2px 0; }
-                table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-                th { background-color: #f5f5f5; padding: 8px; text-align: left; border-bottom: 2px solid #000; font-size: 11px; font-weight: bold; }
-                td { padding: 8px; border-bottom: 1px solid #ddd; font-size: 11px; }
-                .text-right { text-align: right; }
-                .text-center { text-align: center; }
-                .totals { margin-top: 20px; text-align: right; }
-                .totals-row { display: flex; justify-content: flex-end; margin: 5px 0; font-size: 12px; }
-                .totals-label { width: 150px; text-align: right; padding-right: 20px; }
-                .totals-value { width: 120px; text-align: right; font-weight: bold; }
-                .total-final { font-size: 14px; font-weight: bold; border-top: 2px solid #000; padding-top: 8px; margin-top: 8px; }
-                .payment-info { margin: 20px 0; padding: 10px; background-color: #f9f9f9; border: 1px solid #ddd; }
-                .payment-info div { margin: 3px 0; font-size: 11px; }
-                .pending-notice { margin: 15px 0; padding: 10px; background: #fff8e1; border: 1px solid #f0c040; border-radius: 4px; text-align: center; font-size: 11px; font-weight: bold; }
-                .return-notice { margin: 15px 0; padding: 10px; background: #fee; border: 1px solid #faa; border-radius: 4px; text-align: center; font-size: 11px; font-weight: bold; color: #c00; }
-                .returned-item { text-decoration: line-through; color: #999; }
-                .returned-badge { display: inline-block; background: #fee; color: #c00; padding: 2px 6px; border-radius: 3px; font-size: 9px; margin-left: 6px; font-weight: bold; }
-                .footer { margin-top: 30px; text-align: center; font-size: 11px; border-top: 1px dashed #000; padding-top: 15px; }
-                .served-by { margin: 10px 0 5px; text-align: center; font-size: 11px; font-style: italic; }
-                .terms { margin: 8px 0; font-size: 10px; color: #444; text-align: left; white-space: pre-wrap; border-top: 1px dashed #ccc; padding-top: 6px; }
-              </style>
+              <style>${styles}</style>
             </head>
             <body>${receiptRef.current.innerHTML}</body>
           </html>
         `)
         printWindow.document.close()
         printWindow.focus()
-        
-        // Auto-close window after printing
         printWindow.onafterprint = () => printWindow.close()
-        
         setTimeout(() => { printWindow.print() }, 250)
         if (onPrintComplete) onPrintComplete()
       }
@@ -212,34 +211,27 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
   }
 
   const getPaymentMethodName = (payment: PaymentEntry): string => {
-    // If it's a custom method, use the custom name
-    if (payment.method === 'custom' && payment.customMethodName) {
-      return payment.customMethodName
-    }
-    
-    // Handle M-Pesa types
+    if (payment.method === 'custom' && payment.customMethodName) return payment.customMethodName
     if (payment.method === 'mpesa_stk') return 'M-Pesa STK'
     if (payment.method === 'mpesa_manual') return 'M-Pesa Manual'
-    
     const names: Record<string, string> = {
       'cash': 'Cash',
       'mobile_money': 'M-Pesa',
       'card': 'Card',
       'credit': 'Credit',
       'bank': 'Bank Transfer',
+      'deposit': 'Store Credit',
     }
     return names[payment.method] || payment.method.charAt(0).toUpperCase() + payment.method.slice(1)
   }
 
   const consolidatePayments = (paymentList: PaymentEntry[] | undefined) => {
     if (!paymentList || paymentList.length === 0) return {}
-    
     const consolidated: Record<string, PaymentEntry> = {}
     paymentList.forEach(payment => {
-      const key = payment.method === 'custom' && payment.customMethodName 
-        ? payment.customMethodName 
+      const key = payment.method === 'custom' && payment.customMethodName
+        ? payment.customMethodName
         : payment.method
-      
       if (consolidated[key]) {
         consolidated[key].amount += payment.amount
       } else {
@@ -249,250 +241,206 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
     return consolidated
   }
 
+  const money = (n: number) => n.toFixed(2)
+
   return (
     <div ref={receiptRef} style={{ display: 'none' }}>
-      {/* Header */}
+      {/* Header — centered, dashed bottom divider */}
       <div className="header">
         {shopLogo && (
           <img src={resolveMediaUrl(shopLogo)} alt={shopName} className="logo" />
         )}
         <div className="company-name">{shopName}</div>
-        {branchName && (
-          <div style={{ fontSize: '12px', fontWeight: 'normal', marginTop: '2px', marginBottom: '2px' }}>{branchName}</div>
-        )}
+        {branchName && <div className="branch">{branchName}</div>}
         <div className="company-details">
-          {shopPhone && <div>Phone: {shopPhone}</div>}
-          {shopEmail && <div>Email: {shopEmail}</div>}
-          {shopAddress && <div>Address: {shopAddress}</div>}
+          {shopPhone && <div>{shopPhone}</div>}
+          {shopEmail && <div>{shopEmail}</div>}
+          {shopAddress && <div>{shopAddress}</div>}
         </div>
         <div className="doc-type">
           {isSlip ? 'Rental Slip' : isRental ? 'Rental Receipt' : 'Sales Receipt'}
         </div>
       </div>
 
-      {/* Order / Rental info */}
-      <div className="order-info">
-        <div><strong>{isRental ? 'Rental ID:' : 'Order Number:'}</strong> {receiptNumber}</div>
-        <div><strong>Date:</strong> {date.toLocaleDateString('en-GB')}</div>
-        <div><strong>Time:</strong> {date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</div>
-        {rentalDuration && <div><strong>Duration:</strong> {rentalDuration}</div>}
+      {/* Order / Rental info — key|value rows */}
+      <div className="section">
+        <div className="kv"><span className="lbl">{isRental ? 'Rental ID' : 'Order No.'}</span><span className="val">{receiptNumber}</span></div>
+        <div className="kv"><span className="lbl">Date</span><span className="val">{date.toLocaleDateString('en-GB')}</span></div>
+        <div className="kv"><span className="lbl">Time</span><span className="val">{date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</span></div>
+        {rentalDuration && <div className="kv"><span className="lbl">Duration</span><span className="val">{rentalDuration}</span></div>}
       </div>
 
-      {/* Customer info — show for all sale types */}
+      {/* Customer info — key|value rows */}
       {customerName ? (
-        <div className="customer-info">
-          <div><strong>Customer:</strong> {customerName}</div>
-          {customerPhone && <div><strong>Phone:</strong> {customerPhone}</div>}
-          {customerIdNo && <div><strong>ID:</strong> {customerIdNo}</div>}
+        <div className="section">
+          <div className="kv"><span className="lbl">Customer</span><span className="val">{customerName}</span></div>
+          {customerPhone && <div className="kv"><span className="lbl">Phone</span><span className="val">{customerPhone}</span></div>}
+          {customerIdNo && <div className="kv"><span className="lbl">ID</span><span className="val">{customerIdNo}</span></div>}
           {customerBalance != null && customerBalance > 0 && !creditCleared && (
-            <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #ddd', color: '#92400e', fontWeight: 'bold' }}>
-              Outstanding Balance: KES {customerBalance.toFixed(2)}
+            <div className="balance-line" style={{ color: '#92400e' }}>
+              Outstanding: KES {money(customerBalance)}
             </div>
           )}
           {customerBalance != null && customerBalance < 0 && (
-            <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #ddd', color: '#0c2d6b', fontWeight: 'bold' }}>
-              Credit Available: KES {Math.abs(customerBalance).toFixed(2)}
+            <div className="balance-line" style={{ color: '#0c2d6b' }}>
+              Credit Available: KES {money(Math.abs(customerBalance))}
             </div>
           )}
         </div>
       ) : !isRental && (
-        <div className="customer-info">
-          <div><strong>Customer:</strong> Cash Sale</div>
+        <div className="section">
+          <div className="kv"><span className="lbl">Customer</span><span className="val">Cash Sale</span></div>
         </div>
       )}
 
-      {/* Items table */}
-      <table>
-        <thead>
-          <tr>
-            <th>QTY</th>
-            <th>Description</th>
-            <th className="text-right">{isRental ? 'Rate' : 'KES'}</th>
-            {!isSlip && <th className="text-right">Total</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item, index) => {
-            const hasReturns = item.quantityReturned && item.quantityReturned > 0
-            const allReturned = item.quantityReturned === item.quantity
-            
-            return (
-              <tr key={index} className={allReturned ? 'returned-item' : ''}>
-                <td className="text-center">
-                  {item.quantity}
-                  {hasReturns && (
-                    <span className="returned-badge">
-                      -{item.quantityReturned} RTN
-                    </span>
-                  )}
-                </td>
-                <td>
-                  {item.productName}
-                  {(item.brand || item.model || item.variant) && (
-                    <div style={{ fontSize: '10px', color: '#666' }}>
-                      {[item.brand, item.model, item.variant].filter(Boolean).join(' - ')}
-                    </div>
-                  )}
-                  {hasReturns && (
-                    <div style={{ fontSize: '9px', color: '#c00', marginTop: '2px' }}>
-                      {item.returnCondition === 'damaged' ? '⚠ Damaged' : '✓ Restocked'}
-                    </div>
-                  )}
-                </td>
-                <td className="text-right">
-                  {item.price.toFixed(2)}{isRental ? rateLabel(item.rateType) : ''}
-                </td>
-                {!isSlip && <td className="text-right">{item.total.toFixed(2)}</td>}
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+      {/* Items — stacked rows: name + total, qty×price meta below */}
+      <div className="section">
+        {items.map((item, index) => {
+          const hasReturns = item.quantityReturned && item.quantityReturned > 0
+          const allReturned = item.quantityReturned === item.quantity
+          return (
+            <div key={index} className="item">
+              {/* Product name (full width, may wrap) */}
+              <div className={`item-name ${allReturned ? 'returned-item' : ''}`}>
+                {item.productName}
+                {hasReturns && <span className="returned-badge">-{item.quantityReturned} RTN</span>}
+              </div>
+              {/* brand / model / variant sub-line — part of the description, sits under the name */}
+              {(item.brand || item.model || item.variant) && (
+                <div className="item-sub">{[item.brand, item.model, item.variant].filter(Boolean).join(' - ')}</div>
+              )}
+              {/* qty × unit price / rate */}
+              <div className="item-meta">
+                {item.quantity} × {money(item.price)}{isRental ? rateLabel(item.rateType) : ''}
+              </div>
+              {/* return condition note */}
+              {hasReturns && (
+                <div className="return-note">{item.returnCondition === 'damaged' ? '⚠ Damaged' : '✓ Restocked'}</div>
+              )}
+              {/* Line total — printed LAST, after every detail, right-aligned */}
+              {!isSlip && (
+                <div className={`item-total-row ${allReturned ? 'returned-item' : ''}`}>{money(item.total)}</div>
+              )}
+            </div>
+          )
+        })}
+      </div>
 
       {/* Return notice */}
       {(isPartiallyReturned || isFullyReturned) && (
-        <div className="return-notice">
+        <div className={`notice notice-return`}>
           {isFullyReturned ? 'FULLY REFUNDED' : 'PARTIALLY REFUNDED'}
         </div>
       )}
 
-      <div style={{ textAlign: 'center', margin: '10px 0', fontSize: '11px' }}>
-        <strong>{items.length} Item{items.length !== 1 ? 's' : ''}</strong>
-      </div>
-
-      {/* Totals — only for non-slip */}
+      {/* Totals — key|value rows, bold TOTAL under heavier divider (non-slip) */}
       {!isSlip && (
-        <div className="totals">
-          <div className="totals-row">
-            <div className="totals-label">Sub Total</div>
-            <div className="totals-value">{subtotal.toFixed(2)}</div>
-          </div>
+        <div className="section totals">
+          <div className="kv"><span className="lbl">Sub Total</span><span className="val">{money(subtotal)}</span></div>
           {discount > 0 && (
-            <div className="totals-row">
-              <div className="totals-label">Discount</div>
-              <div className="totals-value">- {discount.toFixed(2)}</div>
-            </div>
+            <div className="kv"><span className="lbl">Discount</span><span className="val" style={{ color: '#c00' }}>- {money(discount)}</span></div>
           )}
           {totalReturned != null && totalReturned > 0 && (
-            <div className="totals-row">
-              <div className="totals-label">Amount Refunded</div>
-              <div className="totals-value" style={{ color: '#c00' }}>- {totalReturned.toFixed(2)}</div>
-            </div>
+            <div className="kv"><span className="lbl">Amount Refunded</span><span className="val" style={{ color: '#c00' }}>- {money(totalReturned)}</span></div>
           )}
           {deposit != null && deposit > 0 && (
-            <div className="totals-row">
-              <div className="totals-label">Deposit Paid</div>
-              <div className="totals-value">- {deposit.toFixed(2)}</div>
-            </div>
+            <div className="kv"><span className="lbl">Deposit Paid</span><span className="val">- {money(deposit)}</span></div>
           )}
-          <div className="totals-row total-final">
-            <div className="totals-label">TOTAL</div>
-            <div className="totals-value">{total.toFixed(2)}</div>
-          </div>
+          <div className="kv total-final"><span className="lbl">TOTAL</span><span className="val">{money(total)}</span></div>
         </div>
       )}
 
       {/* Deposit info on slip */}
       {isSlip && deposit != null && deposit > 0 && (
-        <div className="payment-info">
-          <div><strong>Deposit Paid:</strong> KES {deposit.toFixed(2)}</div>
+        <div className="section">
+          <div className="kv"><span className="lbl">Deposit Paid</span><span className="val">KES {money(deposit)}</span></div>
           {depositPaymentMethod && (
-            <div>Method: {depositPaymentMethod === 'mobile_money' ? 'M-Pesa' : depositPaymentMethod}</div>
+            <div className="kv"><span className="lbl">Method</span><span className="val">{depositPaymentMethod === 'mobile_money' ? 'M-Pesa' : depositPaymentMethod}</span></div>
           )}
         </div>
       )}
 
       {/* Pending notice on slip */}
       {isSlip && (
-        <div className="pending-notice">
-          Amount due on return — based on actual duration
-        </div>
+        <div className="notice notice-warn">Amount due on return — based on actual duration</div>
       )}
 
-      {/* Payment info — non-slip */}
+      {/* Payment — key|value rows (non-slip) */}
       {!isSlip && (
-        <div className="payment-info">
-          <div><strong>Payment</strong></div>
-          
-          {/* Show consolidated payment methods if available */}
+        <div className="section payment">
           {payments && payments.length > 0 ? (
             <>
               {Object.entries(consolidatePayments(payments)).map(([key, payment]) => (
-                <div key={key}>
-                  <div>{getPaymentMethodName(payment)}:</div>
-                  <div>KES {payment.amount.toFixed(2)}</div>
+                <div key={key} className="kv">
+                  <span className="lbl">{getPaymentMethodName(payment)}</span>
+                  <span className="val">{money(payment.amount)}</span>
                 </div>
               ))}
-              <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #ccc' }}>
-                <div style={{ marginBottom: '4px' }}>
-                  <span>Total Paid:</span>
-                  <span style={{ float: 'right', fontWeight: 'bold' }}>{payments.reduce((sum, p) => sum + p.amount, 0).toFixed(2)}</span>
-                </div>
-                {payments.reduce((sum, p) => sum + p.amount, 0) > total && (
-                  <div style={{ marginBottom: '4px' }}>
-                    <span>Change:</span>
-                    <span style={{ float: 'right', fontWeight: 'bold', color: '#16a34a' }}>{(payments.reduce((sum, p) => sum + p.amount, 0) - total).toFixed(2)}</span>
-                  </div>
+              <div className="balance-line">
+                <div className="kv"><span className="lbl">Total Paid</span><span className="val">{money(payments.reduce((s, p) => s + p.amount, 0))}</span></div>
+                {payments.reduce((s, p) => s + p.amount, 0) > total && (
+                  <div className="kv"><span className="lbl">Change</span><span className="val" style={{ color: '#16a34a' }}>{money(payments.reduce((s, p) => s + p.amount, 0) - total)}</span></div>
                 )}
-                <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #ccc' }}>
-                  <span style={{ fontWeight: 'bold' }}>Sale Total:</span>
-                  <span style={{ float: 'right', fontWeight: 'bold' }}>{total.toFixed(2)}</span>
-                </div>
+                <div className="kv"><span className="lbl">Sale Total</span><span className="val">{money(total)}</span></div>
               </div>
             </>
           ) : (
             <>
-              <div>Method: {paymentMethod === 'mobile_money' ? 'M-Pesa' : paymentMethod.charAt(0).toUpperCase() + paymentMethod.slice(1)}</div>
-              {/* Show payment breakdown if debt was created */}
+              <div className="kv"><span className="lbl">Method</span><span className="val">{paymentMethod === 'mobile_money' ? 'M-Pesa' : paymentMethod.charAt(0).toUpperCase() + paymentMethod.slice(1)}</span></div>
               {debtCreated && debtCreated > 0 ? (
                 <>
-                  <div>Cash Received: {cashPaid?.toFixed(2) || '0.00'}</div>
-                  <div>Amount on Account: {debtCreated.toFixed(2)}</div>
-                  <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #ccc' }}>
-                    <strong>Total: {total.toFixed(2)}</strong>
-                  </div>
+                  <div className="kv"><span className="lbl">Cash Received</span><span className="val">{cashPaid != null ? money(cashPaid) : '0.00'}</span></div>
+                  <div className="kv"><span className="lbl">On Account</span><span className="val">{money(debtCreated)}</span></div>
+                  <div className="balance-line kv"><span className="lbl">Total</span><span className="val">{money(total)}</span></div>
                 </>
               ) : (
-                <div>Amount: {total.toFixed(2)}</div>
+                <div className="kv"><span className="lbl">Amount</span><span className="val">{money(total)}</span></div>
               )}
             </>
           )}
         </div>
       )}
 
-
+      {/* M-Pesa paybill (non-slip, mobile_money) */}
       {!isSlip && paymentMethod === 'mobile_money' && mpesaPaybill && (
-        <div style={{ margin: '15px 0', fontSize: '11px' }}>
-          <div><strong>M-PESA</strong></div>
-          <div>PAYBILL: {mpesaPaybill}</div>
-          {mpesaAccountNumber && <div>AC/NO: {mpesaAccountNumber}</div>}
+        <div className="section mpesa">
+          <div className="kv"><span className="lbl">M-PESA Paybill</span><span className="val">{mpesaPaybill}</span></div>
+          {mpesaAccountNumber && <div className="kv"><span className="lbl">Account No.</span><span className="val">{mpesaAccountNumber}</span></div>}
         </div>
       )}
 
+      {/* Balance position — before → change → after (only when a balance moved this sale) */}
+      {!isSlip && depositDrawn != null && depositDrawn > 0 && depositBalance != null && (
+        <div className="section">
+          <div className="kv"><span className="lbl">Previous Store Credit</span><span className="val">{money(depositBalance + depositDrawn)}</span></div>
+          <div className="kv"><span className="lbl">Store Credit Used</span><span className="val" style={{ color: '#c00' }}>- {money(depositDrawn)}</span></div>
+          <div className="kv" style={{ fontWeight: 'bold' }}><span className="lbl">Store Credit Balance</span><span className="val" style={{ color: '#0c2d6b' }}>{money(depositBalance)}</span></div>
+        </div>
+      )}
+      {!isSlip && debtCreated != null && debtCreated > 0 && customerBalance != null && customerBalance > 0 && (
+        <div className="section">
+          <div className="kv"><span className="lbl">Previous Balance</span><span className="val">{money(Math.max(0, customerBalance - debtCreated))}</span></div>
+          <div className="kv"><span className="lbl">Added to Account</span><span className="val" style={{ color: '#92400e' }}>+ {money(debtCreated)}</span></div>
+          <div className="kv" style={{ fontWeight: 'bold' }}><span className="lbl">Outstanding</span><span className="val" style={{ color: '#92400e' }}>{money(customerBalance)}</span></div>
+        </div>
+      )}
+
+      {/* Footer — centered, dashed top divider */}
       <div className="footer">
         {creditCleared && (
-          <div style={{ backgroundColor: '#dcfce7', padding: '8px', borderRadius: '4px', marginBottom: '10px', textAlign: 'center', fontSize: '12px', fontWeight: 'bold', color: '#166534' }}>
-            ✓ CREDIT CLEARED
-          </div>
+          <div className="notice notice-credit" style={{ marginBottom: '6px' }}>✓ CREDIT CLEARED</div>
         )}
         {debtCreated && debtCreated > 0 && (
-          <div style={{ backgroundColor: '#fef08a', padding: '8px', borderRadius: '4px', marginBottom: '10px', textAlign: 'center', fontSize: '11px', color: '#78350f' }}>
-            KES {debtCreated.toFixed(2)} added to your account balance
+          <div className="notice notice-debt" style={{ marginBottom: '6px' }}>
+            KES {money(debtCreated)} added to your account balance
           </div>
         )}
-        {/* Custom message */}
-        <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
+        <div className="thank-you">
           {receiptType === 'rental_slip' ? 'Thank you! Please keep this slip.' : 'Thank You For Shopping With Us!'}
         </div>
-        {/* Terms */}
-        {termsEnabled && termsText && (
-          <div className="terms">{termsText}</div>
-        )}
-        {/* Served by */}
+        {termsEnabled && termsText && <div className="terms">{termsText}</div>}
         <div className="served-by">Served By: {cashierName}</div>
-        <div style={{ fontSize: '10px', color: '#666', marginTop: '10px' }}>
-          Powered by Chambu Digital
-        </div>
+        <div className="powered">Powered by Chambu Digital</div>
       </div>
     </div>
   )

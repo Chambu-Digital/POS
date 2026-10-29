@@ -9,13 +9,16 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { apiGet, apiPost, apiPut, apiPatch, handleApiError } from '@/lib/api-client'
 import { LoadingOrOffline } from '@/components/offline-indicator'
 import { CustomerInvoiceDialog } from '@/components/customers/customer-invoice-dialog'
+import { DepositDialog } from '@/components/deposits/deposit-dialog'
+import { CustomerDepositsDialog } from '@/components/deposits/customer-deposits-dialog'
 
 interface LedgerEntry {
   date: string
-  type: 'purchase' | 'payment' | 'adjustment'
+  type: 'purchase' | 'payment' | 'adjustment' | 'deposit' | 'deposit_use' | 'deposit_refund' | 'deposit_return'
   amount: number
   balance: number
   note?: string
+  paymentMethod?: string
 }
 
 interface Customer {
@@ -26,6 +29,7 @@ interface Customer {
   idNumber?: string
   creditBalance: number
   creditLimit: number
+  depositBalance: number  // prepayment we owe the customer (always >= 0)
   ledger: LedgerEntry[]
   createdAt: string
 }
@@ -83,13 +87,42 @@ function CustomersContent() {
   const [invoiceCustomer, setInvoiceCustomer] = useState<Customer | null>(null)
   const [shopSettings, setShopSettings] = useState<any>(null)
 
+  // Permissions — the page-level PermissionGuard ensures core.customers, but the
+  // deposit actions are finer-grained (pos.deposits.take / .refund). Owners
+  // (type 'user') always have everything; staff need explicit grants.
+  const [currentUser, setCurrentUser] = useState<any>(null)
+  const isOwner = currentUser?.type === 'user'
+  const canTakeDeposits = isOwner || !!currentUser?.permissions?.['pos.deposits.take']
+  const canRefundDeposits = isOwner || !!currentUser?.permissions?.['pos.deposits.refund']
+
+  // Take deposit
+  const [depositCustomer, setDepositCustomer] = useState<Customer | null>(null)
+  const [showDeposit, setShowDeposit] = useState(false)
+
+  // View / manage deposits (refund flow lives here)
+  const [depositsCustomer, setDepositsCustomer] = useState<Customer | null>(null)
+  const [showDepositsDialog, setShowDepositsDialog] = useState(false)
+
   // WhatsApp invoice sharing (legacy - keeping for compatibility)
   useEffect(() => { 
     load()
     fetchSettings()
     fetchBankProviders()
     fetchCustomMethods()
+    fetchCurrentUser()
   }, [])
+
+  async function fetchCurrentUser() {
+    try {
+      const res = await fetch('/api/auth/me')
+      if (res.ok) {
+        const data = await res.json()
+        setCurrentUser(data.user || null)
+      }
+    } catch (error) {
+      console.error('Failed to fetch current user:', error)
+    }
+  }
 
   async function load() {
     setLoading(true)
@@ -355,6 +388,7 @@ Thank you for choosing ${businessName}!`
   }
 
   const totalDebt = customers.reduce((s, c) => s + c.creditBalance, 0)
+  const totalDeposits = customers.reduce((s, c) => s + (c.depositBalance || 0), 0)
 
   return (
     <div className="space-y-4">
@@ -364,6 +398,9 @@ Thank you for choosing ${businessName}!`
           <h1 className="text-xl font-bold text-gray-900">Customers</h1>
           {totalDebt > 0 && (
             <p className="text-sm text-red-500 mt-0.5">Total outstanding credit: KES {totalDebt.toLocaleString()}</p>
+          )}
+          {totalDeposits > 0 && (
+            <p className="text-sm text-teal-600 mt-0.5">Total customer deposits held: KES {totalDeposits.toLocaleString()}</p>
           )}
         </div>
         <button
@@ -417,7 +454,7 @@ Thank you for choosing ${businessName}!`
                   </div>
 
                   {/* Credit Info */}
-                  <div className="flex items-center justify-between text-xs mb-2">
+                  <div className="flex items-center justify-between text-xs mb-1">
                     <div>
                       {c.creditBalance > 0 ? (
                         <span className="text-red-600 font-semibold">-KES {c.creditBalance.toLocaleString()}</span>
@@ -430,6 +467,17 @@ Thank you for choosing ${businessName}!`
                     </div>
                   </div>
 
+                  {/* Deposit balance (prepayment we owe the customer) — click to manage/refund */}
+                  {c.depositBalance > 0 && (
+                    <button
+                      onClick={() => { setDepositsCustomer(c); setShowDepositsDialog(true) }}
+                      className="w-full flex items-center justify-between text-xs mb-2 bg-teal-50 -mx-2.5 px-2.5 py-1 rounded hover:bg-teal-100 transition-colors"
+                    >
+                      <span className="text-teal-700 font-medium">Store Credit</span>
+                      <span className="text-teal-800 font-semibold">+KES {c.depositBalance.toLocaleString()}</span>
+                    </button>
+                  )}
+
                   {/* Actions */}
                   <div className="flex gap-1">
                     <button
@@ -438,6 +486,14 @@ Thank you for choosing ${businessName}!`
                     >
                       Edit
                     </button>
+                    {canTakeDeposits && (
+                      <button
+                        onClick={() => { setDepositCustomer(c); setShowDeposit(true) }}
+                        className="flex-1 px-2 py-1 text-xs font-medium text-teal-700 border border-teal-300 rounded hover:bg-teal-50 transition-colors"
+                      >
+                        Deposit
+                      </button>
+                    )}
                     {c.creditBalance > 0 ? (
                       <button
                         onClick={() => { setPayCustomer(c); setPayAmount(String(c.creditBalance)) }}
@@ -472,19 +528,46 @@ Thank you for choosing ${businessName}!`
                         <p className="text-xs text-gray-400 py-1">No transactions</p>
                       ) : (
                         <div className="space-y-0.5 max-h-32 overflow-y-auto">
-                          {[...c.ledger].reverse().slice(0, 5).map((entry, i) => (
-                            <div key={i} className="flex items-center justify-between text-xs py-1 border-b border-gray-100 last:border-0">
-                              <span className={entry.type === 'payment' ? 'text-green-600' : 'text-gray-600'}>
-                                {entry.type === 'payment' ? 'Payment' : entry.type === 'purchase' ? 'Purchase' : 'Adj'}
-                              </span>
-                              <div className="flex items-center gap-2">
-                                <span className={entry.amount < 0 ? 'text-green-600' : 'text-red-500'}>
-                                  {entry.amount < 0 ? '-' : '+'}KES {Math.abs(entry.amount).toLocaleString()}
-                                </span>
-                                <span className="text-gray-300 text-xs">{new Date(entry.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+                          {[...c.ledger].reverse().slice(0, 5).map((entry, i) => {
+                            // Resolve label + color per ledger type
+                            let label = 'Adj'
+                            let labelClass = 'text-gray-600'
+                            let amountClass = entry.amount < 0 ? 'text-green-600' : 'text-red-500'
+                            if (entry.type === 'payment') {
+                              label = 'Payment'
+                              labelClass = 'text-green-600'
+                            } else if (entry.type === 'purchase') {
+                              label = 'Purchase'
+                              labelClass = 'text-gray-600'
+                            } else if (entry.type === 'deposit') {
+                              label = 'Deposit'
+                              labelClass = 'text-teal-700'
+                              amountClass = 'text-teal-700'  // prepayment received (we owe them)
+                            } else if (entry.type === 'deposit_use') {
+                              label = 'Used'
+                              labelClass = 'text-cyan-700'
+                              amountClass = 'text-cyan-700'  // prepayment consumed at pickup
+                            } else if (entry.type === 'deposit_refund') {
+                              label = 'Refund'
+                              labelClass = 'text-orange-600'
+                              amountClass = 'text-orange-600'  // prepayment returned
+                            } else if (entry.type === 'deposit_return') {
+                              label = 'Return'
+                              labelClass = 'text-teal-700'
+                              amountClass = 'text-teal-700'  // deposit credited back (goods returned)
+                            }
+                            return (
+                              <div key={i} className="flex items-center justify-between text-xs py-1 border-b border-gray-100 last:border-0">
+                                <span className={labelClass}>{label}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className={amountClass}>
+                                    {entry.amount < 0 ? '-' : '+'}KES {Math.abs(entry.amount).toLocaleString()}
+                                  </span>
+                                  <span className="text-gray-300 text-xs">{new Date(entry.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       )}
                       {c.creditBalance > 0 && (
@@ -749,6 +832,33 @@ Thank you for choosing ${businessName}!`
         onOpenChange={(open) => !open && setInvoiceCustomer(null)}
         customer={invoiceCustomer}
         shopName={shopSettings?.general?.shopName || 'Our Shop'}
+      />
+
+      {/* Take Deposit Dialog */}
+      <DepositDialog
+        customer={depositCustomer}
+        open={showDeposit}
+        onOpenChange={setShowDeposit}
+        bankProviders={bankProviders}
+        customMethods={customMethods}
+        onTaken={load}
+        shopName={shopSettings?.general?.shopName || shopSettings?.shopName || ''}
+        shopLogo={shopSettings?.general?.logo || shopSettings?.logo}
+        shopPhone={shopSettings?.general?.phone}
+        shopEmail={shopSettings?.general?.email}
+        shopAddress={shopSettings?.general?.address}
+      />
+
+      {/* Customer Deposits management dialog (view + refund) */}
+      <CustomerDepositsDialog
+        customerId={depositsCustomer?._id ?? null}
+        customerName={depositsCustomer?.name ?? ''}
+        open={showDepositsDialog}
+        onOpenChange={setShowDepositsDialog}
+        bankProviders={bankProviders}
+        customMethods={customMethods}
+        onCustomerChanged={load}
+        canRefund={canRefundDeposits}
       />
     </div>
   )

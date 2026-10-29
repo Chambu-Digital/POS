@@ -159,6 +159,76 @@ export async function PATCH(
         })
       }
 
+      // ── Deposit-funded return: credit the deposit portion back ─────────────
+      // Returning goods that were paid via a customer prepayment must restore
+      // the customer's store credit — NOT pay cash (which would bypass the
+      // deposit-refund approval gate). We credit depositBalance and reopen the
+      // original deposit(s) proportionally. The non-deposit portion keeps the
+      // existing return behaviour (refund recorded on the sale, settled by the
+      // business as usual). This block only runs when the sale was partly/fully
+      // funded by deposits, so non-deposit sales are unaffected.
+      if (status === 'approved' && sale.payments && Array.isArray(sale.payments) && sale.customerId) {
+        const depositPayments = sale.payments.filter(
+          (p: any) => p.method === 'deposit' && p.depositId
+        )
+        if (depositPayments.length > 0 && (sale.total || 0) > 0) {
+          const totalDepositPaid = depositPayments.reduce((s: number, p: any) => s + (p.amount || 0), 0)
+          const depositFraction = totalDepositPaid / sale.total
+          const refundToDeposit = (returnEntry.refundAmount || 0) * depositFraction
+
+          if (refundToDeposit > 0.0001) {
+            const customer = await models.Customer.findById(sale.customerId)
+            if (customer) {
+              customer.depositBalance = (customer.depositBalance || 0) + refundToDeposit
+              customer.ledger.push({
+                date: new Date(),
+                type: 'deposit_return',
+                amount: refundToDeposit, // positive = prepayment credited back
+                balance: customer.depositBalance,
+                saleId: sale._id,
+                depositId: depositPayments[0].depositId, // primary deposit reference
+                note: `Return ${sale.orderNumber} — deposit credited back (deposit-funded portion)`,
+                collectedBy: new Types.ObjectId(ownerId),
+                collectedByType: payload.type === 'staff' ? 'staff' : 'user',
+              } as any)
+              await customer.save()
+
+              // Reopen the deposit doc(s) so the credited amount is drawable again.
+              // Distribute the credit proportionally to how each deposit funded
+              // the sale. Skip deposits already refunded/voided (the customer was
+              // made whole via the refund) — the aggregate depositBalance above
+              // already reflects the credit in that case.
+              for (const dp of depositPayments) {
+                const deposit = await models.Deposit.findById(dp.depositId)
+                if (!deposit) continue
+                if (deposit.status === 'refunded' || deposit.status === 'void') continue
+
+                const portion = totalDepositPaid > 0 ? (dp.amount / totalDepositPaid) * refundToDeposit : 0
+                if (portion <= 0) continue
+
+                deposit.balance = (deposit.balance || 0) + portion
+                // Reopen a fully-drawn deposit now that it has balance again
+                if (deposit.status === 'used' && deposit.balance > 0) {
+                  deposit.status = 'partial'
+                }
+                // Append a compensating (negative) consumption entry so the
+                // deposit's history shows the reversal cleanly.
+                deposit.consumptions.push({
+                  saleId: sale._id,
+                  orderNumber: sale.orderNumber,
+                  amount: -portion, // negative = credit back (reverses the draw)
+                  date: new Date(),
+                  cashierId: new Types.ObjectId(ownerId),
+                  cashierModel: payload.type === 'staff' ? 'Staff' : 'User',
+                  note: `Return credit from ${sale.orderNumber}`,
+                } as any)
+                await deposit.save()
+              }
+            }
+          }
+        }
+      }
+
       // Update sale totals and status
       const approvedReturns = sale.returns.filter((r: any) => r.status === 'approved')
       const totalReturnedValue = approvedReturns.reduce((sum: number, r: any) => sum + (r.refundAmount || 0), 0)

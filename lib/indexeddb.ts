@@ -29,6 +29,39 @@ interface POS_DB extends DBSchema {
       updatedAt: string
     }
   }
+  customers: {
+    key: string
+    value: {
+      _id: string
+      userId: string
+      name: string
+      phone: string
+      email?: string
+      creditBalance: number
+      creditLimit: number
+      depositBalance: number
+      [key: string]: any
+    }
+  }
+  bank_providers: {
+    key: string
+    value: {
+      _id: string
+      userId: string
+      name: string
+      isActive: boolean
+    }
+  }
+  custom_methods: {
+    key: string
+    value: {
+      _id: string
+      userId: string
+      name: string
+      type: string
+      isActive: boolean
+    }
+  }
   pending_sales: {
     key: string
     value: {
@@ -96,13 +129,22 @@ let db: IDBPDatabase<POS_DB> | null = null
 export async function initDB(): Promise<IDBPDatabase<POS_DB>> {
   if (db) return db
 
-  db = await openDB<POS_DB>('pos-system', 5, {
+  db = await openDB<POS_DB>('pos-system', 6, {
     upgrade(db, oldVersion) {
       if (!db.objectStoreNames.contains('products')) {
         db.createObjectStore('products', { keyPath: '_id' })
       }
       if (!db.objectStoreNames.contains('categories')) {
         db.createObjectStore('categories', { keyPath: '_id' })
+      }
+      if (!db.objectStoreNames.contains('customers')) {
+        db.createObjectStore('customers', { keyPath: '_id' })
+      }
+      if (!db.objectStoreNames.contains('bank_providers')) {
+        db.createObjectStore('bank_providers', { keyPath: '_id' })
+      }
+      if (!db.objectStoreNames.contains('custom_methods')) {
+        db.createObjectStore('custom_methods', { keyPath: '_id' })
       }
       if (!db.objectStoreNames.contains('pending_sales')) {
         db.createObjectStore('pending_sales', { keyPath: 'id' })
@@ -359,4 +401,100 @@ export async function getProductByBarcode(barcode: string): Promise<any | undefi
   const database = await initDB()
   const all = await database.getAll('products')
   return all.find((p) => p.barcode && p.barcode === barcode)
+}
+
+// ── Local stock deduction ──────────────────────────────────────────────────────
+// Called after addPendingSale() so offline stock numbers stay accurate for
+// subsequent sales. Each item decrements the product's cached stock by its
+// quantity. If the product isn't in the cache, the call is a no-op for that
+// item (safe — the product simply wasn't cached yet).
+export async function deductCachedStock(
+  items: Array<{ productId: string; quantity: number }>
+): Promise<void> {
+  const database = await initDB()
+  for (const item of items) {
+    if (!item.productId) continue
+    try {
+      const product = await database.get('products', item.productId)
+      if (product) {
+        product.stock = Math.max(0, (product.stock ?? 0) - item.quantity)
+        await database.put('products', product)
+      }
+    } catch (e) {
+      // Non-fatal — skip this item; stock may be slightly stale but sale is queued
+      console.warn('[IndexedDB] deductCachedStock skipped item:', item.productId, e)
+    }
+  }
+}
+
+// ── Customers ──────────────────────────────────────────────────────────────────
+export async function cacheCustomers(customers: any[]): Promise<void> {
+  const database = await initDB()
+  const tx = database.transaction('customers', 'readwrite')
+  await tx.objectStore('customers').clear()
+  for (const c of customers) {
+    await tx.objectStore('customers').put(c)
+  }
+  await tx.done
+}
+
+export async function getCachedCustomers(): Promise<any[]> {
+  const database = await initDB()
+  return database.getAll('customers')
+}
+
+// Case-insensitive substring search across name and phone — mirrors the server
+// query so offline customer lookup behaves identically to online.
+export async function searchCachedCustomers(query: string): Promise<any[]> {
+  if (!query.trim()) return getCachedCustomers()
+  const database = await initDB()
+  const all = await database.getAll('customers')
+  const q = query.toLowerCase()
+  return all.filter(
+    (c) =>
+      (c.name && c.name.toLowerCase().includes(q)) ||
+      (c.phone && c.phone.toLowerCase().includes(q))
+  )
+}
+
+export async function getCachedCustomer(id: string): Promise<any | undefined> {
+  const database = await initDB()
+  return database.get('customers', id)
+}
+
+export async function updateCachedCustomer(customer: any): Promise<void> {
+  const database = await initDB()
+  await database.put('customers', customer)
+}
+
+// ── Bank providers ─────────────────────────────────────────────────────────────
+export async function cacheBankProviders(providers: any[]): Promise<void> {
+  const database = await initDB()
+  const tx = database.transaction('bank_providers', 'readwrite')
+  await tx.objectStore('bank_providers').clear()
+  for (const p of providers) {
+    await tx.objectStore('bank_providers').put(p)
+  }
+  await tx.done
+}
+
+export async function getCachedBankProviders(): Promise<any[]> {
+  const database = await initDB()
+  return database.getAll('bank_providers')
+}
+
+// ── Custom payment methods ─────────────────────────────────────────────────────
+export async function cachePaymentMethods(methods: any[]): Promise<void> {
+  const database = await initDB()
+  const tx = database.transaction('custom_methods', 'readwrite')
+  await tx.objectStore('custom_methods').clear()
+  for (const m of methods) {
+    await tx.objectStore('custom_methods').put(m)
+  }
+  await tx.done
+}
+
+export async function getCachedPaymentMethods(): Promise<any[]> {
+  const database = await initDB()
+  return database.getAll('custom_methods')
 }

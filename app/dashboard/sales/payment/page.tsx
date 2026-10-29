@@ -12,7 +12,7 @@ import { Search, UserPlus, X, Plus, Trash2, CreditCard, Smartphone, Banknote, Bu
 import { toast } from 'sonner'
 import { Receipt, ReceiptRef } from '@/components/sales/receipt'
 import { OrderCompletionDialog } from '@/components/sales/order-completion-dialog'
-import { isOnline, addPendingSale, addCachedSale } from '@/lib/indexeddb'
+import { isOnline, addPendingSale, addCachedSale, deductCachedStock, getCachedBankProviders, cacheBankProviders, getCachedPaymentMethods, cachePaymentMethods, searchCachedCustomers, getCachedCustomers, cacheCustomers } from '@/lib/indexeddb'
 import { createBackupSnapshot, isBackupEnabled } from '@/lib/backup'
 
 interface CartItem {
@@ -32,11 +32,12 @@ interface Customer {
   name: string
   phone: string
   creditBalance: number
+  depositBalance: number  // prepayment we owe the customer (always >= 0)
 }
 
 interface PaymentEntry {
   id: string
-  method: string // 'cash' | 'mpesa_stk' | 'mpesa_manual' | 'card' | 'bank' | 'credit' | 'custom'
+  method: string // 'cash' | 'mpesa_stk' | 'mpesa_manual' | 'card' | 'bank' | 'credit' | 'custom' | 'deposit'
   amount: string
   mpesaPhone?: string
   mpesaCode?: string
@@ -44,6 +45,7 @@ interface PaymentEntry {
   bankProviderName?: string
   customMethodId?: string
   customMethodName?: string
+  depositId?: string     // which customer prepayment this draws from (method === 'deposit')
   status?: 'pending' | 'completed' | 'failed'
 }
 
@@ -113,6 +115,12 @@ function PaymentPageContent() {
   const [newCustomerName, setNewCustomerName] = useState('')
   const [newCustomerPhone, setNewCustomerPhone] = useState('')
 
+  // Customer deposits (active prepayments) for the selected customer.
+  // Loaded lazily when the customer changes; used by the 'deposit' payment
+  // method so the cashier can draw down store credit at checkout.
+  const [customerDeposits, setCustomerDeposits] = useState<any[]>([])
+  const [selectedDepositId, setSelectedDepositId] = useState<string>('')
+
   // Bank providers and custom methods
   const [bankProviders, setBankProviders] = useState<BankProvider[]>([])
   const [customMethods, setCustomMethods] = useState<PaymentMethod[]>([])
@@ -177,26 +185,42 @@ function PaymentPageContent() {
   }
 
   async function fetchBankProviders() {
+    // Load from IndexedDB first (instant, works offline)
+    try {
+      const cached = await getCachedBankProviders()
+      if (cached.length > 0) setBankProviders(cached)
+    } catch {}
+    // Then try to refresh from server and update cache
     try {
       const res = await fetch('/api/bank-providers')
       if (res.ok) {
         const data = await res.json()
-        setBankProviders(data.providers || [])
+        const providers = data.providers || []
+        setBankProviders(providers)
+        await cacheBankProviders(providers).catch(() => {})
       }
-    } catch (error) {
-      console.error('Failed to fetch bank providers:', error)
+    } catch {
+      // Server unreachable — cached data already set above, continue offline
     }
   }
 
   async function fetchCustomMethods() {
+    // Load from IndexedDB first (instant, works offline)
+    try {
+      const cached = await getCachedPaymentMethods()
+      if (cached.length > 0) setCustomMethods(cached)
+    } catch {}
+    // Then try to refresh from server and update cache
     try {
       const res = await fetch('/api/payment-methods')
       if (res.ok) {
         const data = await res.json()
-        setCustomMethods(data.methods || [])
+        const methods = data.methods || []
+        setCustomMethods(methods)
+        await cachePaymentMethods(methods).catch(() => {})
       }
-    } catch (error) {
-      console.error('Failed to fetch payment methods:', error)
+    } catch {
+      // Server unreachable — cached data already set above, continue offline
     }
   }
 
@@ -259,16 +283,50 @@ function PaymentPageContent() {
 
   async function searchCustomers(q: string) {
     setCustomerSearchLoading(true)
+    // Always show cached results immediately so offline search works
+    try {
+      const cached = await searchCachedCustomers(q)
+      if (cached.length > 0) setCustomers(cached)
+    } catch {}
+    // Then try server to get fresher results + update cache
     try {
       const res = await fetch(`/api/customers?search=${encodeURIComponent(q)}`)
-      if (res.ok) { const data = await res.json(); setCustomers(data.customers || []) }
-    } catch {}
+      if (res.ok) {
+        const data = await res.json()
+        const results = data.customers || []
+        setCustomers(results)
+        // If search is empty, update the full customers cache
+        if (!q.trim()) await cacheCustomers(results).catch(() => {})
+      }
+    } catch {
+      // Server unreachable — cached results already shown, continue offline
+    }
     setCustomerSearchLoading(false)
   }
 
   useEffect(() => {
     if (showCustomerSearch) searchCustomers(customerSearch)
   }, [customerSearch, showCustomerSearch])
+
+  // Load the selected customer's active deposits so the 'deposit' payment
+  // method can draw down their store credit at checkout. Cleared on deselect.
+  useEffect(() => {
+    if (selectedCustomer?._id) {
+      fetch(`/api/customers/${selectedCustomer._id}/deposits`)
+        .then((r) => (r.ok ? r.json() : { deposits: [] }))
+        .then((data) => {
+          setCustomerDeposits(data.deposits || [])
+          setSelectedDepositId((data.deposits && data.deposits[0]?._id) || '')
+        })
+        .catch(() => {
+          setCustomerDeposits([])
+          setSelectedDepositId('')
+        })
+    } else {
+      setCustomerDeposits([])
+      setSelectedDepositId('')
+    }
+  }, [selectedCustomer?._id])
 
   async function addNewCustomer() {
     if (!newCustomerName.trim()) return
@@ -305,7 +363,20 @@ function PaymentPageContent() {
   // Select payment method
   function selectPaymentMethod(method: string) {
     setSelectedMethod(method)
-    setPaymentAmount(remaining > 0 ? remaining.toFixed(2) : '')
+    // For deposit: cap the default amount at the customer's available prepayment
+    // (so we never propose drawing more than they have). Falls back to remaining.
+    if (method === 'deposit') {
+      const available = customerDeposits.reduce((s, d) => s + (d.balance || 0), 0)
+      const capped = Math.min(available, remaining)
+      setPaymentAmount(capped > 0 ? capped.toFixed(2) : '')
+    } else if (method === 'credit') {
+      // Credit means the customer is not paying now — leave blank so the field
+      // shows the placeholder ("0 for full credit"). A blank or 0 means the full
+      // sale goes on account; the cashier types a number only if paying partially.
+      setPaymentAmount('')
+    } else {
+      setPaymentAmount(remaining > 0 ? remaining.toFixed(2) : '')
+    }
     
     // Reset method-specific fields
     setMpesaPhone('')
@@ -399,6 +470,23 @@ function PaymentPageContent() {
       return
     }
     
+    // Deposit requires a selected customer with an active prepayment to draw from
+    if (method === 'deposit') {
+      if (!selectedCustomer) {
+        toast.error('Select a customer to use store credit')
+        return
+      }
+      const chosenDeposit = customerDeposits.find((d) => d._id === selectedDepositId) || customerDeposits[0]
+      if (!chosenDeposit) {
+        toast.error('No active deposit available for this customer')
+        return
+      }
+      if (amount > chosenDeposit.balance) {
+        toast.error(`Deposit ${chosenDeposit.receiptNo} balance (KSh ${chosenDeposit.balance.toLocaleString()}) is less than the entered amount`)
+        return
+      }
+    }
+    
     const entry: PaymentEntry = {
       id: String(nextPaymentId),
       method,
@@ -424,8 +512,31 @@ function PaymentPageContent() {
       if (customMethod) entry.customMethodName = customMethod.name
     }
     
+    // Deposit: link the entry to the chosen prepayment (FIFO default)
+    if (method === 'deposit') {
+      const chosenDeposit = customerDeposits.find((d) => d._id === selectedDepositId) || customerDeposits[0]
+      if (chosenDeposit) entry.depositId = chosenDeposit._id
+    }
+    
     setPaymentEntries([...paymentEntries, entry])
     setNextPaymentId(nextPaymentId + 1)
+    
+    // Optimistic update: when drawing a deposit, reduce its local balance so a
+    // second drawdown is capped correctly and the available display is accurate.
+    // The server is the source of truth; this just keeps the UI honest until then.
+    if (method === 'deposit' && entry.depositId) {
+      setCustomerDeposits((prev) =>
+        prev.map((d) =>
+          d._id === entry.depositId ? { ...d, balance: Math.max(0, (d.balance || 0) - amount) } : d
+        )
+      )
+      if (selectedCustomer) {
+        setSelectedCustomer({
+          ...selectedCustomer,
+          depositBalance: Math.max(0, (selectedCustomer.depositBalance || 0) - amount),
+        })
+      }
+    }
     
     // Reset form
     setSelectedMethod('')
@@ -461,6 +572,7 @@ function PaymentPageContent() {
       case 'credit': return 'Credit'
       case 'bank': return entry.bankProviderName || 'Bank'
       case 'custom': return entry.customMethodName || 'Custom'
+      case 'deposit': return 'Store Credit'
       default: return entry.method
     }
   }
@@ -508,7 +620,8 @@ function PaymentPageContent() {
         payments: completedPayments.map(p => ({
           method: p.method === 'mpesa_stk' || p.method === 'mpesa_manual' ? 'mobile_money' : 
                   p.method === 'custom' ? 'custom' : 
-                  p.method === 'credit' ? 'credit' : p.method,
+                  p.method === 'credit' ? 'credit' : 
+                  p.method === 'deposit' ? 'deposit' : p.method,
           amount: parseFloat(p.amount),
           mpesaType: p.method === 'mpesa_stk' ? 'stk_push' : p.method === 'mpesa_manual' ? 'manual' : undefined,
           mpesaPhone: p.mpesaPhone || '',
@@ -517,11 +630,21 @@ function PaymentPageContent() {
           bankProviderName: p.bankProviderName || '',
           customMethodId: p.customMethodId || null,
           customMethodName: p.customMethodName || '',
+          // Deposit drawdown: which prepayment this consumes (method === 'deposit')
+          depositId: p.method === 'deposit' ? p.depositId || null : null,
           timestamp: new Date(),
         })),
       }
 
-      if (isOnline()) {
+      // ── Offline-first: attempt online, fall back to local queue on network failure ──
+      // We attempt the fetch regardless of navigator.onLine (which is unreliable —
+      // it returns true whenever any network interface is up, even when the server
+      // is unreachable). On a real network failure (TypeError: Failed to fetch) we
+      // fall through to addPendingSale + local stock deduction. On a server-side
+      // rejection (response.ok === false, e.g. invalid deposit, insufficient stock)
+      // we still surface the error — those are real business errors, not connectivity.
+      let onlineSaleSucceeded = false
+      try {
         const response = await fetch(saleEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -534,6 +657,7 @@ function PaymentPageContent() {
         }
 
         const result = await response.json()
+        onlineSaleSucceeded = true
         const orderNumber = result.sale?.orderNumber || `ORD-${String(result.sale?._id ?? '').slice(-5).toUpperCase()}`
 
         setLastSale({
@@ -570,15 +694,9 @@ function PaymentPageContent() {
           })),
           cashPaid: totalPaid < total ? totalPaid : undefined,
           debtCreated: debt > 0 ? debt : undefined,
-        })
-
-        console.log('LastSale created:', {
-          hasPayments: !!completedPayments.length,
-          paymentsCount: completedPayments.length,
-          totalPaid,
-          total,
-          debt,
-          payments: completedPayments
+          customerBalance: result.customerBalance,
+          depositBalance: result.depositBalance,
+          depositDrawn: result.paymentBreakdown?.depositDrawn,
         })
 
         toast.success('Payment completed successfully')
@@ -595,8 +713,34 @@ function PaymentPageContent() {
           createdAt: new Date().toISOString(),
           synced: true,
         })
-      } else {
+      } catch (fetchError: any) {
+        // If the online sale already succeeded, re-throw so the outer catch
+        // surfaces the error (shouldn't happen, but be defensive).
+        if (onlineSaleSucceeded) throw fetchError
+
+        // Distinguish network failure (TypeError) from a server rejection (Error
+        // with a message we set above). Server rejections re-throw so the outer
+        // catch shows them as toasts. Network failures fall through to the
+        // offline queue below.
+        const isNetworkFailure =
+          fetchError instanceof TypeError ||
+          fetchError?.message === 'Failed to fetch' ||
+          fetchError?.message?.includes('network') ||
+          fetchError?.message?.includes('fetch')
+
+        if (!isNetworkFailure) throw fetchError
+
+        // ── Offline path: queue locally + deduct stock from cache ─────────────
         await addPendingSale(saleData)
+
+        // Deduct stock from the IndexedDB products cache so subsequent offline
+        // sales see accurate stock levels and can't sell already-queued items.
+        // The sales page reads from IndexedDB on load, so the next page load
+        // will reflect the correct stock without any further action here.
+        await deductCachedStock(
+          cart.map(item => ({ productId: item.productId, quantity: item.quantity }))
+        ).catch(() => {})
+
         setLastSale({
           items: cart.map(item => ({
             productName: item.productName, brand: item.brand, model: item.model,
@@ -621,7 +765,7 @@ function PaymentPageContent() {
           cashPaid: totalPaid < total ? totalPaid : undefined,
           debtCreated: debt > 0 ? debt : undefined,
         })
-        toast.success('Sale saved offline - will sync when online')
+        toast.success('Sale saved offline — will sync when back online')
         setShowCompletionDialog(true)
       }
 
@@ -698,6 +842,7 @@ function PaymentPageContent() {
                     <p className="text-xs text-green-600">
                       {selectedCustomer.phone}
                       {selectedCustomer.creditBalance > 0 && ` · Owes KSh ${selectedCustomer.creditBalance.toLocaleString()}`}
+                      {selectedCustomer.depositBalance > 0 && ` · Store credit KSh ${selectedCustomer.depositBalance.toLocaleString()}`}
                     </p>
                   </div>
                   <button onClick={() => setSelectedCustomer(null)} className="text-green-600 hover:text-red-500">
@@ -798,6 +943,23 @@ function PaymentPageContent() {
                   <span className="text-xs font-medium">Credit</span>
                 </button>
 
+                {/* Store Credit / Deposit — only shown when the selected customer has a prepayment AND we are online.
+                    Deposit validation requires the server (balance check against the Deposit collection) so we hide
+                    this method offline to avoid queueing a potentially invalid drawdown. */}
+                {selectedCustomer && selectedCustomer.depositBalance > 0 && isOnline() && (
+                  <button
+                    onClick={() => selectPaymentMethod('deposit')}
+                    className={`flex flex-col items-center justify-center p-2 rounded-lg border transition-all ${
+                      selectedMethod === 'deposit'
+                        ? 'border-teal-500 bg-teal-50'
+                        : 'border-gray-200 hover:border-teal-300 hover:bg-teal-50'
+                    }`}
+                  >
+                    <Wallet className={`w-6 h-6 mb-1 ${selectedMethod === 'deposit' ? 'text-teal-600' : 'text-gray-600'}`} />
+                    <span className="text-xs font-medium">Store Credit</span>
+                  </button>
+                )}
+
                 {/* Custom Payment Methods */}
                 {customMethods.map(method => (
                   <button
@@ -850,6 +1012,41 @@ function PaymentPageContent() {
                     </div>
                   )}
 
+                  {/* Deposit / Store Credit drawdown info */}
+                  {selectedMethod === 'deposit' && selectedCustomer && (
+                    <div className="text-xs bg-teal-50 border border-teal-200 rounded px-2 py-1.5 space-y-1">
+                      <p className="font-medium text-teal-800">
+                        {selectedCustomer.name} · Store credit available: KSh {customerDeposits.reduce((s, d) => s + (d.balance || 0), 0).toLocaleString()}
+                      </p>
+                      {customerDeposits.length > 1 && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-teal-700">Draw from:</span>
+                          <select
+                            value={selectedDepositId}
+                            onChange={(e) => {
+                              setSelectedDepositId(e.target.value)
+                              const d = customerDeposits.find((x) => x._id === e.target.value)
+                              if (d) {
+                                const capped = Math.min(d.balance, remaining)
+                                setPaymentAmount(capped > 0 ? capped.toFixed(2) : '')
+                              }
+                            }}
+                            className="flex-1 border border-teal-300 rounded px-2 py-1 text-xs bg-white"
+                          >
+                            {customerDeposits.map((d) => (
+                              <option key={d._id} value={d._id}>
+                                {d.receiptNo} — KSh {d.balance.toLocaleString()} ({d.method})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      <p className="text-teal-600 text-[11px]">
+                        This draws down the customer's prepayment. No new cash is collected.
+                      </p>
+                    </div>
+                  )}
+
                   {/* Amount */}
                   <div>
                     <Label className="text-xs font-medium mb-1 block">
@@ -861,7 +1058,7 @@ function PaymentPageContent() {
                       type="number"
                       value={paymentAmount}
                       onChange={e => setPaymentAmount(e.target.value)}
-                      placeholder={selectedMethod === 'credit' ? '0 for full credit' : 'Enter amount'}
+                      placeholder={selectedMethod === 'credit' ? 'Leave blank = full credit' : 'Enter amount'}
                       step="0.01"
                       className="h-9 text-base font-semibold"
                       autoFocus
@@ -1093,6 +1290,7 @@ function PaymentPageContent() {
                   <p className="text-xs text-gray-500">
                     {c.phone}
                     {c.creditBalance > 0 && <span className="text-red-500 ml-2">Owes KSh {c.creditBalance.toLocaleString()}</span>}
+                    {c.depositBalance > 0 && <span className="text-teal-600 ml-2">Store credit KSh {c.depositBalance.toLocaleString()}</span>}
                   </p>
                 </button>
               ))}
@@ -1240,6 +1438,9 @@ function PaymentPageContent() {
           payments={lastSale.payments}
           cashPaid={lastSale.cashPaid}
           debtCreated={lastSale.debtCreated}
+          customerBalance={lastSale.customerBalance}
+          depositBalance={lastSale.depositBalance}
+          depositDrawn={lastSale.depositDrawn}
         />
       )}
     </div>
