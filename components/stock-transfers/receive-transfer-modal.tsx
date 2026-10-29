@@ -121,7 +121,7 @@ export function ReceiveTransferModal({ isOpen, transfer, onClose, onSuccess }: R
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Receive Transfer</DialogTitle>
           <DialogDescription>
@@ -129,11 +129,12 @@ export function ReceiveTransferModal({ isOpen, transfer, onClose, onSuccess }: R
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 mt-4">
+        {/* Scrollable body — items list grows here, footer stays pinned below */}
+        <div className="flex-1 overflow-y-auto space-y-4 mt-4 pr-1">
           {/* Items */}
           <div>
             <Label className="text-base mb-3 block">Items to Receive</Label>
-            <div className="border rounded-md divide-y">
+            <div className="border rounded-md divide-y max-h-60 overflow-y-auto">
               {transfer.items.map((item) => {
                 const itemId = getItemId(item)
                 return (
@@ -166,9 +167,12 @@ export function ReceiveTransferModal({ isOpen, transfer, onClose, onSuccess }: R
               You can adjust quantities if there are discrepancies
             </p>
           </div>
+        </div>
 
+        {/* Pinned footer — always visible regardless of items list length */}
+        <div className="space-y-4 border-t pt-4 mt-2 shrink-0">
           {/* Rejection Section */}
-          <div className="border-t pt-4">
+          <div>
             <Label htmlFor="rejection-reason">Or Reject Transfer</Label>
             <Textarea
               id="rejection-reason"
@@ -181,7 +185,7 @@ export function ReceiveTransferModal({ isOpen, transfer, onClose, onSuccess }: R
           </div>
 
           {/* Actions */}
-          <div className="flex justify-end gap-2 pt-4">
+          <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </Button>
