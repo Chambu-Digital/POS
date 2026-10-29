@@ -255,7 +255,7 @@ export async function POST(request: NextRequest) {
     const realCashPayments = payments.filter((p: any) => p.method !== 'deposit')
     const hasCashPayment = realCashPayments.some((p: any) => p.method === 'cash')
     const realCashTotal = realCashPayments.reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)
-    if (realCashTotal > saleTotal && !hasCashPayment) {
+    if (realCashTotal > saleTotal + 0.005 && !hasCashPayment) {
       return NextResponse.json({ 
         error: `Payment amount (${realCashTotal.toFixed(2)}) exceeds sale total (${saleTotal.toFixed(2)}). Overpayment only allowed for cash payments.` 
       }, { status: 400 })
