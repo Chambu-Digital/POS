@@ -22,6 +22,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (cleanedData.categoryId === '') cleanedData.categoryId = undefined
     if (cleanedData.branchId === '') cleanedData.branchId = undefined
 
+    // Round prices to 2 decimal places on save
+    const r2 = (v: any) => v != null ? Math.round(parseFloat(v) * 100) / 100 : v
+    if (cleanedData.sellingPrice != null) cleanedData.sellingPrice = r2(cleanedData.sellingPrice)
+    if (cleanedData.buyingPrice  != null) cleanedData.buyingPrice  = r2(cleanedData.buyingPrice)
+    if (cleanedData.wholeSale    != null) cleanedData.wholeSale    = r2(cleanedData.wholeSale)
+
     Object.assign(product, cleanedData)
     product.updatedAt = new Date()
     await product.save()

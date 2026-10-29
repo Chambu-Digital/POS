@@ -51,7 +51,9 @@ export async function POST(request: NextRequest) {
       const p: Record<string, any> = { userId: ownerId }
       Object.entries(mapping).forEach(([col, field]) => {
         if (field && field !== 'skip' && row[col] !== undefined && row[col] !== '') {
-          p[field] = ['buyingPrice','sellingPrice','wholeSale','stock'].includes(field) ? parseFloat(row[col]) || 0 : row[col]
+          p[field] = ['buyingPrice','sellingPrice','wholeSale','stock'].includes(field)
+            ? (field === 'stock' ? parseFloat(row[col]) || 0 : Math.round((parseFloat(row[col]) || 0) * 100) / 100)
+            : row[col]
         }
       })
       return p

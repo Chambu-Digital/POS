@@ -83,6 +83,13 @@ export async function POST(request: NextRequest) {
     if (cleanedData.categoryId === '') delete cleanedData.categoryId
     if (cleanedData.branchId === '') delete cleanedData.branchId
 
+    // Round prices to 2 decimal places — sub-cent values cause floating point
+    // debt/overpayment artifacts at checkout.
+    const r2 = (v: any) => v != null ? Math.round(parseFloat(v) * 100) / 100 : v
+    if (cleanedData.sellingPrice != null) cleanedData.sellingPrice = r2(cleanedData.sellingPrice)
+    if (cleanedData.buyingPrice  != null) cleanedData.buyingPrice  = r2(cleanedData.buyingPrice)
+    if (cleanedData.wholeSale    != null) cleanedData.wholeSale    = r2(cleanedData.wholeSale)
+
     // ── Duplicate detection ───────────────────────────────────────────────────
     // A product is considered a duplicate when userId + productName + brand +
     // model + variant all match an existing record (case-insensitive on name,

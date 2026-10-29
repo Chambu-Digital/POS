@@ -35,9 +35,12 @@ export async function PATCH(request: NextRequest) {
     for (const item of data.items) {
       try {
         // Validate updates only contain allowed fields
+        const r2 = (v: any) => v != null ? Math.round(parseFloat(v) * 100) / 100 : v
         const updates = Object.keys(item.updates).reduce((acc: any, key) => {
           if (allowedFields.includes(key)) {
-            acc[key] = item.updates[key as keyof typeof item.updates]
+            const val = item.updates[key as keyof typeof item.updates]
+            // Round price fields to 2 decimal places
+            acc[key] = ['buyingPrice', 'sellingPrice', 'wholeSale'].includes(key) ? r2(val) : val
           }
           return acc
         }, {})

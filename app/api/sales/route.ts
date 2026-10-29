@@ -158,7 +158,10 @@ export async function POST(request: NextRequest) {
     const orderNumber = await generateOrderNumber(models, ownerId)
 
     // ── PAYMENT VALIDATION ────────────────────────────────────────────────────
-    const saleTotal = data.total || 0
+    // Round saleTotal to 2 decimal places immediately. Product prices with
+    // sub-cent fractions (e.g. 120.0034) would otherwise cause 0.0034 cent
+    // "debts" that trip the walk-in underpayment guard and the overpayment guard.
+    const saleTotal = Math.round((data.total || 0) * 100) / 100
     let payments = data.payments || []
     
     // Handle legacy single payment format for backward compatibility
@@ -242,7 +245,9 @@ export async function POST(request: NextRequest) {
     // are an internal transfer and can cover part/all of the sale without
     // creating debt.
     const realCashPaid = nonDepositPaid
-    const debt = Math.max(0, saleTotal - (realCashPaid + depositPayments.reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)))
+    // Round debt to 2dp before the walk-in guard — sub-cent floating point
+    // artifacts (e.g. 0.0034) should not be treated as a real underpayment.
+    const debt = Math.max(0, Math.round((saleTotal - (realCashPaid + depositPayments.reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0))) * 100) / 100)
     if (debt > 0 && !data.customerId) {
       return NextResponse.json({ 
         error: 'Walk-in customers cannot have unpaid balances. Please select a registered customer or pay the full amount.' 
