@@ -355,10 +355,11 @@ function PaymentPageContent() {
     const amt = parseFloat(p.amount) || 0
     return sum + (p.status !== 'failed' ? amt : 0)
   }, 0)
-  const remaining = Math.max(0, total - totalPaid)
-  
-  // Change is the overpayment (when total paid exceeds total)
-  const changeDue = Math.max(0, totalPaid - total)
+  // Round to 2dp before comparison to prevent floating point artifacts
+  // (e.g. 0.000000004) from triggering the partial-payment warning on
+  // a fully-paid sale.
+  const remaining = Math.max(0, Math.round((total - totalPaid) * 100) / 100)
+  const changeDue = Math.max(0, Math.round((totalPaid - total) * 100) / 100)
 
   // Select payment method
   function selectPaymentMethod(method: string) {
@@ -1221,7 +1222,7 @@ function PaymentPageContent() {
                 </div>
               </div>
 
-              {remaining > 0 && !selectedCustomer && (
+              {remaining > 0 && !selectedCustomer && paymentEntries.length > 0 && (
                 <div className="mt-2 p-2 bg-amber-100 border border-amber-300 rounded text-xs text-amber-800">
                   ⚠️ Select a customer for partial payments
                 </div>
