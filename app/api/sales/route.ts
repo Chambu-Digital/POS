@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const customerId = url.searchParams.get('customerId')
     const paymentStatusParam = url.searchParams.get('paymentStatus')
 
-    const query: any = { userId: ownerId }
+    const query: any = { userId: ownerId, voidedAt: null }
     if (branchContext) {
       query.branchId = branchContext
     }

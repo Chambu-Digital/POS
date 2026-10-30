@@ -41,7 +41,7 @@ interface Sale {
   discount: number
   paymentMethod: string
   payments?: PaymentEntry[]
-  status?: 'completed' | 'pending' | 'held' | 'refunded'
+  status?: 'completed' | 'pending' | 'held' | 'refunded' | 'voided'
   source?: 'pos' | 'rental'
   createdAt: string
   notes?: string
@@ -92,6 +92,9 @@ function OrdersPageContent() {
     return features[key] === true && permissions[key] === true
   }
 
+  // Owner always has delete permission; staff need the explicit flag
+  const canDeleteOrders = userType === 'user' || permissions['canDeleteOrders'] === true
+
   const showRentals = can('rentals.bookings') || can('rentals.manage')
 
   return (
@@ -107,8 +110,8 @@ function OrdersPageContent() {
             </TabsTrigger>
           )}
         </TabsList>
-        <TabsContent value="sales" className="mt-4"><SalesOrdersTab source="pos" /></TabsContent>
-        {showRentals && <TabsContent value="rental"  className="mt-4"><SalesOrdersTab source="rental" /></TabsContent>}
+        <TabsContent value="sales" className="mt-4"><SalesOrdersTab source="pos" canDeleteOrders={canDeleteOrders} /></TabsContent>
+        {showRentals && <TabsContent value="rental" className="mt-4"><SalesOrdersTab source="rental" canDeleteOrders={canDeleteOrders} /></TabsContent>}
       </Tabs>
     </div>
   )
@@ -138,7 +141,7 @@ function StatusDot({ status }: { status?: 'completed' | 'pending' | 'held' | 're
 }
 
 // ── Sales Orders Tab ──────────────────────────────────────────────────────────
-function SalesOrdersTab({ source }: { source: 'pos' | 'rental' }) {
+function SalesOrdersTab({ source, canDeleteOrders }: { source: 'pos' | 'rental'; canDeleteOrders: boolean }) {
   const [sales, setSales]           = useState<Sale[]>([])
   const [filteredSales, setFiltered] = useState<Sale[]>([])
   const [loading, setLoading]       = useState(true)
@@ -175,6 +178,11 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'rental' }) {
     }
     
     setLoading(false)
+  }
+
+  // Remove a voided order from local state immediately — no refetch needed
+  function handleOrderDeleted(orderId: string) {
+    setSales(prev => prev.filter(s => s._id !== orderId))
   }
 
   function applyFilters() {
@@ -468,7 +476,7 @@ function SalesOrdersTab({ source }: { source: 'pos' | 'rental' }) {
         )}
       </div>
 
-      <OrderDetailsDialog open={dialogOpen} onOpenChange={setDialogOpen} order={selectedOrder} />
+      <OrderDetailsDialog open={dialogOpen} onOpenChange={setDialogOpen} order={selectedOrder} canDeleteOrders={canDeleteOrders} onOrderDeleted={handleOrderDeleted} />
     </div>
   )
 }

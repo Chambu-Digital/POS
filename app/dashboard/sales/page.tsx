@@ -802,7 +802,7 @@ function SalesPageContent() {
 
   function scrollToCart() {
     // On mobile, open the cart modal instead of scrolling
-    if (window.innerWidth < 1024) { // lg breakpoint
+    if (window.innerWidth < 768) { // md breakpoint
       setIsCartModalOpen(true)
     } else {
       cartRef.current?.scrollIntoView({ behavior: 'auto' })
@@ -916,9 +916,9 @@ function SalesPageContent() {
 
   return (
     <>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-200px)]">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[calc(100vh-200px)]">
         {/* Left Panel - Products */}
-        <div className="lg:col-span-2 flex flex-col space-y-4" ref={productsRef}>
+        <div className="md:col-span-2 flex flex-col space-y-4" ref={productsRef}>
           {isOffline && (
             <Alert className="bg-yellow-50 border-yellow-200">
               <AlertCircle className="h-4 w-4 text-yellow-600" />
@@ -934,7 +934,7 @@ function SalesPageContent() {
               <p className="text-muted-foreground">Search and add products to cart</p>
             </div>
             <div className="flex items-center gap-2">
-              <div className="hidden lg:block text-xs text-muted-foreground bg-gray-50 px-3 py-1.5 rounded-lg border">
+              <div className="hidden md:block text-xs text-muted-foreground bg-gray-50 px-3 py-1.5 rounded-lg border">
                 <span className="font-semibold">Search:</span> <kbd className="px-1.5 py-0.5 bg-white border rounded">↑↓</kbd> pick product • <kbd className="px-1.5 py-0.5 bg-white border rounded">Enter</kbd> add &nbsp;|&nbsp; <span className="font-semibold">Cart:</span> <kbd className="px-1.5 py-0.5 bg-white border rounded">↑↓</kbd> select • <kbd className="px-1.5 py-0.5 bg-white border rounded">Tab</kbd> checkout • <kbd className="px-1.5 py-0.5 bg-white border rounded">Q</kbd> qty • <kbd className="px-1.5 py-0.5 bg-white border rounded">D</kbd> disc • <kbd className="px-1.5 py-0.5 bg-white border rounded">+/-</kbd> adjust • <kbd className="px-1.5 py-0.5 bg-white border rounded">Del</kbd> remove
               </div>
               <HeldOrders onRecall={(order) => {
@@ -1110,7 +1110,7 @@ function SalesPageContent() {
         </div>
 
         {/* Right Panel - Cart */}
-        <div className="flex flex-col space-y-4 lg:pb-0 pb-32" ref={cartRef}>
+        <div className="flex flex-col space-y-4 md:pb-0 pb-32" ref={cartRef}>
           <Card className="flex flex-col">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -1124,7 +1124,7 @@ function SalesPageContent() {
                   Cart ({cart.length})
                 </CardTitle>
                 {cart.length > 0 && (
-                  <Button size="sm" variant="outline" onClick={scrollToTop} className="md:hidden">
+                  <Button size="sm" variant="outline" onClick={scrollToTop} className="lg:hidden">
                     Add More Items
                   </Button>
                 )}

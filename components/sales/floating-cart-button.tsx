@@ -10,7 +10,7 @@ export function FloatingCartButton({ itemCount, onClick }: FloatingCartButtonPro
     <button
       onClick={onClick}
       aria-label={`Cart — ${itemCount} item${itemCount !== 1 ? 's' : ''}`}
-      className="fixed bottom-20 right-5 z-40 md:hidden focus:outline-none"
+      className="fixed bottom-20 right-5 z-40 lg:hidden focus:outline-none"
     >
       <div className="relative">
         {/* Glow ring when cart has items */}

@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
     const allSales = await models.Sale.find({
       userId:    ownerId,
       createdAt: { $gte: todayStart, $lte: todayEnd },
+      voidedAt:  null,
       ...staffFilter,
       ...branchFilter,
     })

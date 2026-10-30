@@ -7,19 +7,32 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { Textarea } from '@/components/ui/textarea'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { CheckCircle2, ChevronDown, Printer, Edit, Package, ArrowRightLeft } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Printer, Edit, Package, ArrowRightLeft, Trash2 } from 'lucide-react'
 import { ReturnModal } from '@/components/sales/return-modal'
 import { ExchangeModal } from '@/components/sales/exchange-modal'
 import { Receipt, ReceiptRef } from '@/components/sales/receipt'
+import { toast } from 'sonner'
 
 interface PaymentEntry {
   method: string
@@ -108,9 +121,11 @@ interface OrderDetailsDialogProps {
     isFullyReturned?: boolean
     payments?: PaymentEntry[]
   } | null
+  canDeleteOrders?: boolean
+  onOrderDeleted?: (orderId: string) => void
 }
 
-export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: OrderDetailsDialogProps) {
+export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder, canDeleteOrders = false, onOrderDeleted }: OrderDetailsDialogProps) {
   const [showNoteInput, setShowNoteInput] = useState(false)
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false)
   const [isExchangeModalOpen, setIsExchangeModalOpen] = useState(false)
@@ -121,6 +136,11 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
   const [userType, setUserType] = useState<'user' | 'staff' | null>(null)
   const [processingApproval, setProcessingApproval] = useState<string | null>(null)
   const receiptRef = useRef<ReceiptRef>(null)
+
+  // Void order state
+  const [isVoidDialogOpen, setIsVoidDialogOpen] = useState(false)
+  const [voidReason, setVoidReason] = useState('')
+  const [isVoiding, setIsVoiding] = useState(false)
 
   // Fetch settings and user info
   useEffect(() => {
@@ -224,6 +244,37 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
       alert('Failed to process approval. Please try again.')
     } finally {
       setProcessingApproval(null)
+    }
+  }
+
+  // Void order
+  async function handleVoidOrder() {
+    if (!order?._id || !voidReason.trim()) return
+
+    setIsVoiding(true)
+    try {
+      const response = await fetch(`/api/sales/${order._id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: voidReason.trim() }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        toast.success(`Order ${data.orderNumber || order._id.slice(-6).toUpperCase()} voided successfully`)
+        setIsVoidDialogOpen(false)
+        setVoidReason('')
+        onOpenChange(false)
+        onOrderDeleted?.(order._id)
+      } else {
+        const err = await response.json()
+        toast.error(err.error || 'Failed to void order')
+      }
+    } catch (error) {
+      console.error('Failed to void order:', error)
+      toast.error('Failed to void order. Please try again.')
+    } finally {
+      setIsVoiding(false)
     }
   }
 
@@ -414,6 +465,18 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuItem>View Receipt</DropdownMenuItem>
                 <DropdownMenuItem>Assign To Customer</DropdownMenuItem>
+                {canDeleteOrders && order.status !== 'voided' && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                      onClick={() => { setVoidReason(''); setIsVoidDialogOpen(true) }}
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Void Order
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -928,9 +991,55 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder }: 
           }}
         />
 
+        {/* Void Order Confirmation */}
+        <AlertDialog open={isVoidDialogOpen} onOpenChange={setIsVoidDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-red-600 flex items-center gap-2">
+                <Trash2 className="h-5 w-5" />
+                Void Order
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-3">
+                  <p>
+                    You are about to void{' '}
+                    <strong>{(order as any)?.orderNumber || `order ending in ${order?._id.slice(-6).toUpperCase()}`}</strong>{' '}
+                    totalling <strong>KES {order?.total.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>.
+                  </p>
+                  <p className="text-sm">
+                    This will reverse all stock movements and customer balances associated with this order.
+                    This action cannot be undone.
+                  </p>
+                  <div className="pt-1">
+                    <label className="text-sm font-medium text-gray-700 block mb-1.5">
+                      Reason for voiding <span className="text-red-500">*</span>
+                    </label>
+                    <Textarea
+                      value={voidReason}
+                      onChange={e => setVoidReason(e.target.value)}
+                      placeholder="e.g. Duplicate order, test transaction, customer cancelled..."
+                      rows={3}
+                      className="resize-none"
+                    />
+                  </div>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isVoiding}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleVoidOrder}
+                disabled={isVoiding || !voidReason.trim()}
+                className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              >
+                {isVoiding ? 'Voiding…' : 'Confirm Void'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
         {/* Hidden Receipt for Printing */}
-        {settings && userInfo && (
-          <Receipt
+        {settings && userInfo && (          <Receipt
             ref={receiptRef}
             shopName={settings.general?.shopName || userInfo.user?.shopName || 'My Shop'}
             shopLogo={settings.general?.logo}

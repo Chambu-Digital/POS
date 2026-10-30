@@ -621,6 +621,8 @@ function PaymentPageContent() {
         subtotal,
         discount: cartDiscount,
         total: Math.max(0, chargeTotal),
+        customerId: selectedCustomer?._id || null,
+        customerName: selectedCustomer?.name || '',
         payments: completedPayments.map(p => ({
           method: p.method === 'mpesa_stk' || p.method === 'mpesa_manual' ? 'mobile_money' : 
                   p.method === 'custom' ? 'custom' : 

@@ -208,9 +208,16 @@ export const saleSchema = new mongoose.Schema(
     }],
     totalExchanged:       { type: Number, default: 0 },  // sum of price differences for all exchanges
     
-    status:    { type: String, enum: ['completed', 'pending', 'held', 'refunded', 'partially_refunded', 'exchanged'], default: 'completed' },
+    status:    { type: String, enum: ['completed', 'pending', 'held', 'refunded', 'partially_refunded', 'exchanged', 'voided'], default: 'completed' },
     synced:    { type: Boolean, default: true },
     createdAt: { type: Date, default: Date.now },
+
+    // ── Soft delete (void) ────────────────────────────────────────────────────
+    // voidedAt is the canonical "is this order deleted?" check.
+    // null = active order; Date = voided. Never hard-deleted.
+    voidedAt:   { type: Date,   default: null },
+    voidedBy:   { type: mongoose.Schema.Types.ObjectId, ref: 'Staff', default: null },  // null = owner voided it
+    voidReason: { type: String, default: '' },
   },
   { collection: 'sales' }
 )

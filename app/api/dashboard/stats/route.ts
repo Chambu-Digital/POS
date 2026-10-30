@@ -71,7 +71,7 @@ export async function GET(request: NextRequest) {
     const tenantId = payload.mongoUri || payload.userId
 
     // ── Base match filters ────────────────────────────────────────────────────
-    const baseSaleMatch: any = { userId: ownerObjId }
+    const baseSaleMatch: any = { userId: ownerObjId, voidedAt: null }
     if (branchObjId) baseSaleMatch.branchId = branchObjId
     if (isStaff) baseSaleMatch.staffId = new Types.ObjectId(payload.userId)
 
@@ -131,7 +131,7 @@ export async function GET(request: NextRequest) {
 
       // All-time aggregate: count + sum via $group — NO full document fetch
       canSeeReports ? models.Sale.aggregate([
-        { $match: branchObjId ? { userId: ownerObjId, branchId: branchObjId } : { userId: ownerObjId } },
+        { $match: branchObjId ? { userId: ownerObjId, branchId: branchObjId, voidedAt: null } : { userId: ownerObjId, voidedAt: null } },
         { $group: { _id: null, count: { $sum: 1 }, revenue: { $sum: '$total' }, discount: { $sum: { $ifNull: ['$discount', 0] } } } },
       ]) : Promise.resolve([]),
 
@@ -193,7 +193,7 @@ export async function GET(request: NextRequest) {
         .select('status tableNumber waiterName orderNumber createdAt').lean(),
 
       // Recent retail orders (last 10)
-      models.Sale.find({ userId: ownerObjId, ...(branchObjId ? { branchId: branchObjId } : {}) })
+      models.Sale.find({ userId: ownerObjId, voidedAt: null, ...(branchObjId ? { branchId: branchObjId } : {}) })
         .sort({ createdAt: -1 }).limit(10)
         .select('total createdAt source orderNumber staffId')
         .populate('staffId', 'name firstName lastName').lean(),
@@ -277,7 +277,7 @@ export async function GET(request: NextRequest) {
     // ── Staff-only minimal response ───────────────────────────────────────────
     if (isStaff && !canSeeReports) {
       const [staffRecentOrders, staffRecentHosp] = await Promise.all([
-        models.Sale.find({ userId: ownerObjId, staffId: new Types.ObjectId(payload.userId), ...(branchObjId ? { branchId: branchObjId } : {}) })
+        models.Sale.find({ userId: ownerObjId, staffId: new Types.ObjectId(payload.userId), voidedAt: null, ...(branchObjId ? { branchId: branchObjId } : {}) })
           .sort({ createdAt: -1 }).limit(10).select('total createdAt source').lean(),
         models.HospitalityOrder ? models.HospitalityOrder.find({ tenantId, servedBy: payload.userId })
           .sort({ createdAt: -1 }).limit(10).select('total createdAt orderNumber').lean() : Promise.resolve([]),
