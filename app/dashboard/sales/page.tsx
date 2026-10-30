@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -137,9 +137,13 @@ function SalesPageContent() {
   const discountInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({})
   const priceOverrideInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({})
   const validationTimerRef = useRef<{ [key: string]: ReturnType<typeof setTimeout> | null }>({})
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const productCardRefs = useRef<(HTMLDivElement | null)[]>([])
   
   // Track selected cart item index for keyboard navigation
   const [selectedCartIndex, setSelectedCartIndex] = useState<number>(-1)
+  // Track highlighted product card index for arrow-key navigation from the search bar
+  const [activeProductIndex, setActiveProductIndex] = useState<number>(-1)
   const [overrideItem, setOverrideItem] = useState<string | null>(null)
   const [overridePrice, setOverridePrice] = useState('')
   // Lot picker state
@@ -160,6 +164,18 @@ function SalesPageContent() {
       setSelectedCartIndex(-1)
     }
   }, [cart.length, selectedCartIndex])
+
+  // Reset active product index when filtered results change
+  useEffect(() => {
+    setActiveProductIndex(-1)
+  }, [filteredProducts])
+
+  // Scroll highlighted product card into view
+  useEffect(() => {
+    if (activeProductIndex >= 0) {
+      productCardRefs.current[activeProductIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [activeProductIndex])
 
   // ── Barcode Scanner ──────────────────────────────────────────────────────────
   function handleScanResult(result: ScanResult) {
@@ -438,6 +454,9 @@ function SalesPageContent() {
     // Lot-tracked products: open the picker modal instead of adding directly
     if (product.trackLots) {
       setLotPickerProduct(product)
+      // Clear search so the lot picker opens with a clean state
+      setSearch('')
+      setActiveProductIndex(-1)
       return
     }
 
@@ -472,6 +491,12 @@ function SalesPageContent() {
         },
       ]
     })
+
+    // Clear search bar and product highlight after adding
+    setSearch('')
+    setActiveProductIndex(-1)
+    // Return focus to search input so the cashier can type the next item immediately
+    setTimeout(() => searchInputRef.current?.focus(), 0)
   }
 
   // Called by LotPickerModal with a single CartItem carrying lotBreakdown
@@ -549,6 +574,8 @@ function SalesPageContent() {
 
       // Arrow Up - navigate to previous cart item (works everywhere, even in inputs)
       if (e.key === 'ArrowUp') {
+        // If search is focused, let the search input's own keyDown handler manage this
+        if (document.activeElement === searchInputRef.current) return
         e.preventDefault() // Prevent default increment in number inputs
         if (isTypingInField) {
           // Blur the input first
@@ -565,6 +592,8 @@ function SalesPageContent() {
 
       // Arrow Down - navigate to next cart item (works everywhere, even in inputs)
       if (e.key === 'ArrowDown') {
+        // If search is focused, let the search input's own keyDown handler manage this
+        if (document.activeElement === searchInputRef.current) return
         e.preventDefault() // Prevent default decrement in number inputs
         if (isTypingInField) {
           // Blur the input first
@@ -906,7 +935,7 @@ function SalesPageContent() {
             </div>
             <div className="flex items-center gap-2">
               <div className="hidden lg:block text-xs text-muted-foreground bg-gray-50 px-3 py-1.5 rounded-lg border">
-                <span className="font-semibold">Cart Nav:</span> <kbd className="px-1.5 py-0.5 bg-white border rounded">↑↓</kbd> select • <kbd className="px-1.5 py-0.5 bg-white border rounded">Enter/Tab</kbd> checkout • <kbd className="px-1.5 py-0.5 bg-white border rounded">Q</kbd> qty • <kbd className="px-1.5 py-0.5 bg-white border rounded">D</kbd> disc • <kbd className="px-1.5 py-0.5 bg-white border rounded">+/-</kbd> adjust • <kbd className="px-1.5 py-0.5 bg-white border rounded">Del</kbd> remove
+                <span className="font-semibold">Search:</span> <kbd className="px-1.5 py-0.5 bg-white border rounded">↑↓</kbd> pick product • <kbd className="px-1.5 py-0.5 bg-white border rounded">Enter</kbd> add &nbsp;|&nbsp; <span className="font-semibold">Cart:</span> <kbd className="px-1.5 py-0.5 bg-white border rounded">↑↓</kbd> select • <kbd className="px-1.5 py-0.5 bg-white border rounded">Tab</kbd> checkout • <kbd className="px-1.5 py-0.5 bg-white border rounded">Q</kbd> qty • <kbd className="px-1.5 py-0.5 bg-white border rounded">D</kbd> disc • <kbd className="px-1.5 py-0.5 bg-white border rounded">+/-</kbd> adjust • <kbd className="px-1.5 py-0.5 bg-white border rounded">Del</kbd> remove
               </div>
               <HeldOrders onRecall={(order) => {
                 setCart(order.cart)
@@ -920,12 +949,32 @@ function SalesPageContent() {
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" size={20} />
               <Input
+                ref={searchInputRef}
                 placeholder="Search by name, brand, model, variant..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onFocus={enterEditing}
                 onBlur={exitEditing}
                 className="pl-10"
+                onKeyDown={(e) => {
+                  if (filteredProducts.length === 0) return
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setActiveProductIndex(prev =>
+                      prev >= filteredProducts.length - 1 ? 0 : prev + 1
+                    )
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setActiveProductIndex(prev =>
+                      prev <= 0 ? filteredProducts.length - 1 : prev - 1
+                    )
+                  } else if (e.key === 'Enter' && activeProductIndex >= 0) {
+                    e.preventDefault()
+                    addToCart(filteredProducts[activeProductIndex])
+                  } else if (e.key === 'Escape') {
+                    setActiveProductIndex(-1)
+                  }
+                }}
               />
             </div>
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
@@ -995,11 +1044,14 @@ function SalesPageContent() {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {filteredProducts.map((product) => (
+                {filteredProducts.map((product, idx) => (
                   <Card
                     key={product._id}
+                    ref={(el) => { productCardRefs.current[idx] = el }}
                     className={`hover:shadow-md transition-all cursor-pointer ${
-                      product.trackLots
+                      activeProductIndex === idx
+                        ? 'ring-2 ring-blue-500 bg-blue-50 border-blue-300'
+                        : product.trackLots
                         ? 'hover:ring-2 hover:ring-blue-400'
                         : 'hover:ring-2 hover:ring-green-500'
                     }`}

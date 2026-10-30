@@ -26,6 +26,7 @@ function buildDefaults(user: { shopName?: string; email?: string; phone?: string
     receipt: {
       showLogo: true, showTaxId: true, showAddress: true, showPhone: true,
       customMessage: 'Thank You For Shopping With Us!', paperSize: '58mm',
+      totalRounding: 'none',
     },
     documents: {
       paperSize: 'A4',        // A4, Letter, 58mm, 80mm

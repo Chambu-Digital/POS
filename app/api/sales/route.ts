@@ -149,7 +149,7 @@ export async function POST(request: NextRequest) {
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { models } = await getTenantDB(request)
+    const { models, conn } = await getTenantDB(request)
     const data = await request.json()
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
     const branchContext = await getBranchContext(request)
@@ -158,10 +158,27 @@ export async function POST(request: NextRequest) {
     const orderNumber = await generateOrderNumber(models, ownerId)
 
     // ── PAYMENT VALIDATION ────────────────────────────────────────────────────
-    // Round saleTotal to 2 decimal places immediately. Product prices with
-    // sub-cent fractions (e.g. 120.0034) would otherwise cause 0.0034 cent
-    // "debts" that trip the walk-in underpayment guard and the overpayment guard.
-    const saleTotal = Math.round((data.total || 0) * 100) / 100
+    // Apply totalRounding setting before any comparison. 'ceil' rounds up to
+    // the nearest whole shilling (e.g. 150.42 → 151). 'none' (default) still
+    // rounds to 2dp to strip floating-point dust from multi-item totals.
+    // This must match what the payment page computed as chargeTotal so the
+    // walk-in underpayment guard and the overpayment guard never fire on a
+    // legitimately paid sale.
+    let saleTotal: number
+    try {
+      const userDoc = await conn.db.collection('users').findOne(
+        { _id: new Types.ObjectId(ownerId) },
+        { projection: { settings: 1 } }
+      ) as any
+      const rounding = userDoc?.settings?.receipt?.totalRounding || 'none'
+      const raw = data.total || 0
+      saleTotal = rounding === 'ceil'
+        ? Math.ceil(raw)
+        : Math.round(raw * 100) / 100
+    } catch {
+      // Non-fatal: fall back to 2dp rounding if settings can't be read
+      saleTotal = Math.round((data.total || 0) * 100) / 100
+    }
     let payments = data.payments || []
     
     // Handle legacy single payment format for backward compatibility

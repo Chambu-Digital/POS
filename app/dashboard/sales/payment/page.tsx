@@ -351,6 +351,11 @@ function PaymentPageContent() {
   // Calculate totals
   const subtotal = cart.reduce((sum, item) => sum + item.sellingPrice * item.quantity - item.discount, 0)
   const total = subtotal - cartDiscount
+  // Apply totalRounding setting: 'ceil' rounds up to the nearest whole shilling.
+  // Only affects the amount charged — stored prices and COGS remain exact.
+  const chargeTotal = shopSettings?.receipt?.totalRounding === 'ceil'
+    ? Math.ceil(total)
+    : Math.round(total * 100) / 100  // default: round to 2dp (strips floating point dust)
   const totalPaid = paymentEntries.reduce((sum, p) => {
     const amt = parseFloat(p.amount) || 0
     return sum + (p.status !== 'failed' ? amt : 0)
@@ -358,8 +363,8 @@ function PaymentPageContent() {
   // Round to 2dp before comparison to prevent floating point artifacts
   // (e.g. 0.000000004) from triggering the partial-payment warning on
   // a fully-paid sale.
-  const remaining = Math.max(0, Math.round((total - totalPaid) * 100) / 100)
-  const changeDue = Math.max(0, Math.round((totalPaid - total) * 100) / 100)
+  const remaining = Math.max(0, Math.round((chargeTotal - totalPaid) * 100) / 100)
+  const changeDue = Math.max(0, Math.round((totalPaid - chargeTotal) * 100) / 100)
 
   // Select payment method
   function selectPaymentMethod(method: string) {
@@ -615,9 +620,7 @@ function PaymentPageContent() {
         })),
         subtotal,
         discount: cartDiscount,
-        total: Math.max(0, total),
-        customerName: selectedCustomer?.name || '',
-        customerId: selectedCustomer?._id || null,
+        total: Math.max(0, chargeTotal),
         payments: completedPayments.map(p => ({
           method: p.method === 'mpesa_stk' || p.method === 'mpesa_manual' ? 'mobile_money' : 
                   p.method === 'custom' ? 'custom' : 
@@ -674,7 +677,7 @@ function PaymentPageContent() {
           })),
           subtotal,
           discount: cartDiscount,
-          total: Math.max(0, total),
+          total: Math.max(0, chargeTotal),
           amountPaid: totalPaid,
           paymentMethod: completedPayments.length === 1 ? completedPayments[0].method : 'multiple',
           customerName: selectedCustomer?.name || 'Cash Sale',
@@ -693,7 +696,7 @@ function PaymentPageContent() {
             customMethodName: p.customMethodName || '',
             timestamp: new Date(),
           })),
-          cashPaid: totalPaid < total ? totalPaid : undefined,
+          cashPaid: totalPaid < chargeTotal ? totalPaid : undefined,
           debtCreated: debt > 0 ? debt : undefined,
           customerBalance: result.customerBalance,
           depositBalance: result.depositBalance,
@@ -748,7 +751,7 @@ function PaymentPageContent() {
             variant: item.variant, quantity: item.quantity, price: item.sellingPrice,
             discount: item.discount, total: item.sellingPrice * item.quantity - item.discount,
           })),
-          subtotal, discount: cartDiscount, total: Math.max(0, total),
+          subtotal, discount: cartDiscount, total: Math.max(0, chargeTotal),
           paymentMethod: 'offline',
           customerName: selectedCustomer?.name || 'Cash Sale',
           customerPhone: selectedCustomer?.phone || '',
@@ -763,7 +766,7 @@ function PaymentPageContent() {
             customMethodName: p.customMethodName || '',
             timestamp: new Date(),
           })),
-          cashPaid: totalPaid < total ? totalPaid : undefined,
+          cashPaid: totalPaid < chargeTotal ? totalPaid : undefined,
           debtCreated: debt > 0 ? debt : undefined,
         })
         toast.success('Sale saved offline — will sync when back online')
@@ -827,7 +830,7 @@ function PaymentPageContent() {
               <h1 className="text-xl font-bold">Payment</h1>
               <div className="text-right">
                 <p className="text-xs text-gray-500">Total</p>
-                <p className="text-2xl font-bold text-green-600">KSh {Math.max(0, total).toLocaleString()}</p>
+                <p className="text-2xl font-bold text-green-600">KSh {Math.max(0, chargeTotal).toLocaleString()}</p>
               </div>
             </div>
 
@@ -1066,10 +1069,10 @@ function PaymentPageContent() {
                     />
                     {selectedMethod === 'cash' && parseFloat(paymentAmount) > 0 && (
                       <div className={`mt-1 flex justify-between px-2 py-1 rounded text-xs font-semibold ${
-                        (totalPaid + parseFloat(paymentAmount)) > total ? 'bg-blue-50 text-blue-700' : 'bg-gray-50 text-gray-600'
+                        (totalPaid + parseFloat(paymentAmount)) > chargeTotal ? 'bg-blue-50 text-blue-700' : 'bg-gray-50 text-gray-600'
                       }`}>
                         <span>Preview Change:</span>
-                        <span>KSh {Math.max(0, (totalPaid + parseFloat(paymentAmount)) - total).toFixed(2)}</span>
+                        <span>KSh {Math.max(0, (totalPaid + parseFloat(paymentAmount)) - chargeTotal).toFixed(2)}</span>
                       </div>
                     )}
                     {selectedMethod === 'credit' && selectedCustomer && (
@@ -1204,7 +1207,7 @@ function PaymentPageContent() {
               <div className="grid grid-cols-4 gap-3">
                 <div>
                   <p className="text-xs text-gray-600">Sale Total</p>
-                  <p className="text-lg font-bold">KSh {total.toFixed(2)}</p>
+                  <p className="text-lg font-bold">KSh {chargeTotal.toFixed(2)}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-600">Paid</p>

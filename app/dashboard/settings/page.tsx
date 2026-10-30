@@ -43,6 +43,7 @@ interface PaymentSettings {
 interface ReceiptSettings {
   showLogo: boolean; showTaxId: boolean; showAddress: boolean; showPhone: boolean
   customMessage: string; paperSize: '58mm' | '80mm'
+  totalRounding: 'none' | 'ceil'
 }
 interface DocumentSettings {
   paperSize: 'A4' | 'Letter' | '58mm' | '80mm'
@@ -145,6 +146,7 @@ export default function SettingsPage() {
   const [receipt, setReceipt] = useState<ReceiptSettings>({
     showLogo: true, showTaxId: true, showAddress: true, showPhone: true,
     customMessage: 'Thank You For Shopping With Us!', paperSize: '58mm',
+    totalRounding: 'none',
   })
   const [documents, setDocuments] = useState<DocumentSettings>({
     paperSize: 'A4',
@@ -609,6 +611,15 @@ export default function SettingsPage() {
                   <SelectContent>
                     <SelectItem value="58mm">58mm — Narrow thermal (default)</SelectItem>
                     <SelectItem value="80mm">80mm — Wide thermal</SelectItem>
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+              <SettingRow label="Total Rounding" desc="Round sale totals up to the nearest whole shilling at checkout. Useful when coins under KSh 1 are not in circulation. Stored prices remain exact — only the charged total is rounded.">
+                <Select value={receipt.totalRounding} onValueChange={(v: 'none' | 'ceil') => { upReceipt({ totalRounding: v }); autoSave({ receipt: { totalRounding: v } }) }}>
+                  <SelectTrigger className="max-w-xs focus:ring-green-500"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None — charge the exact total (e.g. KSh 150.42)</SelectItem>
+                    <SelectItem value="ceil">Round up — next whole shilling (e.g. KSh 151)</SelectItem>
                   </SelectContent>
                 </Select>
               </SettingRow>
