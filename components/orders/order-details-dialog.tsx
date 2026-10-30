@@ -82,10 +82,14 @@ interface ReturnItem {
 
 interface ExchangeItem {
   _id?: string
-  returnedProductName: string
-  newProductName: string
-  quantityReturned: number
-  quantityReceived: number
+  // Legacy singular fields (old records)
+  returnedProductName?: string
+  newProductName?: string
+  quantityReturned?: number
+  quantityReceived?: number
+  // Multi-item arrays (new records)
+  returnedItems?: Array<{ productName: string; quantity: number; price: number }>
+  newItems?: Array<{ productName: string; quantity: number; price: number; effectivePrice: number; overridePrice?: number | null; discount?: number }>
   priceDifference: number
   reason: string
   notes?: string
@@ -426,7 +430,7 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder, ca
               <Printer className="h-4 w-4 mr-2" />
               Print Receipt
             </Button>
-            {(order.status !== 'refunded' && !order.isFullyReturned && order.status !== 'exchanged') && (
+            {order.status !== 'refunded' && !order.isFullyReturned && order.status !== 'voided' && (
               <>
                 <Button
                   className="flex-1"
@@ -445,16 +449,6 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder, ca
                   Return Items
                 </Button>
               </>
-            )}
-            {(order.status !== 'refunded' && !order.isFullyReturned && order.status === 'exchanged') && (
-              <Button
-                className="flex-1"
-                variant="outline"
-                onClick={() => setIsReturnModalOpen(true)}
-              >
-                <Package className="h-4 w-4 mr-2" />
-                Return Items
-              </Button>
             )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -657,25 +651,54 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder, ca
                       </tr>
                     </thead>
                     <tbody>
-                      {order.exchanges.map((exchange, index) => (
+                      {order.exchanges.map((exchange, index) => {
+                        // Resolve item lists — prefer new arrays, fall back to legacy singular fields
+                        const retItems = exchange.returnedItems && exchange.returnedItems.length > 0
+                          ? exchange.returnedItems
+                          : exchange.returnedProductName
+                          ? [{ productName: exchange.returnedProductName, quantity: exchange.quantityReturned ?? 0, price: 0 }]
+                          : []
+                        const rcvItems = exchange.newItems && exchange.newItems.length > 0
+                          ? exchange.newItems
+                          : exchange.newProductName
+                          ? [{ productName: exchange.newProductName, quantity: exchange.quantityReceived ?? 0, price: 0, effectivePrice: 0 }]
+                          : []
+                        const totalRetQty = retItems.reduce((s, i) => s + i.quantity, 0)
+                        const totalRcvQty = rcvItems.reduce((s, i) => s + i.quantity, 0)
+
+                        return (
                         <tr key={index} className="border-t border-blue-200">
                           <td className="p-3">
-                            <div>
-                              <p className="text-xs text-muted-foreground">Returned:</p>
-                              <p className="font-medium">{exchange.returnedProductName}</p>
-                              <p className="text-xs text-muted-foreground mt-1">Received:</p>
-                              <p className="font-medium text-green-600">{exchange.newProductName}</p>
-                              {exchange.reason && (
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  Reason: {exchange.reason}
+                            <div className="space-y-1">
+                              <p className="text-xs text-muted-foreground font-medium">Returned:</p>
+                              {retItems.map((ri, i) => (
+                                <p key={i} className="text-sm font-medium">
+                                  {ri.productName}
+                                  {retItems.length > 1 && <span className="text-muted-foreground ml-1">×{ri.quantity}</span>}
                                 </p>
+                              ))}
+                              <p className="text-xs text-muted-foreground font-medium mt-1.5">Received:</p>
+                              {rcvItems.map((ri, i) => (
+                                <p key={i} className="text-sm font-medium text-green-600">
+                                  {ri.productName}
+                                  {rcvItems.length > 1 && <span className="ml-1">×{ri.quantity}</span>}
+                                  {(ri as any).overridePrice != null && (
+                                    <span className="ml-1 text-xs text-orange-500">(price override)</span>
+                                  )}
+                                  {(ri as any).discount > 0 && (
+                                    <span className="ml-1 text-xs text-muted-foreground">(-{(ri as any).discount} disc)</span>
+                                  )}
+                                </p>
+                              ))}
+                              {exchange.reason && (
+                                <p className="text-xs text-muted-foreground mt-1">Reason: {exchange.reason}</p>
                               )}
                             </div>
                           </td>
                           <td className="p-3 text-right">
                             <div>
-                              <p className="text-red-600">-{exchange.quantityReturned}</p>
-                              <p className="text-green-600">+{exchange.quantityReceived}</p>
+                              <p className="text-red-600">-{totalRetQty}</p>
+                              <p className="text-green-600">+{totalRcvQty}</p>
                             </div>
                           </td>
                           <td className="p-3 text-right">
@@ -739,24 +762,43 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder, ca
                             </td>
                           )}
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
 
                 {/* Mobile Card Layout */}
                 <div className="md:hidden space-y-3">
-                  {order.exchanges.map((exchange, index) => (
+                  {order.exchanges.map((exchange, index) => {
+                    const retItems = exchange.returnedItems && exchange.returnedItems.length > 0
+                      ? exchange.returnedItems
+                      : exchange.returnedProductName
+                      ? [{ productName: exchange.returnedProductName, quantity: exchange.quantityReturned ?? 0, price: 0 }]
+                      : []
+                    const rcvItems = exchange.newItems && exchange.newItems.length > 0
+                      ? exchange.newItems
+                      : exchange.newProductName
+                      ? [{ productName: exchange.newProductName, quantity: exchange.quantityReceived ?? 0, price: 0, effectivePrice: 0 }]
+                      : []
+
+                    return (
                     <div key={index} className="border border-blue-200 rounded-lg p-4 space-y-3 bg-blue-50/30">
                       <div>
-                        <p className="text-xs text-muted-foreground">Returned:</p>
-                        <p className="font-semibold text-sm">{exchange.returnedProductName}</p>
-                        <p className="text-xs text-muted-foreground mt-2">Received:</p>
-                        <p className="font-semibold text-sm text-green-600">{exchange.newProductName}</p>
-                        {exchange.reason && (
-                          <p className="text-xs text-muted-foreground mt-2">
-                            Reason: {exchange.reason}
+                        <p className="text-xs text-muted-foreground font-medium">Returned:</p>
+                        {retItems.map((ri, i) => (
+                          <p key={i} className="font-semibold text-sm">
+                            {ri.productName}{retItems.length > 1 && ` ×${ri.quantity}`}
                           </p>
+                        ))}
+                        <p className="text-xs text-muted-foreground font-medium mt-2">Received:</p>
+                        {rcvItems.map((ri, i) => (
+                          <p key={i} className="font-semibold text-sm text-green-600">
+                            {ri.productName}{rcvItems.length > 1 && ` ×${ri.quantity}`}
+                          </p>
+                        ))}
+                        {exchange.reason && (
+                          <p className="text-xs text-muted-foreground mt-2">Reason: {exchange.reason}</p>
                         )}
                       </div>
                       
@@ -801,7 +843,8 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder, ca
                         </div>
                       )}
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
 

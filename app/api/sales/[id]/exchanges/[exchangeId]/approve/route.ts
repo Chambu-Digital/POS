@@ -1,6 +1,8 @@
 // ─── PATCH /api/sales/[id]/exchanges/[exchangeId]/approve ─────────────────────
-// Approve or reject a pending exchange request
-// On approval: processes stock changes, customer ledger updates, and sale status
+// Approve or reject a pending exchange request.
+// On approval: loops over returnedItems[] (EXCHANGE_IN) and newItems[] (EXCHANGE_OUT),
+// updates stock + ledger for every line, then handles customer credit/debit.
+// Falls back to legacy singular fields for old exchange records.
 
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
@@ -15,7 +17,7 @@ export async function PATCH(
   try {
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    
+
     // Only owners can approve
     if (payload.type !== 'user') {
       return NextResponse.json({ error: 'Only owners can approve exchanges' }, { status: 403 })
@@ -29,170 +31,182 @@ export async function PATCH(
     const data = await request.json()
     const { status } = data
 
-    // Validate status
     if (!['approved', 'rejected'].includes(status)) {
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
     }
 
     const saleId = new Types.ObjectId(id)
-    
-    // Get sale
-    const sale = await models.Sale.findOne({
-      _id: saleId,
-      userId: ownerId,
-    })
+    const sale = await models.Sale.findOne({ _id: saleId, userId: ownerId })
+    if (!sale) return NextResponse.json({ error: 'Sale not found' }, { status: 404 })
 
-    if (!sale) {
-      return NextResponse.json({ error: 'Sale not found' }, { status: 404 })
-    }
-
-    // Find the exchange entry
     const exchangeIndex = sale.exchanges.findIndex((e: any) => e._id.toString() === exchangeId)
-    if (exchangeIndex === -1) {
-      return NextResponse.json({ error: 'Exchange not found' }, { status: 404 })
-    }
+    if (exchangeIndex === -1) return NextResponse.json({ error: 'Exchange not found' }, { status: 404 })
 
-    const exchangeEntry = sale.exchanges[exchangeIndex]
-
-    // Check if already processed
-    if (exchangeEntry.status !== 'pending') {
+    const ex = sale.exchanges[exchangeIndex]
+    if (ex.status !== 'pending') {
       return NextResponse.json({ error: 'Exchange already processed' }, { status: 400 })
     }
 
-    // Update exchange status
-    sale.exchanges[exchangeIndex].status = status
-    sale.exchanges[exchangeIndex].approvedBy = new Types.ObjectId(ownerId)
-    sale.exchanges[exchangeIndex].approvedAt = new Date()
+    // Stamp approval metadata — kept in memory for reference during the
+    // approval block below; actual persistence happens via findByIdAndUpdate
+    // at the end so we never call sale.save() and never trigger full-document
+    // validation on legacy subdocuments.
+    const approvalMeta = {
+      status,
+      approvedBy: new Types.ObjectId(ownerId),
+      approvedAt: new Date(),
+    }
 
-    // If approved, process stock changes and customer ledger
     if (status === 'approved') {
-      const returnedProductObjId = exchangeEntry.returnedProductId
-      const newProductObjId = exchangeEntry.newProductId
+      // ── Helpers ────────────────────────────────────────────────────────────
 
-      // Update stock for returned product (add back to inventory)
-      const returnedProduct = await models.Product.findOne({
-        _id: returnedProductObjId,
-        userId: ownerId,
-      })
+      async function applyStockIn(
+        productObjId: Types.ObjectId,
+        quantity: number,
+        productName: string
+      ) {
+        const product = await models.Product.findOne({ _id: productObjId, userId: ownerId })
+        if (!product) {
+          console.warn(`[exchange/approve] EXCHANGE_IN: product not found ${productObjId}`)
+          return
+        }
+        const prevStock = product.stock || 0
+        const newStock = prevStock + quantity
 
-      if (returnedProduct) {
-        const returnedPrevStock = returnedProduct.stock || 0
-        const returnedNewStock = returnedPrevStock + exchangeEntry.quantityReturned
+        await models.Product.findByIdAndUpdate(productObjId, {
+          stock: newStock,
+          updatedAt: new Date(),
+        })
 
-        await models.Product.findByIdAndUpdate(
-          returnedProductObjId,
-          {
-            stock: returnedNewStock,
-            updatedAt: new Date(),
-          }
-        )
-
-        // Update ProductInventory if multi-branch
         if (branchContext) {
           await models.ProductInventory.findOneAndUpdate(
-            {
-              userId: ownerId,
-              branchId: branchContext,
-              productId: returnedProductObjId,
-            },
-            {
-              $inc: { stock: exchangeEntry.quantityReturned },
-              lastUpdated: new Date(),
-            }
+            { userId: ownerId, branchId: branchContext, productId: productObjId },
+            { $inc: { stock: quantity }, lastUpdated: new Date() }
           )
         }
 
-        // Create stock ledger entry for returned product
         await (models as any).StockLedger.create({
           userId: ownerId,
           branchId: branchContext ? new Types.ObjectId(branchContext) : null,
-          productId: returnedProductObjId,
-          saleId: saleId,
-          staffId: exchangeEntry.processedBy || null,
+          productId: productObjId,
+          saleId,
+          staffId: ex.processedBy || null,
           type: 'EXCHANGE_IN',
-          quantity: exchangeEntry.quantityReturned,
-          previousStock: returnedPrevStock,
-          newStock: returnedNewStock,
+          quantity,
+          previousStock: prevStock,
+          newStock,
           orderNumber: sale.orderNumber,
-          reason: exchangeEntry.reason,
-          notes: `Approved exchange: ${exchangeEntry.notes || ''}`,
+          reason: ex.reason,
+          notes: `Approved exchange: ${ex.notes || ''}`.trim(),
           timestamp: new Date(),
         })
       }
 
-      // Update stock for new product (remove from inventory)
-      const newProduct = await models.Product.findOne({
-        _id: newProductObjId,
-        userId: ownerId,
-      })
+      async function applyStockOut(
+        productObjId: Types.ObjectId,
+        quantity: number,
+        productName: string
+      ) {
+        const product = await models.Product.findOne({ _id: productObjId, userId: ownerId })
+        if (!product) {
+          console.warn(`[exchange/approve] EXCHANGE_OUT: product not found ${productObjId}`)
+          return
+        }
+        const prevStock = product.stock || 0
+        const newStock = Math.max(0, prevStock - quantity)
 
-      if (newProduct) {
-        const newPrevStock = newProduct.stock || 0
-        const newNewStock = Math.max(0, newPrevStock - exchangeEntry.quantityReceived)
+        await models.Product.findByIdAndUpdate(productObjId, {
+          stock: newStock,
+          updatedAt: new Date(),
+        })
 
-        await models.Product.findByIdAndUpdate(
-          newProductObjId,
-          {
-            stock: newNewStock,
-            updatedAt: new Date(),
-          }
-        )
-
-        // Update ProductInventory if multi-branch
         if (branchContext) {
           await models.ProductInventory.findOneAndUpdate(
-            {
-              userId: ownerId,
-              branchId: branchContext,
-              productId: newProductObjId,
-            },
-            {
-              $inc: { stock: -exchangeEntry.quantityReceived },
-              lastUpdated: new Date(),
-            }
+            { userId: ownerId, branchId: branchContext, productId: productObjId },
+            { $inc: { stock: -quantity }, lastUpdated: new Date() }
           )
         }
 
-        // Create stock ledger entry for new product
         await (models as any).StockLedger.create({
           userId: ownerId,
           branchId: branchContext ? new Types.ObjectId(branchContext) : null,
-          productId: newProductObjId,
-          saleId: saleId,
-          staffId: exchangeEntry.processedBy || null,
+          productId: productObjId,
+          saleId,
+          staffId: ex.processedBy || null,
           type: 'EXCHANGE_OUT',
-          quantity: -exchangeEntry.quantityReceived,
-          previousStock: newPrevStock,
-          newStock: newNewStock,
+          quantity: -quantity,
+          previousStock: prevStock,
+          newStock,
           orderNumber: sale.orderNumber,
-          reason: exchangeEntry.reason,
-          notes: `Approved exchange: ${exchangeEntry.notes || ''}`,
+          reason: ex.reason,
+          notes: `Approved exchange: ${ex.notes || ''}`.trim(),
           timestamp: new Date(),
         })
       }
 
-      // Handle customer ledger for price difference
-      const priceDifference = exchangeEntry.priceDifference
+      // ── Process returned items (stock IN) ─────────────────────────────────
+      // New format: returnedItems[] array
+      // Legacy fallback: singular returnedProductId / quantityReturned
+      const returnedItems: Array<{ productId: Types.ObjectId; productName: string; quantity: number }> =
+        ex.returnedItems && ex.returnedItems.length > 0
+          ? ex.returnedItems.map((ri: any) => ({
+              productId: ri.productId,
+              productName: ri.productName,
+              quantity: ri.quantity,
+            }))
+          : ex.returnedProductId
+          ? [{ productId: ex.returnedProductId, productName: ex.returnedProductName, quantity: ex.quantityReturned }]
+          : []
+
+      for (const ri of returnedItems) {
+        await applyStockIn(ri.productId, ri.quantity, ri.productName)
+      }
+
+      // ── Process new items (stock OUT) ─────────────────────────────────────
+      // New format: newItems[] array
+      // Legacy fallback: singular newProductId / quantityReceived
+      const newItems: Array<{ productId: Types.ObjectId; productName: string; quantity: number }> =
+        ex.newItems && ex.newItems.length > 0
+          ? ex.newItems.map((ni: any) => ({
+              productId: ni.productId,
+              productName: ni.productName,
+              quantity: ni.quantity,
+            }))
+          : ex.newProductId
+          ? [{ productId: ex.newProductId, productName: ex.newProductName, quantity: ex.quantityReceived }]
+          : []
+
+      for (const ni of newItems) {
+        await applyStockOut(ni.productId, ni.quantity, ni.productName)
+      }
+
+      // ── Customer ledger for net price difference ──────────────────────────
+      const priceDifference = ex.priceDifference
+
+      // Build human-readable product name summaries for the ledger note
+      const returnedSummary = returnedItems.map(r => r.productName).join(', ')
+      const newSummary = newItems.map(n => n.productName).join(', ')
 
       if (sale.customerId && priceDifference !== 0) {
         const customer = await models.Customer.findById(sale.customerId)
-
         if (customer) {
           if (priceDifference > 0) {
-            // Customer pays extra (or if using credit, add to their debt)
-            if (exchangeEntry.paymentMethod === 'credit') {
+            // Customer owes extra — add to debt when paymentMethod is credit
+            if (ex.paymentMethod === 'credit') {
               customer.creditBalance = (customer.creditBalance || 0) + priceDifference
               customer.ledger.push({
                 date: new Date(),
                 type: 'purchase',
                 amount: priceDifference,
                 balance: customer.creditBalance,
-                saleId: saleId,
-                note: `Exchange surcharge: ${exchangeEntry.returnedProductName} → ${exchangeEntry.newProductName}`,
+                saleId,
+                note: `Exchange surcharge: [${returnedSummary}] → [${newSummary}]`,
               })
             }
+            // For cash/other methods the cashier collected the amount at the counter;
+            // no ledger entry needed.
           } else {
-            // Customer receives credit (negative difference)
+            // Customer gets credit back
             const creditAmount = Math.abs(priceDifference)
             customer.creditBalance = (customer.creditBalance || 0) - creditAmount
             customer.ledger.push({
@@ -200,29 +214,62 @@ export async function PATCH(
               type: 'payment',
               amount: -creditAmount,
               balance: customer.creditBalance,
-              saleId: saleId,
-              note: `Exchange credit: ${exchangeEntry.returnedProductName} → ${exchangeEntry.newProductName}`,
+              saleId,
+              note: `Exchange credit: [${returnedSummary}] → [${newSummary}]`,
             })
           }
-
           await customer.save()
         }
       }
 
-      // Update sale totals and status
-      const approvedExchanges = sale.exchanges.filter((e: any) => e.status === 'approved')
-      const totalExchanged = approvedExchanges.reduce((sum: number, e: any) => sum + (e.priceDifference || 0), 0)
-      
-      sale.totalExchanged = totalExchanged
-      sale.status = 'exchanged'
+      // ── Update sale totals and status ─────────────────────────────────────
+      const approvedExchanges = sale.exchanges.filter((e: any) => 
+        e._id.toString() === exchangeId ? true : e.status === 'approved'
+      )
+      const newTotalExchanged = approvedExchanges.reduce(
+        (sum: number, e: any) => sum + (e.priceDifference || 0), 0
+      )
+
+      // Use findByIdAndUpdate to write only the fields we're changing.
+      // This avoids triggering full-document validation (which would reject
+      // existing exchange subdocuments that were saved before 'reason' became
+      // optional) while still being precise about what we intend to update.
+      await models.Sale.findByIdAndUpdate(
+        saleId,
+        {
+          $set: {
+            [`exchanges.${exchangeIndex}.status`]: status,
+            [`exchanges.${exchangeIndex}.approvedBy`]: new Types.ObjectId(ownerId),
+            [`exchanges.${exchangeIndex}.approvedAt`]: new Date(),
+            totalExchanged: newTotalExchanged,
+            status: 'exchanged',
+          },
+        },
+        { runValidators: false }
+      )
+    } else {
+      // Rejection: only update the exchange status fields
+      await models.Sale.findByIdAndUpdate(
+        saleId,
+        {
+          $set: {
+            [`exchanges.${exchangeIndex}.status`]: status,
+            [`exchanges.${exchangeIndex}.approvedBy`]: new Types.ObjectId(ownerId),
+            [`exchanges.${exchangeIndex}.approvedAt`]: new Date(),
+          },
+        },
+        { runValidators: false }
+      )
     }
 
-    await sale.save()
+    // Re-fetch the updated exchange entry to return in the response
+    const updatedSale = await models.Sale.findById(saleId).lean() as any
+    const updatedExchange = updatedSale?.exchanges?.[exchangeIndex]
 
     return NextResponse.json({
       success: true,
       message: `Exchange ${status}`,
-      exchangeEntry: sale.exchanges[exchangeIndex],
+      exchangeEntry: updatedExchange,
     })
   } catch (error) {
     console.error('[exchanges/approve] PATCH error:', error)

@@ -176,18 +176,37 @@ export const saleSchema = new mongoose.Schema(
     
     // Exchange tracking (customer returns item + gets new one)
     exchanges: [{
-      returnedProductId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
-      returnedProductName: { type: String, required: true },
-      quantityReturned:    { type: Number, required: true },
-      returnedPrice:       { type: Number, required: true },
-      
-      newProductId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
-      newProductName:      { type: String, required: true },
-      quantityReceived:    { type: Number, required: true },
-      newPrice:            { type: Number, required: true },
+      // ── Legacy singular fields (kept for backward compat with old records) ──
+      returnedProductId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+      returnedProductName: { type: String },
+      quantityReturned:    { type: Number },
+      returnedPrice:       { type: Number },
+      newProductId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+      newProductName:      { type: String },
+      quantityReceived:    { type: Number },
+      newPrice:            { type: Number },
+
+      // ── Multi-item arrays (new exchanges use these) ───────────────────────
+      // returnedItems: items the customer brings back from the original sale
+      returnedItems: [{
+        productId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+        productName: { type: String, required: true },
+        quantity:    { type: Number, required: true },
+        price:       { type: Number, required: true },  // original sale price per unit
+      }],
+      // newItems: items the shop hands out in exchange
+      newItems: [{
+        productId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+        productName:   { type: String, required: true },
+        quantity:      { type: Number, required: true },
+        price:         { type: Number, required: true },   // catalog selling price
+        overridePrice: { type: Number, default: null },    // cashier-set price (replaces catalog price when present)
+        discount:      { type: Number, default: 0 },       // per-item discount in KSh
+        effectivePrice:{ type: Number, required: true },   // resolved price used for priceDifference: (overridePrice ?? price) - discount
+      }],
       
       priceDifference:     { type: Number, required: true },  // positive = customer pays extra, negative = customer receives credit
-      reason:              { type: String, required: true },
+      reason:              { type: String, default: '' },
       notes:               String,
       processedBy:         { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
       processedAt:         { type: Date, default: Date.now },

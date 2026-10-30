@@ -1,6 +1,7 @@
 // ─── POST /api/sales/[id]/exchange ────────────────────────────────────────────
-// Process item exchange: customer returns item + gets new one (possibly with price difference)
-// Creates EXCHANGE_IN and EXCHANGE_OUT stock movements
+// Process item exchange: customer returns one or more items + gets one or more
+// new ones back (possibly with a net price difference).
+// Stock changes happen on approval, not here — this only records a pending entry.
 
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
@@ -8,21 +9,32 @@ import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
+// ── Input shapes ──────────────────────────────────────────────────────────────
+
+interface ReturnedItemInput {
+  productId: string
+  productName: string
+  quantity: number
+  price: number        // original sale price per unit
+}
+
+interface NewItemInput {
+  productId: string
+  productName: string
+  quantity: number
+  price: number          // catalog selling price
+  overridePrice?: number | null  // cashier-set price; replaces catalog price when provided
+  discount?: number              // per-item discount in KSh (applied after override/catalog price)
+}
+
 interface ExchangeRequest {
-  returnedProductId: string
-  returnedProductName: string
-  quantityReturned: number
-  returnedPrice: number
-  
-  newProductId: string
-  newProductName: string
-  quantityReceived: number
-  newPrice: number
-  
+  returnedItems: ReturnedItemInput[]
+  newItems: NewItemInput[]
+
   reason: string
   notes?: string
-  
-  // Dynamic payment tracking
+
+  // Payment for any positive price difference
   paymentMethod?: string
   bankProviderId?: string
   bankProviderName?: string
@@ -42,7 +54,6 @@ export async function POST(
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
-    const branchContext = await getBranchContext(request)
     const staffId = payload.type === 'staff' ? payload.userId : null
 
     const { id } = await params
@@ -50,19 +61,13 @@ export async function POST(
     let body: ExchangeRequest
     try {
       body = await request.json()
-    } catch (parseError) {
+    } catch {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
     }
 
     const {
-      returnedProductId,
-      returnedProductName,
-      quantityReturned,
-      returnedPrice,
-      newProductId,
-      newProductName,
-      quantityReceived,
-      newPrice,
+      returnedItems,
+      newItems,
       reason,
       notes,
       paymentMethod,
@@ -74,104 +79,225 @@ export async function POST(
       mpesaPhone,
     } = body
 
-    // Validate inputs
-    if (!returnedProductId || quantityReturned <= 0) {
-      return NextResponse.json({ error: 'Invalid returned product data' }, { status: 400 })
+    // ── Top-level validation ───────────────────────────────────────────────────
+    if (!returnedItems || returnedItems.length === 0) {
+      return NextResponse.json({ error: 'At least one item to return is required' }, { status: 400 })
+    }
+    if (!newItems || newItems.length === 0) {
+      return NextResponse.json({ error: 'At least one new item is required' }, { status: 400 })
+    }
+    if (!reason?.trim()) {
+      // Reason is optional — default to empty string if not provided
     }
 
-    if (!newProductId || quantityReceived <= 0) {
-      return NextResponse.json({ error: 'Invalid new product data' }, { status: 400 })
-    }
-
-    if (!reason || !reason.trim()) {
-      return NextResponse.json({ error: 'Exchange reason is required' }, { status: 400 })
-    }
-
-    // Get sale
+    // ── Load sale ─────────────────────────────────────────────────────────────
     const saleId = new Types.ObjectId(id)
-    const sale = await models.Sale.findOne({
-      _id: saleId,
-      userId: ownerId,
-    })
+    const sale = await models.Sale.findOne({ _id: saleId, userId: ownerId })
+    if (!sale) return NextResponse.json({ error: 'Sale not found' }, { status: 404 })
 
-    if (!sale) {
-      return NextResponse.json({ error: 'Sale not found' }, { status: 404 })
-    }
+    // ── Validate returned items ───────────────────────────────────────────────
+    // Each returned item must:
+    //   1. Have a valid productId and quantity > 0
+    //   2. Exist in this tenant's product catalogue (so the product reference is legit)
+    //   3. Appear on the original sale (so the customer actually bought it)
+    //   4. Not exceed the quantity originally purchased on that sale line
 
-    const returnedProductObjId = new Types.ObjectId(returnedProductId)
-    const newProductObjId = new Types.ObjectId(newProductId)
+    const validatedReturnedItems: Array<{
+      productId: Types.ObjectId
+      productName: string
+      quantity: number
+      price: number
+    }> = []
 
-    // Verify returned product exists
-    const returnedProduct = await models.Product.findOne({
-      _id: returnedProductObjId,
-      userId: ownerId,
-    })
+    for (const ri of returnedItems) {
+      if (!ri.productId || ri.quantity <= 0) {
+        return NextResponse.json(
+          { error: `Invalid returned item: ${ri.productName || ri.productId}` },
+          { status: 400 }
+        )
+      }
 
-    if (!returnedProduct) {
-      return NextResponse.json({ error: 'Returned product not found' }, { status: 404 })
-    }
+      const productObjId = new Types.ObjectId(ri.productId)
 
-    // Verify new product exists and has stock
-    const newProduct = await models.Product.findOne({
-      _id: newProductObjId,
-      userId: ownerId,
-    })
+      // Must exist in product catalogue
+      const product = await models.Product.findOne({ _id: productObjId, userId: ownerId })
+      if (!product) {
+        return NextResponse.json(
+          { error: `Returned product not found: ${ri.productName}` },
+          { status: 404 }
+        )
+      }
 
-    if (!newProduct) {
-      return NextResponse.json({ error: 'New product not found' }, { status: 404 })
-    }
-
-    const newProductCurrentStock = newProduct.stock || 0
-    if (newProductCurrentStock < quantityReceived) {
-      return NextResponse.json(
-        { error: `Insufficient stock. Available: ${newProductCurrentStock}` },
-        { status: 400 }
+      // Must appear on the original sale
+      const saleLine = sale.items.find(
+        (item: any) => item.productId?.toString() === ri.productId
       )
+      if (!saleLine) {
+        return NextResponse.json(
+          { error: `${ri.productName} was not on this sale` },
+          { status: 400 }
+        )
+      }
+
+      // Cannot return more than was sold
+      if (ri.quantity > saleLine.quantity) {
+        return NextResponse.json(
+          {
+            error: `Cannot return ${ri.quantity} × ${ri.productName} — only ${saleLine.quantity} was sold`,
+          },
+          { status: 400 }
+        )
+      }
+
+      validatedReturnedItems.push({
+        productId: productObjId,
+        productName: ri.productName,
+        quantity: ri.quantity,
+        price: ri.price,
+      })
     }
 
-    // Calculate price difference (positive = customer pays extra, negative = customer gets credit)
-    const totalReturnedValue = quantityReturned * returnedPrice
-    const totalNewValue = quantityReceived * newPrice
-    const priceDifference = totalNewValue - totalReturnedValue
+    // ── Validate new items ────────────────────────────────────────────────────
+    // Each new item must:
+    //   1. Have a valid productId and quantity > 0
+    //   2. Exist in this tenant's catalogue
+    //   3. Have sufficient stock
+    //   4. Have a non-negative discount (if supplied)
+    //   5. Have a positive overridePrice (if supplied)
 
-    // CREATE EXCHANGE AS PENDING (no stock changes or customer ledger updates yet)
-    const exchangeEntry = {
-      returnedProductId: new Types.ObjectId(returnedProductId),
-      returnedProductName,
-      quantityReturned,
-      returnedPrice,
-      newProductId: new Types.ObjectId(newProductId),
-      newProductName,
-      quantityReceived,
-      newPrice,
+    const validatedNewItems: Array<{
+      productId: Types.ObjectId
+      productName: string
+      quantity: number
+      price: number
+      overridePrice: number | null
+      discount: number
+      effectivePrice: number
+    }> = []
+
+    for (const ni of newItems) {
+      if (!ni.productId || ni.quantity <= 0) {
+        return NextResponse.json(
+          { error: `Invalid new item: ${ni.productName || ni.productId}` },
+          { status: 400 }
+        )
+      }
+
+      const productObjId = new Types.ObjectId(ni.productId)
+
+      const product = await models.Product.findOne({ _id: productObjId, userId: ownerId })
+      if (!product) {
+        return NextResponse.json(
+          { error: `New product not found: ${ni.productName}` },
+          { status: 404 }
+        )
+      }
+
+      const currentStock = product.stock || 0
+      if (currentStock < ni.quantity) {
+        return NextResponse.json(
+          { error: `Insufficient stock for ${ni.productName}. Available: ${currentStock}` },
+          { status: 400 }
+        )
+      }
+
+      const overridePrice = ni.overridePrice != null ? Number(ni.overridePrice) : null
+      const discount = Number(ni.discount ?? 0)
+
+      if (overridePrice !== null && overridePrice < 0) {
+        return NextResponse.json(
+          { error: `Override price for ${ni.productName} cannot be negative` },
+          { status: 400 }
+        )
+      }
+      if (discount < 0) {
+        return NextResponse.json(
+          { error: `Discount for ${ni.productName} cannot be negative` },
+          { status: 400 }
+        )
+      }
+
+      // effectivePrice = (overridePrice ?? catalogPrice) - discount, floored at 0
+      const basePrice = overridePrice !== null ? overridePrice : Number(ni.price)
+      const effectivePrice = Math.max(0, basePrice - discount)
+
+      validatedNewItems.push({
+        productId: productObjId,
+        productName: ni.productName,
+        quantity: ni.quantity,
+        price: Number(ni.price),
+        overridePrice,
+        discount,
+        effectivePrice,
+      })
+    }
+
+    // ── Compute net price difference ──────────────────────────────────────────
+    // positive → customer pays extra
+    // negative → customer receives credit / refund
+    const totalReturnedValue = validatedReturnedItems.reduce(
+      (sum, ri) => sum + ri.quantity * ri.price, 0
+    )
+    const totalNewValue = validatedNewItems.reduce(
+      (sum, ni) => sum + ni.quantity * ni.effectivePrice, 0
+    )
+    const priceDifference = Math.round((totalNewValue - totalReturnedValue) * 100) / 100
+
+    // ── Build and persist the exchange entry (status: pending) ────────────────
+    const exchangeEntry: any = {
+      // Multi-item arrays (primary data)
+      returnedItems: validatedReturnedItems,
+      newItems: validatedNewItems,
+
+      // Legacy singular fields — populated from the first item so old display
+      // code that reads these fields still renders something meaningful.
+      returnedProductId:   validatedReturnedItems[0].productId,
+      returnedProductName: validatedReturnedItems[0].productName,
+      quantityReturned:    validatedReturnedItems[0].quantity,
+      returnedPrice:       validatedReturnedItems[0].price,
+      newProductId:        validatedNewItems[0].productId,
+      newProductName:      validatedNewItems[0].productName,
+      quantityReceived:    validatedNewItems[0].quantity,
+      newPrice:            validatedNewItems[0].effectivePrice,
+
       priceDifference,
-      reason: reason.trim(),
+      reason: reason?.trim() || '',
       notes: notes?.trim() || '',
       processedBy: staffId ? new Types.ObjectId(staffId) : null,
       processedAt: new Date(),
-      status: 'pending', // Awaiting approval
-      paymentMethod: paymentMethod || '',
-      bankProviderId: bankProviderId || null,
+      status: 'pending',
+
+      paymentMethod:    paymentMethod    || '',
+      bankProviderId:   bankProviderId   || null,
       bankProviderName: bankProviderName || '',
-      customMethodId: customMethodId || null,
+      customMethodId:   customMethodId   || null,
       customMethodName: customMethodName || '',
-      mpesaCode: mpesaCode || '',
-      mpesaPhone: mpesaPhone || '',
+      mpesaCode:        mpesaCode        || '',
+      mpesaPhone:       mpesaPhone       || '',
     }
 
-    const updateData: any = {
-      $push: { exchanges: exchangeEntry },
-    }
-
-    await models.Sale.findByIdAndUpdate(saleId, updateData)
+    await models.Sale.findByIdAndUpdate(saleId, { $push: { exchanges: exchangeEntry } })
 
     return NextResponse.json({
       success: true,
       saleNumber: sale.orderNumber,
-      message: 'Exchange request submitted - awaiting approval',
+      message: 'Exchange request submitted — awaiting approval',
       exchange: {
-        returnedProduct: returnedProductName,
-        newProduct: newProductName,
+        returnedItems: validatedReturnedItems.map(ri => ({
+          productName: ri.productName,
+          quantity: ri.quantity,
+          price: ri.price,
+        })),
+        newItems: validatedNewItems.map(ni => ({
+          productName: ni.productName,
+          quantity: ni.quantity,
+          catalogPrice: ni.price,
+          overridePrice: ni.overridePrice,
+          discount: ni.discount,
+          effectivePrice: ni.effectivePrice,
+        })),
+        totalReturnedValue,
+        totalNewValue,
         priceDifference,
         status: 'pending',
       },
