@@ -1082,7 +1082,8 @@ export function OrderDetailsDialog({ open, onOpenChange, order: initialOrder, ca
         </AlertDialog>
 
         {/* Hidden Receipt for Printing */}
-        {settings && userInfo && (          <Receipt
+        {settings && userInfo && (
+          <Receipt
             ref={receiptRef}
             shopName={settings.general?.shopName || userInfo.user?.shopName || 'My Shop'}
             shopLogo={settings.general?.logo}

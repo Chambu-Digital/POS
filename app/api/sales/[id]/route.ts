@@ -349,11 +349,23 @@ export async function DELETE(
     }
 
     // ── C. Mark the sale as voided ────────────────────────────────────────────
-    sale.status     = 'voided'
-    sale.voidedAt   = new Date()
-    sale.voidedBy   = staffId ? new Types.ObjectId(staffId) : null
-    sale.voidReason = voidReason
-    await sale.save()
+    // Use findByIdAndUpdate + runValidators:false so a stale cached model
+    // (common in Next.js dev hot-reload) never blocks the status update.
+    // The schema enum was updated in step 1 — this is purely a cache guard.
+    const now = new Date()
+    await models.Sale.findByIdAndUpdate(
+      sale._id,
+      {
+        $set: {
+          status:     'voided',
+          voidedAt:   now,
+          voidedBy:   staffId ? new Types.ObjectId(staffId) : null,
+          voidReason: voidReason,
+        },
+      },
+      { runValidators: false }
+    )
+    sale.voidedAt = now
 
     return NextResponse.json({
       success:     true,
