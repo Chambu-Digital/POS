@@ -1,7 +1,7 @@
 // Chambu Digital POS Service Worker
 // Handles offline caching, background sync, and automatic updates
 
-const CACHE_VERSION = 'chambu-pos-v2-' + (self.registration?.scope || 'v1')
+const CACHE_VERSION = 'chambu-pos-v3-' + (self.registration?.scope || 'v1')
 const CACHE_NAME = CACHE_VERSION + '-precache'
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime'
 const API_CACHE = CACHE_VERSION + '-api'
@@ -13,6 +13,10 @@ const PRECACHE_ASSETS = [
   '/',
   '/manifest.json',
   '/chambu-logo.svg',
+  '/dashboard/sales',
+  '/dashboard/sales/payment',
+  '/dashboard/retail/sales',
+  '/dashboard/retail/sales/payment',
 ]
 
 // Install event - cache essential assets and skip waiting
@@ -67,6 +71,11 @@ self.addEventListener('fetch', (event) => {
   const CASHIER_ROUTES = [
     '/dashboard/sales',
     '/dashboard/retail/sales',
+    '/dashboard/sales/payment',
+    '/dashboard/retail/sales/payment',
+    '/dashboard/bar/sales',
+    '/dashboard/bar/payment',
+    '/dashboard/pharmacy/pos',
     '/dashboard/customers',
     '/dashboard/retail/customers',
   ]
