@@ -118,16 +118,17 @@ function OrdersPageContent() {
 }
 
 // ── Status icon ───────────────────────────────────────────────────────────────
-function StatusDot({ status }: { status?: 'completed' | 'pending' | 'held' | 'refunded' | 'partially_refunded' | 'exchanged' }) {
-  const cfg = {
+function StatusDot({ status }: { status?: 'completed' | 'pending' | 'held' | 'refunded' | 'partially_refunded' | 'exchanged' | 'voided' }) {
+  const cfg: Record<string, { icon: string; border: string; text: string; bg: string; label: string }> = {
     completed:           { icon: '✓', border: 'border-green-500',  text: 'text-green-600',  bg: 'bg-white', label: 'Completed' },
     pending:             { icon: '…', border: 'border-amber-400',  text: 'text-amber-500',  bg: 'bg-white', label: 'Pending'   },
     held:                { icon: '⏸', border: 'border-blue-400',   text: 'text-blue-500',   bg: 'bg-white', label: 'On Hold'   },
     refunded:            { icon: '↩', border: 'border-red-400',    text: 'text-red-500',    bg: 'bg-white', label: 'Refunded'  },
     partially_refunded:  { icon: '⤴', border: 'border-orange-400', text: 'text-orange-500', bg: 'bg-white', label: 'Partial Refund' },
     exchanged:           { icon: '⇄', border: 'border-purple-500', text: 'text-purple-600', bg: 'bg-white', label: 'Exchanged' },
+    voided:              { icon: '✕', border: 'border-gray-400',   text: 'text-gray-500',   bg: 'bg-white', label: 'Voided'    },
   }
-  const c = cfg[status || 'completed']
+  const c = cfg[status || 'completed'] ?? cfg['completed']
   return (
     <span className="relative group flex items-center justify-center">
       <span className={`w-5 h-5 rounded-full border-2 ${c.border} ${c.bg} flex items-center justify-center`}>
