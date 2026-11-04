@@ -121,10 +121,16 @@ function SalesPageContent() {
     } catch { return 0 }
   })
   const [isWholesaleMode, setIsWholesaleMode] = useState(false)
+  // Branch-level pricing config: pricingType drives the initial wholesale mode,
+  // allowModeToggle controls whether the cashier can override it.
+  const [branchPricingConfig, setBranchPricingConfig] = useState<{
+    pricingType: 'retail' | 'wholesale'
+    allowModeToggle: boolean
+  }>({ pricingType: 'retail', allowModeToggle: true })
   const [loading, setLoading] = useState(true)
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
   const [shopSettings, setShopSettings] = useState<any>(null)
-  const [activeBranch, setActiveBranch] = useState<{ name: string; phone?: string; address?: string } | null>(null)
+  const [activeBranch, setActiveBranch] = useState<{ name: string; phone?: string; address?: string; email?: string } | null>(null)
   const [isCartModalOpen, setIsCartModalOpen] = useState(false)
   const [showCompletionDialog, setShowCompletionDialog] = useState(false)
   const [lastSale, setLastSale] = useState<any>(null)
@@ -211,27 +217,8 @@ function SalesPageContent() {
   }, [])
 
   // Re-fetch products when the tab regains focus so stock counts are fresh
-  // after returning from the payment page.
-  useEffect(() => {
-    function onVisible() {
-      if (document.visibilityState === 'visible') {
-        sessionStorage.removeItem('sessionProducts')
-        fetchProducts()
-      }
-    }
-    function onFocus() {
-      sessionStorage.removeItem('sessionProducts')
-      fetchProducts()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', onFocus)
-    return () => {
-      document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', onFocus)
-    }
-  }, [])
-
-  // Re-fetch fresh stock when the user returns to this page after a sale
+  // after returning from the payment page. Only fires on actual visibility
+  // change (tab switch / return from payment), NOT on every element focus.
   useEffect(() => {
     function onVisible() {
       if (document.visibilityState === 'visible') {
@@ -240,10 +227,8 @@ function SalesPageContent() {
       }
     }
     document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', onVisible)
     return () => {
       document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', onVisible)
     }
   }, [])
 
@@ -373,11 +358,19 @@ function SalesPageContent() {
         if (res.ok) {
           const data = await res.json()
           const phones = (data.branch.phones || []).filter((p: string) => p.trim())
+          const emails = (data.branch.emails || []).filter((e: string) => e.trim())
           setActiveBranch({
             name: data.branch.name,
             phone: phones.length > 0 ? phones.join(' / ') : (data.branch.phone || ''),
             address: data.branch.address || '',
+            email: emails.length > 0 ? emails.join(' / ') : '',
           })
+          // Apply branch-level pricing defaults
+          const pricingType: 'retail' | 'wholesale' = data.branch.pricingType ?? 'retail'
+          const allowModeToggle: boolean = data.branch.allowModeToggle ?? true
+          setBranchPricingConfig({ pricingType, allowModeToggle })
+          // Initialise wholesale mode from the branch's default
+          setIsWholesaleMode(pricingType === 'wholesale')
         }
       }
     } catch {
@@ -823,7 +816,8 @@ function SalesPageContent() {
       cart,
       cartDiscount,
       saleEndpoint: '/api/sales',
-      returnUrl: '/dashboard/sales'
+      returnUrl: '/dashboard/sales',
+      saleType: isWholesaleMode ? 'wholesale' : 'retail',
     }))
     router.push('/dashboard/sales/payment')
   }
@@ -988,26 +982,44 @@ function SalesPageContent() {
                 ))}
               </SelectContent>
             </Select>
-            {/* Wholesale Toggle - Compact */}
-            <button
-              type="button"
-              onClick={() => setIsWholesaleMode(!isWholesaleMode)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border transition-all ${
-                isWholesaleMode 
-                  ? 'bg-green-600 text-white border-green-600' 
-                  : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
-              }`}
-              title={isWholesaleMode ? 'Wholesale Mode' : 'Retail Mode'}
-            >
-              <span className="text-sm font-semibold">{isWholesaleMode ? 'W' : 'R'}</span>
-              <div className={`w-7 h-4 rounded-full transition-colors ${
-                isWholesaleMode ? 'bg-green-700' : 'bg-gray-300'
-              } relative`}>
-                <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
-                  isWholesaleMode ? 'translate-x-3.5' : 'translate-x-0.5'
-                }`} />
+            {/* Wholesale Toggle - hidden when branch locks the pricing mode */}
+            {branchPricingConfig.allowModeToggle ? (
+              <button
+                type="button"
+                onClick={() => setIsWholesaleMode(!isWholesaleMode)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border transition-all ${
+                  isWholesaleMode
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
+                }`}
+                title={isWholesaleMode ? 'Switch to Retail' : 'Switch to Wholesale'}
+              >
+                <span className="text-sm font-semibold">{isWholesaleMode ? 'W' : 'R'}</span>
+                <div className={`w-7 h-4 rounded-full transition-colors ${
+                  isWholesaleMode ? 'bg-blue-700' : 'bg-gray-300'
+                } relative`}>
+                  <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
+                    isWholesaleMode ? 'translate-x-3.5' : 'translate-x-0.5'
+                  }`} />
+                </div>
+              </button>
+            ) : (
+              /* Locked badge — shows enforced pricing type, no click */
+              <div
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border cursor-default select-none ${
+                  isWholesaleMode
+                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                    : 'bg-gray-50 text-gray-600 border-gray-200'
+                }`}
+                title={`${isWholesaleMode ? 'Wholesale' : 'Retail'} mode — locked by branch settings`}
+              >
+                <span className="text-sm font-semibold">{isWholesaleMode ? 'W' : 'R'}</span>
+                <svg width="10" height="12" viewBox="0 0 10 12" fill="none" className="opacity-60">
+                  <rect x="1" y="5" width="8" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.4"/>
+                  <path d="M3 5V3.5a2 2 0 1 1 4 0V5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                </svg>
               </div>
-            </button>
+            )}
           </div>
 
           {/* Manual barcode entry */}
@@ -1450,7 +1462,7 @@ function SalesPageContent() {
           date={lastSale.date}
           receiptNumber={lastSale.receiptNumber}
           shopPhone={activeBranch?.phone || shopSettings?.general?.phone}
-          shopEmail={shopSettings?.general?.email}
+          shopEmail={activeBranch?.email || shopSettings?.general?.email}
           shopAddress={activeBranch?.address || shopSettings?.general?.address}
           branchName={activeBranch?.name}
           mpesaPaybill={shopSettings?.payment?.mpesaPaybill}

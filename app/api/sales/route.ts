@@ -1,4 +1,4 @@
-import { getTenantDB } from '@/lib/tenant/get-db'
+import { getTenantDB, isMongoOfflineError, dbOfflineResponse } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
@@ -140,6 +140,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ sales: salesWithStaff })
   } catch (error) {
     console.error('[sales] GET error:', error)
+    if (isMongoOfflineError(error)) return dbOfflineResponse()
     return NextResponse.json({ error: 'Failed to fetch sales' }, { status: 500 })
   }
 }
@@ -517,6 +518,7 @@ export async function POST(request: NextRequest) {
       
       notes: data.notes || '',
       source: data.source || 'pos',
+      saleType: data.saleType === 'wholesale' ? 'wholesale' : 'retail',
       rentalMeta: data.rentalMeta || undefined,
       status: 'completed',
     })
@@ -615,6 +617,7 @@ export async function POST(request: NextRequest) {
     }, { status: 201 })
   } catch (error) {
     console.error('[sales] POST error:', error)
+    if (isMongoOfflineError(error)) return dbOfflineResponse()
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to create sale' }, { status: 500 })
   }
 }

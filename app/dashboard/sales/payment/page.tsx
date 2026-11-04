@@ -76,6 +76,7 @@ function PaymentPageContent() {
   const [cartDiscount, setCartDiscount] = useState(0)
   const [saleEndpoint, setSaleEndpoint] = useState('/api/sales')
   const [returnUrl, setReturnUrl] = useState('/dashboard/sales')
+  const [saleType, setSaleType] = useState<'retail' | 'wholesale'>('retail')
   
   // Payment entries state
   const [paymentEntries, setPaymentEntries] = useState<PaymentEntry[]>([])
@@ -102,7 +103,7 @@ function PaymentPageContent() {
   const [lastSale, setLastSale] = useState<any>(null)
   const [userInfo, setUserInfo] = useState<{ shopName: string; name: string } | null>(null)
   const [shopSettings, setShopSettings] = useState<any>(null)
-  const [activeBranch, setActiveBranch] = useState<{ name: string; phone?: string; address?: string } | null>(null)
+  const [activeBranch, setActiveBranch] = useState<{ name: string; phone?: string; address?: string; email?: string } | null>(null)
   const [showCompletionDialog, setShowCompletionDialog] = useState(false)
 
   // Customer state
@@ -139,6 +140,7 @@ function PaymentPageContent() {
         setCartDiscount(data.cartDiscount || 0)
         if (data.saleEndpoint) setSaleEndpoint(data.saleEndpoint)
         if (data.returnUrl) setReturnUrl(data.returnUrl)
+        if (data.saleType) setSaleType(data.saleType)
         setLoading(false)
       } catch {
         router.push('/dashboard/sales')
@@ -174,10 +176,12 @@ function PaymentPageContent() {
         if (res.ok) {
           const data = await res.json()
           const phones = (data.branch.phones || []).filter((p: string) => p.trim())
+          const emails = (data.branch.emails || []).filter((e: string) => e.trim())
           setActiveBranch({
             name: data.branch.name,
             phone: phones.length > 0 ? phones.join(' / ') : (data.branch.phone || ''),
             address: data.branch.address || '',
+            email: emails.length > 0 ? emails.join(' / ') : '',
           })
         }
       }
@@ -623,6 +627,7 @@ function PaymentPageContent() {
         total: Math.max(0, chargeTotal),
         customerId: selectedCustomer?._id || null,
         customerName: selectedCustomer?.name || '',
+        saleType,
         payments: completedPayments.map(p => ({
           method: p.method === 'mpesa_stk' || p.method === 'mpesa_manual' ? 'mobile_money' : 
                   p.method === 'custom' ? 'custom' : 
@@ -658,8 +663,11 @@ function PaymentPageContent() {
         })
 
         if (!response.ok) {
-          const err = await response.json()
-          throw new Error(err.error || 'Failed to complete sale')
+          const err = await response.json().catch(() => ({}))
+          const e = new Error(err.error || 'Failed to complete sale') as any
+          e.httpStatus = response.status
+          e.isOffline = err.offline === true || response.status === 503 || response.status === 500
+          throw e
         }
 
         const result = await response.json()
@@ -724,20 +732,28 @@ function PaymentPageContent() {
         // surfaces the error (shouldn't happen, but be defensive).
         if (onlineSaleSucceeded) throw fetchError
 
-        // Distinguish network failure (TypeError) from a server rejection (Error
-        // with a message we set above). Server rejections re-throw so the outer
-        // catch shows them as toasts. Network failures fall through to the
-        // offline queue below.
+        // Distinguish connectivity failure from a real business error.
+        // - TypeError / "Failed to fetch": browser couldn't reach the server at all
+        // - httpStatus 500: server reached but MongoDB was unreachable (internet down
+        //   on the server side) — treat as offline, queue for later sync
+        // - httpStatus 4xx: real business rejection (invalid deposit, insufficient
+        //   stock, validation error) — surface as an error toast, do NOT queue
         const isNetworkFailure =
           fetchError instanceof TypeError ||
+          fetchError?.isOffline === true ||
           fetchError?.message === 'Failed to fetch' ||
           fetchError?.message?.includes('network') ||
-          fetchError?.message?.includes('fetch')
+          fetchError?.message?.includes('fetch') ||
+          fetchError?.message?.includes('offline') ||
+          fetchError?.message?.includes('unavailable') ||
+          fetchError?.httpStatus === 500 ||
+          fetchError?.httpStatus === 503 ||
+          fetchError?.httpStatus === 504
 
         if (!isNetworkFailure) throw fetchError
 
         // ── Offline path: queue locally + deduct stock from cache ─────────────
-        await addPendingSale(saleData)
+        await addPendingSale({ ...saleData, _endpoint: saleEndpoint })
 
         // Deduct stock from the IndexedDB products cache so subsequent offline
         // sales see accurate stock levels and can't sell already-queued items.
@@ -789,16 +805,7 @@ function PaymentPageContent() {
 
   function cancelOrder() { 
     sessionStorage.removeItem('pendingSale')
-    if (isOnline()) {
-      router.push(returnUrl)
-    } else {
-      // Offline: just reset to allow new sale
-      setCart([])
-      setCartDiscount(0)
-      setSelectedCustomer(null)
-      setPaymentEntries([])
-      toast.info('Order cancelled. Working offline.')
-    }
+    router.push(returnUrl)
   }
 
   function holdOrder() {
@@ -808,16 +815,7 @@ function PaymentPageContent() {
     held.push({ id: `hold-${Date.now()}`, cart, cartDiscount, heldAt: new Date().toISOString() })
     localStorage.setItem(heldKey, JSON.stringify(held))
     sessionStorage.removeItem('pendingSale')
-    if (isOnline()) {
-      router.push(returnUrl)
-    } else {
-      // Offline: reset state
-      setCart([])
-      setCartDiscount(0)
-      setSelectedCustomer(null)
-      setPaymentEntries([])
-      toast.success('Order held. Working offline.')
-    }
+    router.push(returnUrl)
   }
 
   if (loading) return <div className="flex items-center justify-center h-screen"><div className="text-lg">Loading...</div></div>
@@ -1374,17 +1372,7 @@ function PaymentPageContent() {
               sessionStorage.removeItem('pendingSale')
               sessionStorage.removeItem('activeCart')
               sessionStorage.removeItem('activeCartDiscount')
-              // Only navigate if online
-              if (isOnline()) {
-                router.push(returnUrl)
-              } else {
-                // Reset state to allow new sale without navigation
-                setCart([])
-                setCartDiscount(0)
-                setSelectedCustomer(null)
-                setPaymentEntries([])
-                setLastSale(null)
-              }
+              router.push(returnUrl)
             }
           }}
           orderNumber={lastSale.receiptNumber}
@@ -1401,18 +1389,7 @@ function PaymentPageContent() {
             sessionStorage.removeItem('pendingSale')
             sessionStorage.removeItem('activeCart')
             sessionStorage.removeItem('activeCartDiscount')
-            // Only navigate if online
-            if (isOnline()) {
-              router.push(returnUrl)
-            } else {
-              // Reset state to allow new sale without navigation
-              setShowCompletionDialog(false)
-              setCart([])
-              setCartDiscount(0)
-              setSelectedCustomer(null)
-              setPaymentEntries([])
-              setLastSale(null)
-            }
+            router.push(returnUrl)
           }}
         />
       )}
@@ -1434,7 +1411,7 @@ function PaymentPageContent() {
           receiptNumber={lastSale.receiptNumber}
           branchName={activeBranch?.name}
           shopPhone={activeBranch?.phone || shopSettings?.general?.phone}
-          shopEmail={shopSettings?.general?.email}
+          shopEmail={activeBranch?.email || shopSettings?.general?.email}
           shopAddress={activeBranch?.address || shopSettings?.general?.address}
           mpesaPaybill={shopSettings?.payment?.mpesaPaybill}
           mpesaAccountNumber={shopSettings?.payment?.mpesaAccountNumber}

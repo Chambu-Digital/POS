@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, Edit, Trash2, Building2, UserCheck, X, MapPin, Phone } from 'lucide-react'
+import { Plus, Edit, Trash2, Building2, UserCheck, X, MapPin, Phone, Mail, Tag, Lock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import {
   Dialog,
   DialogContent,
@@ -23,8 +24,11 @@ interface Branch {
   address: string
   phone: string
   phones?: string[]
+  emails?: string[]
   status: 'active' | 'inactive' | 'closed'
   isDefault: boolean
+  pricingType: 'retail' | 'wholesale'
+  allowModeToggle: boolean
   createdAt: string
   managers?: Array<{ _id: string; name: string; email: string }>
 }
@@ -49,7 +53,10 @@ export function BranchesSettings() {
     code: '',
     address: '',
     phones: [''] as string[],
+    emails: [''] as string[],
     status: 'active' as Branch['status'],
+    pricingType: 'retail' as Branch['pricingType'],
+    allowModeToggle: true,
   })
   const [selectedManagers, setSelectedManagers] = useState<string[]>([])
   const [addingManager, setAddingManager] = useState(false)
@@ -97,7 +104,7 @@ export function BranchesSettings() {
 
   function openCreateModal() {
     setEditingBranch(null)
-    setFormData({ name: '', code: '', address: '', phones: [''], status: 'active' })
+    setFormData({ name: '', code: '', address: '', phones: [''], emails: [''], status: 'active', pricingType: 'retail', allowModeToggle: true })
     setSelectedManagers([])
     setAddingManager(false)
     setIsModalOpen(true)
@@ -116,7 +123,10 @@ export function BranchesSettings() {
       code: branch.code,
       address: branch.address || '',
       phones,
+      emails: branch.emails && branch.emails.length > 0 ? branch.emails : [''],
       status: branch.status,
+      pricingType: branch.pricingType ?? 'retail',
+      allowModeToggle: branch.allowModeToggle ?? true,
     })
     setSelectedManagers(branch.managers?.map(m => m._id) || [])
     setAddingManager(false)
@@ -131,6 +141,7 @@ export function BranchesSettings() {
     setIsSubmitting(true)
     try {
       const cleanPhones = formData.phones.filter(p => p.trim() !== '')
+      const cleanEmails = formData.emails.filter(e => e.trim() !== '')
       const url = editingBranch ? `/api/branches/${editingBranch._id}` : '/api/branches'
       const method = editingBranch ? 'PUT' : 'POST'
 
@@ -143,7 +154,10 @@ export function BranchesSettings() {
           address: formData.address,
           phones: cleanPhones,
           phone: cleanPhones[0] || '',
+          emails: cleanEmails,
           status: formData.status,
+          pricingType: formData.pricingType,
+          allowModeToggle: formData.allowModeToggle,
         }),
       })
 
@@ -285,6 +299,16 @@ export function BranchesSettings() {
                       <span className={`text-xs font-semibold border px-2 py-0.5 rounded-full ${statusColor(branch.status)}`}>
                         {branch.status.charAt(0).toUpperCase() + branch.status.slice(1)}
                       </span>
+                      {/* Pricing type badge */}
+                      <span className={`text-xs font-semibold border px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                        (branch.pricingType ?? 'retail') === 'wholesale'
+                          ? 'bg-blue-50 text-blue-700 border-blue-200'
+                          : 'bg-gray-50 text-gray-600 border-gray-200'
+                      }`}>
+                        <Tag size={10} />
+                        {(branch.pricingType ?? 'retail') === 'wholesale' ? 'Wholesale' : 'Retail'}
+                        {!(branch.allowModeToggle ?? true) && <Lock size={9} className="ml-0.5 opacity-70" />}
+                      </span>
                     </div>
 
                     {/* Contact details */}
@@ -299,6 +323,12 @@ export function BranchesSettings() {
                         <div key={i} className="flex items-center gap-1.5 text-xs text-gray-500">
                           <Phone size={12} className="shrink-0" />
                           <span>{p}</span>
+                        </div>
+                      ))}
+                      {(branch.emails || []).filter(e => e).map((e, i) => (
+                        <div key={i} className="flex items-center gap-1.5 text-xs text-gray-500">
+                          <Mail size={12} className="shrink-0" />
+                          <span>{e}</span>
                         </div>
                       ))}
                     </div>
@@ -362,7 +392,7 @@ export function BranchesSettings() {
               <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Branch Name *</Label>
               <Input
                 value={formData.name}
-                onChange={e => setFormData({ ...formData, name: e.target.value })}
+                onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
                 placeholder="e.g. Downtown Branch"
                 className="focus-visible:ring-green-500"
               />
@@ -373,7 +403,7 @@ export function BranchesSettings() {
               <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Branch Code *</Label>
               <Input
                 value={formData.code}
-                onChange={e => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                onChange={e => setFormData(prev => ({ ...prev, code: e.target.value.toUpperCase() }))}
                 placeholder="e.g. DT01"
                 maxLength={10}
                 className="focus-visible:ring-green-500 font-mono"
@@ -386,7 +416,7 @@ export function BranchesSettings() {
               <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Address</Label>
               <Input
                 value={formData.address}
-                onChange={e => setFormData({ ...formData, address: e.target.value })}
+                onChange={e => setFormData(prev => ({ ...prev, address: e.target.value }))}
                 placeholder="e.g. 123 Main Street, Nairobi"
                 className="focus-visible:ring-green-500"
               />
@@ -403,7 +433,7 @@ export function BranchesSettings() {
                       onChange={e => {
                         const updated = [...formData.phones]
                         updated[idx] = e.target.value
-                        setFormData({ ...formData, phones: updated })
+                        setFormData(prev => { const p = [...prev.phones]; p[idx] = e.target.value; return { ...prev, phones: p } })
                       }}
                       placeholder="e.g. +254 712 345 678"
                       className="focus-visible:ring-green-500"
@@ -412,7 +442,7 @@ export function BranchesSettings() {
                       <button
                         type="button"
                         onClick={() =>
-                          setFormData({ ...formData, phones: formData.phones.filter((_, i) => i !== idx) })
+                          setFormData(prev => ({ ...prev, phones: prev.phones.filter((_, i) => i !== idx) }))
                         }
                         className="shrink-0 p-2 rounded-lg border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors"
                       >
@@ -424,7 +454,7 @@ export function BranchesSettings() {
                 {formData.phones.length < 3 && (
                   <button
                     type="button"
-                    onClick={() => setFormData({ ...formData, phones: [...formData.phones, ''] })}
+                    onClick={() => setFormData(prev => ({ ...prev, phones: [...prev.phones, ''] }))}
                     className="w-full py-1.5 rounded-lg border border-dashed border-gray-300 text-xs font-medium text-gray-500 hover:border-green-400 hover:text-green-600 hover:bg-green-50 transition-colors flex items-center justify-center gap-1.5"
                   >
                     <Plus size={12} /> Add Another Number
@@ -433,12 +463,111 @@ export function BranchesSettings() {
               </div>
             </div>
 
+            {/* Email addresses */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Email Address(es)</Label>
+              <div className="space-y-2">
+                {formData.emails.map((email, idx) => (
+                  <div key={idx} className="flex gap-2">
+                    <Input
+                      type="email"
+                      value={email}
+                      onChange={e => {
+                        setFormData(prev => { const em = [...prev.emails]; em[idx] = e.target.value; return { ...prev, emails: em } })
+                      }}
+                      placeholder="e.g. info@branch.com"
+                      className="focus-visible:ring-green-500"
+                    />
+                    {formData.emails.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormData(prev => ({ ...prev, emails: prev.emails.filter((_, i) => i !== idx) }))
+                        }
+                        className="shrink-0 p-2 rounded-lg border border-gray-200 text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {formData.emails.length < 3 && (
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, emails: [...prev.emails, ''] }))}
+                    className="w-full py-1.5 rounded-lg border border-dashed border-gray-300 text-xs font-medium text-gray-500 hover:border-green-400 hover:text-green-600 hover:bg-green-50 transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <Plus size={12} /> Add Another Email
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Pricing Configuration */}
+            <div className="space-y-3 p-4 rounded-xl border border-gray-200 bg-gray-50/60">
+              <div>
+                <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Pricing Configuration</p>
+                <p className="text-xs text-gray-400 mt-0.5">Controls which price is used by default at the POS for this branch</p>
+              </div>
+
+              {/* Pricing type */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-gray-600">Default Pricing Mode</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['retail', 'wholesale'] as const).map(type => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, pricingType: type }))}
+                      className={`py-2.5 px-3 rounded-lg border text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
+                        formData.pricingType === type
+                          ? type === 'wholesale'
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                            : 'bg-green-600 text-white border-green-600 shadow-sm'
+                          : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <Tag size={13} />
+                      {type === 'retail' ? 'Retail' : 'Wholesale'}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400">
+                  {formData.pricingType === 'wholesale'
+                    ? 'POS opens in wholesale mode — uses the wholesale price when set, otherwise falls back to retail.'
+                    : 'POS opens in retail mode — uses the standard selling price.'}
+                </p>
+              </div>
+
+              {/* Toggle lock */}
+              <div className="flex items-center justify-between py-2 border-t border-gray-200">
+                <div>
+                  <p className="text-xs font-semibold text-gray-700">Allow Cashier to Switch Mode</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {formData.allowModeToggle
+                      ? 'Cashier can flip between retail and wholesale per transaction'
+                      : 'Pricing mode is locked — cashier cannot override it'}
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.allowModeToggle}
+                  onCheckedChange={val => setFormData(prev => ({ ...prev, allowModeToggle: val }))}
+                />
+              </div>
+              {!formData.allowModeToggle && (
+                <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  <Lock size={12} className="shrink-0" />
+                  <span>Toggle will be hidden on the POS. Cashiers must serve all customers at {formData.pricingType} prices.</span>
+                </div>
+              )}
+            </div>
+
             {/* Status */}
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Status</Label>
               <Select
                 value={formData.status}
-                onValueChange={(val: any) => setFormData({ ...formData, status: val })}
+                onValueChange={(val: any) => setFormData(prev => ({ ...prev, status: val }))}
               >
                 <SelectTrigger className="focus:ring-green-500">
                   <SelectValue />

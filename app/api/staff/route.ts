@@ -13,7 +13,6 @@ export async function GET(request: NextRequest) {
 
     const { models } = await getTenantDB(request)
     const staff = await models.Staff.find({ userId: payload.userId }).select('-password').sort({ createdAt: -1 }).lean()
-    console.log('[staff GET] Returning staff count:', staff.length, 'Sample:', staff[0])
     return NextResponse.json({ staff })
   } catch (error) {
     console.error('[staff] GET error:', error)

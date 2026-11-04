@@ -101,9 +101,10 @@ export async function connectTenantDB(uri: string): Promise<mongoose.Connection>
   // Create connection promise and cache it immediately to prevent race conditions
   const connectionPromise = mongoose.createConnection(uri, {
     family: 4,
-    serverSelectionTimeoutMS: 10000,
-    socketTimeoutMS: 45000,
-    maxPoolSize: 2,  // Reduced from 3 to lower total connections
+    serverSelectionTimeoutMS: 3000,  // Fail fast — 3s is enough to detect offline
+    socketTimeoutMS: 10000,
+    connectTimeoutMS: 3000,
+    maxPoolSize: 2,
     minPoolSize: 1,
   }).asPromise()
 

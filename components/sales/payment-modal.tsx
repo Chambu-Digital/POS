@@ -325,7 +325,12 @@ export function PaymentModal({
         customerId: selectedCustomer?._id || null,
       }
 
-      if (isOnline()) {
+      // Always attempt the fetch — navigator.onLine is unreliable (returns true
+      // whenever any network interface is up, even when MongoDB is unreachable).
+      // We distinguish real business errors (4xx) from infrastructure failures
+      // (500/503/TypeError) and fall through to offline queue for the latter.
+      let serverSaleSucceeded = false
+      try {
         const response = await fetch(saleEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -333,7 +338,7 @@ export function PaymentModal({
         })
 
         if (!response.ok) {
-          const err = await response.json()
+          const err = await response.json().catch(() => ({}))
           // Handle ID requirement error for credit sales
           if (err.requiresId) {
             setIdRequiredError({
@@ -342,10 +347,14 @@ export function PaymentModal({
             })
             throw new Error('ID required for credit')
           }
-          throw new Error(err.error || 'Failed to complete sale')
+          const e = new Error(err.error || 'Failed to complete sale') as any
+          e.httpStatus = response.status
+          e.isOffline = err.offline === true || response.status === 503 || response.status === 500
+          throw e
         }
 
         const result = await response.json()
+        serverSaleSucceeded = true
 
         const orderNumber =
           result.sale?.orderNumber ||
@@ -393,8 +402,23 @@ export function PaymentModal({
           createdAt: new Date().toISOString(),
           synced: true,
         })
-      } else {
-        await addPendingSale(saleData)
+      } catch (fetchError: any) {
+        if (serverSaleSucceeded) throw fetchError
+
+        // 500/503/504 = server reached but DB/infra unreachable → treat as offline
+        // TypeError = browser couldn't reach the server at all → offline
+        // 4xx = real business rejection → re-throw as error toast
+        const isInfraFailure =
+          fetchError instanceof TypeError ||
+          fetchError?.isOffline === true ||
+          fetchError?.message === 'Failed to fetch' ||
+          fetchError?.httpStatus === 500 ||
+          fetchError?.httpStatus === 503 ||
+          fetchError?.httpStatus === 504
+
+        if (!isInfraFailure) throw fetchError
+
+        await addPendingSale({ ...saleData, _endpoint: saleEndpoint })
         const completedSale = {
           items: cart.map(item => ({
             productName: item.productName,
@@ -416,7 +440,7 @@ export function PaymentModal({
           date: new Date(),
           receiptNumber: `OFFLINE-${Date.now()}`,
         }
-        toast.success('Sale saved offline - will sync when online')
+        toast.success('Sale saved offline — will sync when back online')
         onPaymentComplete(completedSale)
       }
 

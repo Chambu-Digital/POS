@@ -14,8 +14,9 @@ export const queryClient = new QueryClient({
       // Keep unused data in cache for 10 minutes
       gcTime: 10 * 60 * 1000,
       
-      // Refetch on window focus (when user returns to tab)
-      refetchOnWindowFocus: true,
+      // Don't refetch just because the window regained focus — staleTime
+      // already controls when data is considered fresh enough.
+      refetchOnWindowFocus: false,
       
       // Don't refetch on mount if data is fresh
       refetchOnMount: false,

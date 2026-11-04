@@ -1,4 +1,4 @@
-import { getTenantDB } from '@/lib/tenant/get-db'
+import { getTenantDB, isMongoOfflineError, dbOfflineResponse } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
@@ -281,6 +281,7 @@ export async function POST(request: NextRequest) {
     }, { status: 201 })
   } catch (error) {
     console.error('[pharmacy/sale POST]', error)
+    if (isMongoOfflineError(error)) return dbOfflineResponse()
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to process sale' }, { status: 500 })
   }
 }

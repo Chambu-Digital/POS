@@ -11,6 +11,7 @@ import { DemoBanner } from '@/components/demo/demo-banner'
 import { NetworkStatusProvider } from '@/components/network-status-provider'
 import { Toaster } from 'sonner'
 import PaymentNotificationOverlay from '@/components/payment-notification-overlay'
+import { initAutoSync } from '@/lib/sync'
 
 const SIDEBAR_STORAGE_KEY = 'sidebar-collapsed'
 
@@ -32,6 +33,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       if (stored !== null) setSidebarCollapsed(stored === 'true')
     } catch {}
   }, [])
+
+  // Register the online / background-sync listeners once for the whole dashboard
+  useEffect(() => { initAutoSync() }, [])
 
   function handleCollapsedChange(v: boolean) {
     setSidebarCollapsed(v)

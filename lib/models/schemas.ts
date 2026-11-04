@@ -127,6 +127,10 @@ export const saleSchema = new mongoose.Schema(
     
     notes:         String,
     source:        { type: String, enum: ['pos', 'rental'], default: 'pos' },
+    // Pricing mode in effect when the sale was completed.  Determined by the
+    // branch's pricingType default and any cashier override.  Drives reporting
+    // splits between wholesale and retail revenue.
+    saleType:      { type: String, enum: ['retail', 'wholesale'], default: 'retail' },
     rentalMeta: {
       bookingId:       { type: mongoose.Schema.Types.ObjectId },
       serviceName:     String,
@@ -895,8 +899,18 @@ export const branchSchema = new mongoose.Schema(
     address: { type: String, default: '' },
     phone: { type: String, default: '' },
     phones: { type: [String], default: [] },
+    emails: { type: [String], default: [] },
     status: { type: String, enum: ['active', 'inactive', 'closed'], default: 'active' },
     isDefault: { type: Boolean, default: false },
+    // ── Branch-level pricing configuration ────────────────────────────────────
+    // pricingType sets the default pricing mode for all sales at this branch.
+    // 'retail'    → cashier starts in retail mode (sellingPrice)
+    // 'wholesale' → cashier starts in wholesale mode (wholeSale price)
+    pricingType:      { type: String, enum: ['retail', 'wholesale'], default: 'retail' },
+    // allowModeToggle controls whether the cashier can manually switch pricing
+    // modes mid-session.  When false the branch pricing type is enforced and the
+    // toggle button is hidden on the POS.
+    allowModeToggle:  { type: Boolean, default: true },
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
   },

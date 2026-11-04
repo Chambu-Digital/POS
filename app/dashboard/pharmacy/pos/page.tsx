@@ -354,14 +354,22 @@ function PharmacyPOSContent() {
     }
 
     try {
-      if (isOnline()) {
+      let serverSaleSucceeded = false
+      try {
         const res = await fetch('/api/pharmacy/sale', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(saleData),
         })
-        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed') }
+        if (!res.ok) {
+          const e_body = await res.json().catch(() => ({}))
+          const err = new Error(e_body.error || 'Failed') as any
+          err.httpStatus = res.status
+          err.isOffline = e_body.offline === true || res.status === 503 || res.status === 500
+          throw err
+        }
         const result = await res.json()
+        serverSaleSucceeded = true
         const orderNumber = result.sale?.orderNumber || `RX-${result.sale?._id?.slice(-6).toUpperCase()}`
 
         setLastSale({
@@ -380,15 +388,27 @@ function PharmacyPOSContent() {
         toast.success('Sale completed')
         setShowCompletion(true)
         clearCart()
-      } else {
-        await addPendingSale(saleData)
+      } catch (fetchError: any) {
+        if (serverSaleSucceeded) throw fetchError
+
+        const isInfraFailure =
+          fetchError instanceof TypeError ||
+          fetchError?.isOffline === true ||
+          fetchError?.message === 'Failed to fetch' ||
+          fetchError?.httpStatus === 500 ||
+          fetchError?.httpStatus === 503 ||
+          fetchError?.httpStatus === 504
+
+        if (!isInfraFailure) throw fetchError
+
+        await addPendingSale({ ...saleData, _endpoint: '/api/pharmacy/sale' })
         setLastSale({
           items: cart.map(i => ({ productName: i.productName, quantity: i.quantity, price: i.sellingPrice, discount: i.discount, total: i.sellingPrice * i.quantity - i.discount })),
           subtotal, discount: cartDiscount, total: Math.max(0, total),
           paymentMethod, customerName: customer?.name || 'Cash Sale',
           date: new Date(), receiptNumber: `OFFLINE-${Date.now()}`,
         })
-        toast.success('Sale saved offline')
+        toast.success('Sale saved offline — will sync when back online')
         setShowCompletion(true)
         clearCart()
       }
