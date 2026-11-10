@@ -1035,6 +1035,9 @@ function InventoryPageContent() {
             const allChecked = matched.length > 0 && matched.every(p => exportSelected.has(p._id))
             const someChecked = matched.some(p => exportSelected.has(p._id))
 
+            // Only count/export products that are BOTH in the filtered list AND checked
+            const exportReady = matched.filter(p => exportSelected.has(p._id))
+
             return (
               <>
                 <div className="flex items-center justify-between gap-2 pt-2 pb-1 border-b">
@@ -1059,7 +1062,7 @@ function InventoryPageContent() {
                     </Label>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {exportSelected.size} selected
+                    {exportReady.length} selected
                   </span>
                 </div>
 
@@ -1109,26 +1112,20 @@ function InventoryPageContent() {
                   <Button
                     variant="outline"
                     className="flex-1"
-                    disabled={exportSelected.size === 0}
-                    onClick={() => {
-                      const selected = products.filter(p => exportSelected.has(p._id))
-                      handleDownloadStock(selected)
-                    }}
+                    disabled={exportReady.length === 0}
+                    onClick={() => handleDownloadStock(exportReady)}
                   >
                     <Download size={16} className="mr-2" />
-                    Download CSV ({exportSelected.size})
+                    Download CSV ({exportReady.length})
                   </Button>
                   <Button
                     variant="outline"
                     className="flex-1"
-                    disabled={exportSelected.size === 0}
-                    onClick={() => {
-                      const selected = products.filter(p => exportSelected.has(p._id))
-                      handleDownloadPDF(selected)
-                    }}
+                    disabled={exportReady.length === 0}
+                    onClick={() => handleDownloadPDF(exportReady)}
                   >
                     <FileText size={16} className="mr-2" />
-                    Download PDF ({exportSelected.size})
+                    Download PDF ({exportReady.length})
                   </Button>
                 </div>
               </>
