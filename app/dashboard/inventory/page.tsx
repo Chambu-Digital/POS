@@ -15,15 +15,19 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Upload, Download, Trash2, Edit2, Search, FolderTree, ArrowLeftRight, PackageOpen, Layers, Settings2, ChevronDown, FileText } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Badge } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Plus, Upload, Download, Trash2, Edit2, Search, FolderTree, ArrowLeftRight, PackageOpen, Layers, Settings2, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { ProductForm } from '@/components/inventory/product-form'
 import { BatchProductForm } from '@/components/inventory/batch-product-form'
 import { ImportModal } from '@/components/inventory/import-modal'
@@ -83,6 +87,15 @@ function InventoryPageContent() {
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false)
   const [isLotCreatorOpen, setIsLotCreatorOpen] = useState(false)
   const [currency, setCurrency] = useState('KSh')
+
+  // ── Export modal state ───────────────────────────────────────────────────
+  const [isExportOpen, setIsExportOpen] = useState(false)
+  const [exportSearch, setExportSearch] = useState('')
+  const [exportCategory, setExportCategory] = useState('all')
+  const [exportStockPreset, setExportStockPreset] = useState('all')
+  const [exportStockMin, setExportStockMin] = useState('')
+  const [exportStockMax, setExportStockMax] = useState('')
+  const [exportSelected, setExportSelected] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     fetchProducts()
@@ -165,12 +178,13 @@ function InventoryPageContent() {
     }
   }
 
-  function handleDownloadStock() {
+  function handleDownloadStock(exportProducts?: Product[]) {
+    const data = exportProducts ?? products
     const headers = ['productName', 'category', 'brand', 'model', 'variant', 'unit', 'buyingPrice', 'sellingPrice', 'wholeSale', 'stock', 'description', 'barcode']
     let csv = headers.join(',') + '\n'
     
     // Add actual product data
-    products.forEach((product) => {
+    data.forEach((product) => {
       const row = [
         `"${(product.productName || '').replace(/"/g, '""')}"`,
         `"${(product.category || '').replace(/"/g, '""')}"`,
@@ -196,10 +210,11 @@ function InventoryPageContent() {
     a.download = `stock_export_${dateStr}.csv`
     a.click()
     window.URL.revokeObjectURL(url)
-    toast.success(`Exported ${products.length} products`)
+    toast.success(`Exported ${data.length} products`)
   }
 
-  function handleDownloadPDF() {
+  function handleDownloadPDF(exportProducts?: Product[]) {
+    const data = exportProducts ?? products
     const shopName = (user as any)?.shopName || 'Stock Report'
     const dateStr = new Date().toLocaleDateString('en-KE', { day: '2-digit', month: 'long', year: 'numeric' })
 
@@ -212,7 +227,7 @@ function InventoryPageContent() {
       ].filter(Boolean).join(' ')
     }
 
-    const rows = products.map((p, i) => `
+    const rows = data.map((p, i) => `
       <tr class="${i % 2 === 0 ? 'row-even' : 'row-odd'}">
         <td class="col-num">${i + 1}</td>
         <td class="col-name">${formatName(p)}</td>
@@ -346,7 +361,7 @@ function InventoryPageContent() {
   </table>
 
   <div class="doc-footer">
-    <span>${products.length} product${products.length !== 1 ? 's' : ''}</span>
+    <span>${data.length} product${data.length !== 1 ? 's' : ''}</span>
     <span>Powered by Chambu Digital</span>
   </div>
 </body>
@@ -473,25 +488,23 @@ function InventoryPageContent() {
             <Upload size={16} className="mr-2" />
             Import Items
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Download size={16} className="mr-2" />
-                Download Stock
-                <ChevronDown size={14} className="ml-1" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={handleDownloadStock}>
-                <Download size={14} className="mr-2" />
-                Download CSV
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleDownloadPDF}>
-                <FileText size={14} className="mr-2" />
-                Download PDF
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setExportSearch('')
+              setExportCategory('all')
+              setExportStockPreset('all')
+              setExportStockMin('')
+              setExportStockMax('')
+              // Pre-select all products
+              setExportSelected(new Set(products.map(p => p._id)))
+              setIsExportOpen(true)
+            }}
+          >
+            <Download size={16} className="mr-2" />
+            Download Stock
+          </Button>
           <Button
             onClick={() => setIsCategoryManagerOpen(true)}
             variant="outline"
@@ -908,6 +921,221 @@ function InventoryPageContent() {
         open={isCategoryManagerOpen}
         onOpenChange={setIsCategoryManagerOpen}
       />
+
+      {/* Export Stock Modal — filter, select, then download CSV or PDF */}
+      <Dialog open={isExportOpen} onOpenChange={setIsExportOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Download Stock</DialogTitle>
+            <DialogDescription>Filter products, select the ones you want, then export as CSV or PDF.</DialogDescription>
+          </DialogHeader>
+
+          {/* ── Filters ─────────────────────────────────────────────── */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Search by name</Label>
+              <Input
+                placeholder="Product name, brand..."
+                value={exportSearch}
+                onChange={(e) => setExportSearch(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Category</Label>
+              <Select value={exportCategory} onValueChange={setExportCategory}>
+                <SelectTrigger className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  {Array.from(new Set(products.map(p => p.category))).filter(Boolean).sort().map((cat) => (
+                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Stock level</Label>
+              <Select value={exportStockPreset} onValueChange={(v) => {
+                setExportStockPreset(v)
+                if (v !== 'custom') {
+                  setExportStockMin('')
+                  setExportStockMax('')
+                }
+              }}>
+                <SelectTrigger className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All stock levels</SelectItem>
+                  <SelectItem value="out">Out of stock (= 0)</SelectItem>
+                  <SelectItem value="low">Low stock (&lt; 10)</SelectItem>
+                  <SelectItem value="in">In stock (&gt; 0)</SelectItem>
+                  <SelectItem value="custom">Custom range…</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {exportStockPreset === 'custom' && (
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Stock range (min / max)</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    placeholder="Min"
+                    value={exportStockMin}
+                    onChange={(e) => setExportStockMin(e.target.value)}
+                    className="h-9 w-20"
+                  />
+                  <span className="text-muted-foreground">–</span>
+                  <Input
+                    type="number"
+                    placeholder="Max"
+                    value={exportStockMax}
+                    onChange={(e) => setExportStockMax(e.target.value)}
+                    className="h-9 w-20"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Select all toggle + count ──────────────────────────── */}
+          {(() => {
+            // Compute filtered products based on the export filters
+            const exportCategories = Array.from(new Set(products.map(p => p.category))).filter(Boolean).sort()
+            const searchLower = exportSearch.toLowerCase().trim()
+            const stockMinNum = exportStockMin !== '' ? parseFloat(exportStockMin) : null
+            const stockMaxNum = exportStockMax !== '' ? parseFloat(exportStockMax) : null
+
+            const matched = products.filter((p) => {
+              // Search filter
+              if (searchLower) {
+                const combined = [p.productName, (p as any).brand, (p as any).model, (p as any).variant]
+                  .filter(Boolean).join(' ').toLowerCase()
+                if (!combined.includes(searchLower)) return false
+              }
+              // Category filter
+              if (exportCategory !== 'all' && p.category !== exportCategory) return false
+              // Stock level filter
+              const stock = p.stock ?? 0
+              if (exportStockPreset === 'out' && stock !== 0) return false
+              if (exportStockPreset === 'low' && stock >= 10) return false
+              if (exportStockPreset === 'in' && stock <= 0) return false
+              if (exportStockPreset === 'custom') {
+                if (stockMinNum !== null && stock < stockMinNum) return false
+                if (stockMaxNum !== null && stock > stockMaxNum) return false
+              }
+              return true
+            })
+
+            // The matched list is used in the rendered list below too,
+            // so we store it on a ref-like variable via a closure.
+            // However React re-renders this IIFE on every change, so it's fine.
+            const allChecked = matched.length > 0 && matched.every(p => exportSelected.has(p._id))
+            const someChecked = matched.some(p => exportSelected.has(p._id))
+
+            return (
+              <>
+                <div className="flex items-center justify-between gap-2 pt-2 pb-1 border-b">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="export-select-all"
+                      checked={allChecked ? true : someChecked ? 'indeterminate' : false}
+                      onCheckedChange={(checked) => {
+                        setExportSelected(prev => {
+                          const next = new Set(prev)
+                          if (checked) {
+                            matched.forEach(p => next.add(p._id))
+                          } else {
+                            matched.forEach(p => next.delete(p._id))
+                          }
+                          return next
+                        })
+                      }}
+                    />
+                    <Label htmlFor="export-select-all" className="text-sm font-medium cursor-pointer">
+                      Select all ({matched.length})
+                    </Label>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {exportSelected.size} selected
+                  </span>
+                </div>
+
+                {/* ── Product list ─────────────────────────────────── */}
+                <ScrollArea className="flex-1 min-h-0 max-h-[350px] border rounded-md">
+                  <div className="divide-y">
+                    {matched.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground text-sm">
+                        No products match your filters
+                      </div>
+                    ) : (
+                      matched.map((p) => {
+                        const name = [(p as any).variant, (p as any).brand, p.productName].filter(Boolean).join(' ')
+                        const isSelected = exportSelected.has(p._id)
+                        return (
+                          <label
+                            key={p._id}
+                            className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer"
+                          >
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => {
+                                setExportSelected(prev => {
+                                  const next = new Set(prev)
+                                  if (checked) next.add(p._id)
+                                  else next.delete(p._id)
+                                  return next
+                                })
+                              }}
+                            />
+                            <span className="flex-1 text-sm truncate">{name}</span>
+                            <Badge
+                              variant={p.stock > 0 ? 'default' : 'destructive'}
+                              className="text-[10px]"
+                            >
+                              {p.stock}
+                            </Badge>
+                          </label>
+                        )
+                      })
+                    )}
+                  </div>
+                </ScrollArea>
+
+                {/* ── Export buttons ────────────────────────────────── */}
+                <div className="flex gap-2 pt-3 border-t">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    disabled={exportSelected.size === 0}
+                    onClick={() => {
+                      const selected = products.filter(p => exportSelected.has(p._id))
+                      handleDownloadStock(selected)
+                    }}
+                  >
+                    <Download size={16} className="mr-2" />
+                    Download CSV ({exportSelected.size})
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    disabled={exportSelected.size === 0}
+                    onClick={() => {
+                      const selected = products.filter(p => exportSelected.has(p._id))
+                      handleDownloadPDF(selected)
+                    }}
+                  >
+                    <FileText size={16} className="mr-2" />
+                    Download PDF ({exportSelected.size})
+                  </Button>
+                </div>
+              </>
+            )
+          })()}
+        </DialogContent>
+      </Dialog>
 
       {/* Stock In Modal */}
       <StockInModal
