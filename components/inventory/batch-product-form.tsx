@@ -83,6 +83,9 @@ interface ProductCardState {
   errors: Record<string, string>
   trackLots: boolean
   lotUnit: string
+  lotContainerName: string
+  lotSize: number
+  lotPrice: number
   initialLots: InitialLot[]
   duplicate: boolean
 }
@@ -126,6 +129,9 @@ export function BatchProductForm({ onSuccess }: BatchProductFormProps) {
       errors: {},
       trackLots: false,
       lotUnit: 'pieces',
+      lotContainerName: '',
+      lotSize: 1,
+      lotPrice: 0,
       initialLots: [],
       duplicate: false,
     }
@@ -405,13 +411,23 @@ async function submitBatch() {
               ? lotsTotal(product.initialLots)
               : variant.stock
 
+            // When trackLots is on and initial lots are defined, the batch
+            // creation endpoint ($inc) will set the stock. So create the product
+            // with stock: 0 to avoid double-counting.
+            const effectiveStock = product.trackLots && product.initialLots.length > 0
+              ? 0
+              : openingStock
+
             const createData = {
               ...prodData,
               ...varData,
-              stock:     openingStock,
+              stock:     effectiveStock,
               images:    varImages,
-              trackLots: product.trackLots,
-              lotUnit:   product.lotUnit,
+              trackLots:        product.trackLots,
+              lotUnit:          product.lotUnit,
+              lotContainerName: product.lotContainerName,
+              lotSize:          product.lotSize,
+              lotPrice:         product.lotPrice,
             }
 
             const response = await fetch('/api/products', {
@@ -968,15 +984,24 @@ async function submitBatch() {
                 {/* Buying Price - 1.5 cols */}
                 <div className="col-span-1 space-y-1">
                   <Label htmlFor={`buyingPrice-${product.id}`} className="text-xs font-medium">
-                    Buying {product.errors.buyingPrice && <span className="text-red-500">*</span>}
+                    {product.trackLots && product.lotSize > 1 && product.lotContainerName
+                      ? `Buy/${product.lotContainerName} `
+                      : 'Buying '}
+                    {product.errors.buyingPrice && <span className="text-red-500">*</span>}
                   </Label>
                   <Input
                     id={`buyingPrice-${product.id}`}
                     type="number"
                     step="0.01"
-                    value={product.buyingPrice || ''}
+                    value={product.trackLots && product.lotSize > 1 && product.lotContainerName
+                      ? (product.buyingPrice * product.lotSize) || ''
+                      : product.buyingPrice || ''}
                     onChange={(e) => {
-                      updateProduct(product.id, { buyingPrice: e.target.value })
+                      if (product.trackLots && product.lotSize > 1 && product.lotContainerName) {
+                        updateProduct(product.id, { buyingPrice: String((parseFloat(e.target.value) || 0) / product.lotSize) })
+                      } else {
+                        updateProduct(product.id, { buyingPrice: e.target.value })
+                      }
                       if (product.errors.buyingPrice) clearErrors(product.id)
                     }}
                     onFocus={(e) => e.target.select()}
@@ -990,15 +1015,24 @@ async function submitBatch() {
                 {/* Selling Price - 1.5 cols */}
                 <div className="col-span-1 space-y-1">
                   <Label htmlFor={`sellingPrice-${product.id}`} className="text-xs font-medium">
-                    Selling {product.errors.sellingPrice && <span className="text-red-500">*</span>}
+                    {product.trackLots && product.lotSize > 1 && product.lotContainerName
+                      ? `Sell/${product.lotContainerName} `
+                      : 'Selling '}
+                    {product.errors.sellingPrice && <span className="text-red-500">*</span>}
                   </Label>
                   <Input
                     id={`sellingPrice-${product.id}`}
                     type="number"
                     step="0.01"
-                    value={product.sellingPrice || ''}
+                    value={product.trackLots && product.lotSize > 1 && product.lotContainerName
+                      ? (product.lotPrice || '') 
+                      : product.sellingPrice || ''}
                     onChange={(e) => {
-                      updateProduct(product.id, { sellingPrice: e.target.value })
+                      if (product.trackLots && product.lotSize > 1 && product.lotContainerName) {
+                        updateProduct(product.id, { lotPrice: parseFloat(e.target.value) || 0 } as any)
+                      } else {
+                        updateProduct(product.id, { sellingPrice: e.target.value })
+                      }
                       if (product.errors.sellingPrice) clearErrors(product.id)
                     }}
                     onFocus={(e) => e.target.select()}
@@ -1115,34 +1149,78 @@ async function submitBatch() {
                     {product.trackLots && (
                       <div className="space-y-3 pt-2 border-t border-gray-200">
 
-                        {/* Unit of measure */}
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-medium">Unit of measure</Label>
-                          <div className="flex gap-1.5 flex-wrap">
-                            {['metres', 'pieces', 'kg', 'litres', 'rolls', 'boxes', 'cartons', 'packs'].map((u) => (
-                              <button
-                                key={u}
-                                type="button"
-                                onClick={() => updateProduct(product.id, { lotUnit: u })}
-                                className={cn(
-                                  'px-2 py-0.5 rounded-full text-[10px] border transition-all',
-                                  product.lotUnit === u
-                                    ? 'bg-primary text-primary-foreground border-primary'
-                                    : 'bg-background border-input hover:border-primary'
-                                )}
+                        {/* Container pricing */}
+                        <div className="space-y-1.5 pt-2 border-t border-gray-100">
+                          <Label className="text-xs font-medium">Container pricing</Label>
+                          {/* Row 1: container name + base unit */}
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <span className="text-[10px] text-muted-foreground">Container name</span>
+                              <Input
+                                value={product.lotContainerName ?? ''}
+                                onChange={(e) => updateProduct(product.id, { lotContainerName: e.target.value })}
+                                placeholder="e.g. roll, box, carton"
                                 disabled={loading}
-                              >
-                                {u}
-                              </button>
-                            ))}
+                                className="h-7 text-xs"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <span className="text-[10px] text-muted-foreground">Base unit (sold individually)</span>
+                              <Input
+                                value={product.lotUnit ?? ''}
+                                onChange={(e) => updateProduct(product.id, { lotUnit: e.target.value })}
+                                placeholder="e.g. metres, pieces, kg"
+                                disabled={loading}
+                                className="h-7 text-xs"
+                              />
+                            </div>
                           </div>
-                          <Input
-                            value={product.lotUnit}
-                            onChange={(e) => updateProduct(product.id, { lotUnit: e.target.value })}
-                            placeholder="Or type a custom unit (e.g. sheets)"
-                            disabled={loading}
-                            className="h-7 text-xs"
-                          />
+                          {/* Row 2: qty per container + price per base unit + price per container */}
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="space-y-1">
+                              <span className="text-[10px] text-muted-foreground">
+                                {product.lotUnit || 'units'} per {product.lotContainerName || 'container'}
+                              </span>
+                              <Input
+                                type="number"
+                                min="1"
+                                step="any"
+                                value={product.lotSize ?? 1}
+                                onChange={(e) => updateProduct(product.id, { lotSize: parseFloat(e.target.value) || 1 })}
+                                onFocus={(e) => e.target.select()}
+                                disabled={loading}
+                                className="h-7 text-xs"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <span className="text-[10px] text-muted-foreground">
+                                Price per {product.lotUnit || 'unit'}
+                              </span>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={product.sellingPrice || ''}
+                                onChange={(e) => updateProduct(product.id, { sellingPrice: parseFloat(e.target.value) || 0 })}
+                                onFocus={(e) => e.target.select()}
+                                disabled={loading}
+                                className="h-7 text-xs"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <span className="text-[10px] text-muted-foreground">
+                                Price per {product.lotContainerName || 'container'}
+                              </span>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={product.lotPrice ?? 0}
+                                onChange={(e) => updateProduct(product.id, { lotPrice: parseFloat(e.target.value) || 0 })}
+                                onFocus={(e) => e.target.select()}
+                                disabled={loading}
+                                className="h-7 text-xs"
+                              />
+                            </div>
+                          </div>
                         </div>
 
                         {/* Initial lots table */}

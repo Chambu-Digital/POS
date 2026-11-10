@@ -101,13 +101,13 @@ export function useAuth() {
       // Clear all queries
       queryClient.clear()
       
-      // Redirect to login
-      router.push('/auth/login')
+      // Hard redirect — tears down the React tree immediately, no stale re-renders
+      window.location.href = '/auth/login'
     },
     onError: () => {
-      // Even if logout API fails, clear cache and redirect
+      // Even if logout API fails, clear cache and hard redirect
       queryClient.clear()
-      router.push('/auth/login')
+      window.location.href = '/auth/login'
     },
   })
   

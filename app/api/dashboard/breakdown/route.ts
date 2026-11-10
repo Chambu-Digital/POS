@@ -64,13 +64,14 @@ export async function GET(request: NextRequest) {
       userId:      ownerId,
       'ledger.date': { $gte: todayStart, $lte: todayEnd },
       'ledger.type': { $in: ['payment', 'deposit', 'deposit_refund'] },
+      ...(branchContext ? { 'ledger.branchId': branchContext } : {}),
     }).lean()
 
     const {
       creditPayments,
       depositReceipts,
       byPaymentFromLedger,
-    } = processLedgerEntries(customersWithEntries, todayStart, todayEnd, staffScopeId)
+    } = processLedgerEntries(customersWithEntries, todayStart, todayEnd, staffScopeId, branchContext)
 
     // ── 4. Normalise retail sales → unified transaction shape ─────────────────
     const retailTransactions = allSales.map((sale: any) => {

@@ -1,5 +1,6 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 
 // Pay off credit balance
@@ -25,6 +26,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const payment = Math.min(amount, customer.creditBalance)
     customer.creditBalance -= payment
     
+    const branchContext = await getBranchContext(request)
+
     // Build note with payment method
     let paymentNote = note || 'Credit payment'
     if (paymentMethod === 'mobile_money' && mpesaCode) {
@@ -48,6 +51,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       // Track who collected this payment for per-staff accountability
       collectedBy: payload.userId,
       collectedByType: payload.type, // 'staff' or 'user'
+      branchId: branchContext || undefined,
       // Store payment method details for reporting
       paymentMethod,
       mpesaCode: mpesaCode || undefined,

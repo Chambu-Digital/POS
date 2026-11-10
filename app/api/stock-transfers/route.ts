@@ -28,8 +28,8 @@ export async function GET(request: NextRequest) {
       query.fromBranchId = branchContext
     } else if (direction === 'received' && branchContext) {
       query.toBranchId = branchContext
-    } else if (branchContext && payload.type === 'staff') {
-      // Staff can only see transfers involving their branch
+    } else if (branchContext) {
+      // Scope all transfers to current branch for both owners and staff
       query.$or = [
         { fromBranchId: branchContext },
         { toBranchId: branchContext },
@@ -160,6 +160,27 @@ export async function POST(request: NextRequest) {
               staffId: payload.type === 'staff' ? new Types.ObjectId(payload.userId) : undefined,
               timestamp: new Date(),
             }], { session })
+          }
+
+          // ── Lot tracking: decrement source batches ──────────────────────
+          if (item.lotBreakdown && Array.isArray(item.lotBreakdown) && item.lotBreakdown.length > 0) {
+            for (const lotEntry of item.lotBreakdown) {
+              if (!lotEntry.batchId || !lotEntry.quantity) continue
+              try {
+                const batch = await (models as any).ProductBatch.findOne({
+                  _id:      new Types.ObjectId(lotEntry.batchId),
+                  userId:   ownerId,
+                  branchId: new Types.ObjectId(fromBranchId),
+                }).session(session)
+                if (batch) {
+                  batch.quantity = Math.max(0, batch.quantity - lotEntry.quantity)
+                  if (batch.quantity === 0) batch.status = 'depleted'
+                  await batch.save({ session })
+                }
+              } catch (batchErr) {
+                console.error('[stock-transfers] ProductBatch deduction failed:', lotEntry.batchId, batchErr)
+              }
+            }
           }
         }
       }

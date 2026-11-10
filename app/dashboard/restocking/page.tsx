@@ -31,6 +31,7 @@ import {
 } from 'lucide-react'
 import { PermissionGuard } from '@/components/auth/permission-guard'
 import { FloatingSelectionButton } from '@/components/restocking/floating-selection-button'
+import { useAuth } from '@/hooks/use-auth'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import {
   addToBasket,
@@ -124,6 +125,8 @@ function formatKES(amount: number): string {
 function RestockingPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { user, permissions } = useAuth()
+  const canSeeCost = user?.type === 'user' || permissions?.['pos.buying-price'] === true
   const [activeTab, setActiveTab] = useState('low-stock')
   const [budget, setBudget] = useState('')
   const [leadTime, setLeadTime] = useState('')
@@ -622,11 +625,13 @@ function RestockingPageContent() {
           </div>
           {loading ? (
             <Loader2 className="h-5 w-5 animate-spin text-green-600" />
-          ) : (
+          ) : canSeeCost ? (
             <>
               <p className="text-xl font-bold text-green-900">{formatKES(lowStockData?.stats.estimatedCost || 0)}</p>
               <p className="text-xs text-green-600">To reach threshold</p>
             </>
+          ) : (
+            <p className="text-xl font-bold text-green-900">—</p>
           )}
         </div>
 
@@ -874,17 +879,19 @@ function RestockingPageContent() {
                           <th className="text-right p-3 font-medium text-sm">Threshold</th>
                           <th className="text-right p-3 font-medium text-sm">Need</th>
                           <th className="text-left p-3 font-medium text-sm">Status</th>
-                          <th
-                            className="text-right p-3 font-medium text-sm cursor-pointer hover:bg-muted/80"
-                            onClick={() => handleSort('price')}
-                          >
-                            <div className="flex items-center justify-end gap-1">
-                              Price
-                              {sortBy === 'price' && (
-                                sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
-                              )}
-                            </div>
-                          </th>
+                          {canSeeCost && (
+                            <th
+                              className="text-right p-3 font-medium text-sm cursor-pointer hover:bg-muted/80"
+                              onClick={() => handleSort('price')}
+                            >
+                              <div className="flex items-center justify-end gap-1">
+                                Price
+                                {sortBy === 'price' && (
+                                  sortOrder === 'asc' ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
+                                )}
+                              </div>
+                            </th>
+                          )}
                           <th className="text-left p-3 font-medium text-sm">Supplier</th>
                         </tr>
                       </thead>
@@ -916,7 +923,9 @@ function RestockingPageContent() {
                                   {status.label}
                                 </Badge>
                               </td>
-                              <td className="p-3 text-right text-sm">{formatKES(item.buyingPrice)}</td>
+                              {canSeeCost && (
+                                <td className="p-3 text-right text-sm">{formatKES(item.buyingPrice)}</td>
+                              )}
                               <td className="p-3 text-sm text-muted-foreground">
                                 {item.supplier?.name || <span className="text-muted-foreground/60">No supplier</span>}
                               </td>
@@ -991,7 +1000,11 @@ function RestockingPageContent() {
                             </div>
 
                             <div className="flex items-center justify-between pt-2 border-t text-xs">
-                              <span className="font-medium">{formatKES(item.buyingPrice)}</span>
+                              {canSeeCost ? (
+                                <span className="font-medium">{formatKES(item.buyingPrice)}</span>
+                              ) : (
+                                <span />
+                              )}
                               <span className="text-muted-foreground">
                                 {item.supplier?.name || 'No supplier'}
                               </span>

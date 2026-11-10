@@ -21,8 +21,11 @@ import {
   ChevronDown,
   ChevronUp,
   Plus,
+  Trash2,
+  PackageCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useAuth } from '@/hooks/use-auth'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -36,6 +39,8 @@ interface ProductMeta {
   stock: number
   trackLots?: boolean
   lotUnit?: string
+  lotSize?: number
+  lotContainerName?: string
 }
 
 interface BatchRow {
@@ -47,17 +52,34 @@ interface BatchRow {
   status: string
 }
 
+interface MigrationRow {
+  id: string        // local key only
+  label: string
+  quantity: number
+}
+
 interface CountItem {
   productId: string
   productName: string
   systemStock: number
-  physicalStock: number    // used only for non-lot products
+  physicalStock: number
   // lot fields
   isLotProduct: boolean
   lotUnit: string
+  lotSize: number
+  lotContainerName: string
   lotsExpanded: boolean
-  batches: BatchRow[]      // populated on expand
+  batches: BatchRow[]
   batchesLoading: boolean
+  // migration fields
+  migrationMode: boolean
+  migrationLots: MigrationRow[]
+  // enable-lots-in-place fields (for products that never had trackLots)
+  enableLotsMode: boolean
+  pendingContainerName: string
+  pendingLotUnit: string
+  pendingLotSize: number
+  needsProductPatch: boolean  // true when trackLots was enabled in-place here
 }
 
 interface StockCountModalProps {
@@ -69,6 +91,9 @@ interface StockCountModalProps {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountModalProps) {
+  const { user } = useAuth()
+  const branchId = user?.selectedBranch?._id ?? null
+
   const [products, setProducts]           = useState<ProductMeta[]>([])
   const [counts, setCounts]               = useState<CountItem[]>([])
   const [reason, setReason]               = useState('Weekly stock count')
@@ -95,7 +120,9 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
   async function fetchProducts() {
     try {
       setLoading(true)
-      const res = await fetch('/api/products')
+      const headers: Record<string, string> = {}
+      if (branchId) headers['X-Branch-Context'] = branchId
+      const res = await fetch('/api/products', { headers })
       if (!res.ok) throw new Error()
       const data = await res.json()
       const prods: ProductMeta[] = data.products || []
@@ -108,9 +135,18 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
           physicalStock: p.stock || 0,
           isLotProduct: p.trackLots === true,
           lotUnit:      p.lotUnit || 'units',
+          lotSize:      (p as any).lotSize || 0,
+          lotContainerName: (p as any).lotContainerName || '',
           lotsExpanded: false,
           batches:      [],
           batchesLoading: false,
+          migrationMode: false,
+          migrationLots: [],
+          enableLotsMode: false,
+          pendingContainerName: '',
+          pendingLotUnit: '',
+          pendingLotSize: 1,
+          needsProductPatch: false,
         }))
       )
     } catch {
@@ -125,7 +161,9 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
       i === countIndex ? { ...c, batchesLoading: true } : c
     ))
     try {
-      const res = await fetch(`/api/products/${productId}/batches?status=active,depleted`)
+      const params = new URLSearchParams({ status: 'active,depleted' })
+      if (branchId) params.set('branchId', branchId)
+      const res = await fetch(`/api/products/${productId}/batches?${params.toString()}`)
       if (!res.ok) throw new Error()
       const data = await res.json()
       const batches: BatchRow[] = (data.batches || []).map((b: any) => ({
@@ -133,9 +171,27 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
         lotId:            b.lotId,
         lotLabel:         b.lotLabel || b.lotId,
         systemQuantity:   b.quantity,
-        physicalQuantity: b.quantity, // start at system value
+        physicalQuantity: b.quantity,
         status:           b.status,
       }))
+
+      // ── Migration mode: no batches exist yet ───────────────────────────────
+      if (batches.length === 0) {
+        setCounts(prev => prev.map((c, i) => {
+          if (i !== countIndex) return c
+          // Auto-seed rows from lotSize if configured
+          const migrationLots = autoSeedMigrationRows(c)
+          return {
+            ...c,
+            batches:        [],
+            batchesLoading: false,
+            migrationMode:  true,
+            migrationLots,
+          }
+        }))
+        return
+      }
+
       setCounts(prev => prev.map((c, i) =>
         i === countIndex ? { ...c, batches, batchesLoading: false } : c
       ))
@@ -145,6 +201,125 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
         i === countIndex ? { ...c, batchesLoading: false } : c
       ))
     }
+  }
+
+  function autoSeedMigrationRows(count: CountItem): MigrationRow[] {
+    const stock    = count.systemStock
+    const lotSize  = count.lotSize
+    const name     = count.lotContainerName || 'Batch'
+    if (stock <= 0) return [{ id: uid(), label: `${name} 1`, quantity: 0 }]
+    if (!lotSize || lotSize <= 1) {
+      // No container config — one row with full stock
+      return [{ id: uid(), label: `${name} 1`, quantity: stock }]
+    }
+    const full      = Math.floor(stock / lotSize)
+    const remainder = stock % lotSize
+    const rows: MigrationRow[] = []
+    for (let i = 1; i <= full; i++) {
+      rows.push({ id: uid(), label: `${name} ${i}`, quantity: lotSize })
+    }
+    if (remainder > 0) {
+      rows.push({ id: uid(), label: `${name} ${full + 1}`, quantity: remainder })
+    }
+    return rows
+  }
+
+  function uid() { return Math.random().toString(36).slice(2) }
+
+  function addMigrationRow(countIndex: number) {
+    setCounts(prev => prev.map((c, i) => {
+      if (i !== countIndex) return c
+      const next = c.migrationLots.length + 1
+      return {
+        ...c,
+        migrationLots: [
+          ...c.migrationLots,
+          { id: uid(), label: `${c.lotContainerName || 'Batch'} ${next}`, quantity: 0 },
+        ],
+      }
+    }))
+  }
+
+  function removeMigrationRow(countIndex: number, rowId: string) {
+    setCounts(prev => prev.map((c, i) =>
+      i !== countIndex ? c : { ...c, migrationLots: c.migrationLots.filter(r => r.id !== rowId) }
+    ))
+  }
+
+  function updateMigrationRow(countIndex: number, rowId: string, field: 'label' | 'quantity', value: string) {
+    setCounts(prev => prev.map((c, i) => {
+      if (i !== countIndex) return c
+      return {
+        ...c,
+        migrationLots: c.migrationLots.map(r =>
+          r.id !== rowId ? r : {
+            ...r,
+            [field]: field === 'quantity' ? (parseFloat(value) || 0) : value,
+          }
+        ),
+      }
+    }))
+  }
+
+  function migrationTotal(lots: MigrationRow[]) {
+    return lots.reduce((s, r) => s + (Number(r.quantity) || 0), 0)
+  }
+
+  function enableLotsForProduct(countIndex: number) {
+    setCounts(prev => prev.map((c, i) =>
+      i !== countIndex ? c : { ...c, enableLotsMode: true, lotsExpanded: true }
+    ))
+  }
+
+  function confirmEnableLots(countIndex: number) {
+    setCounts(prev => prev.map((c, i) => {
+      if (i !== countIndex) return c
+      if (!c.pendingLotUnit.trim()) {
+        toast.error('Base unit is required')
+        return c
+      }
+      // Switch to lot product + migration mode
+      const updated: CountItem = {
+        ...c,
+        isLotProduct:      true,
+        lotUnit:           c.pendingLotUnit.trim(),
+        lotContainerName:  c.pendingContainerName.trim(),
+        lotSize:           c.pendingLotSize > 0 ? c.pendingLotSize : 1,
+        enableLotsMode:    false,
+        migrationMode:     true,
+        needsProductPatch: true,
+        migrationLots:     autoSeedMigrationRows({
+          ...c,
+          lotUnit:          c.pendingLotUnit.trim(),
+          lotContainerName: c.pendingContainerName.trim(),
+          lotSize:          c.pendingLotSize > 0 ? c.pendingLotSize : 1,
+        }),
+      }
+      return updated
+    }))
+  }
+
+  function cancelEnableLots(countIndex: number) {
+    setCounts(prev => prev.map((c, i) =>
+      i !== countIndex ? c : {
+        ...c,
+        enableLotsMode: false,
+        lotsExpanded: false,
+        pendingContainerName: '',
+        pendingLotUnit: '',
+        pendingLotSize: 1,
+      }
+    ))
+  }
+
+  function updatePending(countIndex: number, field: 'pendingContainerName' | 'pendingLotUnit' | 'pendingLotSize', value: string) {
+    setCounts(prev => prev.map((c, i) => {
+      if (i !== countIndex) return c
+      return {
+        ...c,
+        [field]: field === 'pendingLotSize' ? (parseFloat(value) || 1) : value,
+      }
+    }))
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -187,6 +362,7 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
   function batchDiff(b: BatchRow) { return b.physicalQuantity - b.systemQuantity }
 
   function productDiff(c: CountItem) {
+    if (c.migrationMode) return 0  // migration items don't show as adjustments
     if (c.isLotProduct && c.batches.length > 0) {
       return c.batches.reduce((s, b) => s + batchDiff(b), 0)
     }
@@ -217,7 +393,9 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
 
   async function handleSubmit() {
     const hasChanges = counts.some(c => productDiff(c) !== 0)
-    if (!hasChanges) {
+    const hasMigrations = counts.some(c => c.migrationMode && c.migrationLots.length > 0)
+
+    if (!hasChanges && !hasMigrations) {
       toast.info('All counts match system stock. No adjustments needed.')
       onOpenChange(false)
       return
@@ -227,55 +405,112 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
       return
     }
 
+    // Validate migration items
+    for (const c of counts) {
+      if (!c.migrationMode) continue
+      const total = migrationTotal(c.migrationLots)
+      if (total !== c.systemStock) {
+        toast.error(`${c.productName}: lots total ${total} but system stock is ${c.systemStock}. They must match exactly.`)
+        return
+      }
+    }
+
     setSubmitting(true)
     try {
-      const payload = {
-        reason,
-        notes,
-        counts: counts.map(c => {
-          const base = {
-            productId:    c.productId,
-            systemStock:  c.systemStock,
-            physicalStock: c.physicalStock,
+      // ── Step 1: run migrations first ───────────────────────────────────────
+      const migrationItems = counts.filter(c => c.migrationMode && c.migrationLots.length > 0)
+      for (const c of migrationItems) {
+        // If trackLots was enabled in-place, PATCH the product first
+        if (c.needsProductPatch) {
+          const patchRes = await fetch(`/api/products/${c.productId}`, {
+            method:  'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({
+              trackLots:        true,
+              lotUnit:          c.lotUnit,
+              lotContainerName: c.lotContainerName,
+              lotSize:          c.lotSize,
+            }),
+          })
+          if (!patchRes.ok) {
+            const d = await patchRes.json()
+            throw new Error(d.error || `Failed to enable lot tracking for ${c.productName}`)
           }
-          // Include per-batch breakdown for lot products that have been expanded
-          if (c.isLotProduct && c.batches.length > 0) {
-            return {
-              ...base,
-              batches: c.batches.map(b => ({
-                batchId:         b.batchId,
-                physicalQuantity: b.physicalQuantity,
-              })),
-            }
-          }
-          return base
-        }),
+        }
+
+        const res = await fetch(`/api/products/${c.productId}/migrate-to-lots`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            lots: c.migrationLots
+              .filter(r => r.quantity > 0)
+              .map(r => ({ label: r.label.trim() || 'Batch', quantity: r.quantity })),
+          }),
+        })
+        if (!res.ok) {
+          const d = await res.json()
+          throw new Error(d.error || `Failed to migrate ${c.productName}`)
+        }
       }
 
-      const res = await fetch('/api/inventory/stock-count', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(payload),
-      })
+      // ── Step 2: stock count for non-migration items only ───────────────────
+      const countItems = counts.filter(c => !c.migrationMode && productDiff(c) !== 0)
+      if (countItems.length > 0) {
+        const payload = {
+          reason,
+          notes,
+          counts: countItems.map(c => {
+            const base = {
+              productId:    c.productId,
+              systemStock:  c.systemStock,
+              physicalStock: c.physicalStock,
+            }
+            if (c.isLotProduct && c.batches.length > 0) {
+              return {
+                ...base,
+                batches: c.batches.map(b => ({
+                  batchId:         b.batchId,
+                  physicalQuantity: b.physicalQuantity,
+                })),
+              }
+            }
+            return base
+          }),
+        }
 
-      if (res.ok) {
+        const res = await fetch('/api/inventory/stock-count', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(payload),
+        })
+
+        if (!res.ok) {
+          const d = await res.json()
+          throw new Error(d.error || 'Failed to process stock count')
+        }
+
         const data = await res.json()
         const lotMsg = data.batchAdjustmentCount
           ? `, ${data.batchAdjustmentCount} lot${data.batchAdjustmentCount !== 1 ? 's' : ''} updated`
           : ''
+        const migrateMsg = migrationItems.length > 0
+          ? `, ${migrationItems.length} product${migrationItems.length !== 1 ? 's' : ''} migrated to lots`
+          : ''
         toast.success(
           data.adjustmentCount > 0
-            ? `Stock count complete. ${data.adjustmentCount} adjustment${data.adjustmentCount !== 1 ? 's' : ''} made${lotMsg}.`
-            : 'Stock count complete. All counts match.'
+            ? `Stock count complete. ${data.adjustmentCount} adjustment${data.adjustmentCount !== 1 ? 's' : ''} made${lotMsg}${migrateMsg}.`
+            : `Stock count complete${migrateMsg}.`
         )
-        onOpenChange(false)
-        onSuccess()
-      } else {
-        const data = await res.json()
-        toast.error(data.error || 'Failed to process stock count')
+      } else if (migrationItems.length > 0) {
+        toast.success(
+          `${migrationItems.length} product${migrationItems.length !== 1 ? 's' : ''} successfully migrated to lots.`
+        )
       }
-    } catch {
-      toast.error('Error processing stock count')
+
+      onOpenChange(false)
+      onSuccess()
+    } catch (e: any) {
+      toast.error(e.message || 'Error processing stock count')
     } finally {
       setSubmitting(false)
     }
@@ -409,6 +644,16 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
                                   {count.isLotProduct && (
                                     <Layers size={12} className="text-blue-400 shrink-0" />
                                   )}
+                                  {!count.isLotProduct && !count.enableLotsMode && (
+                                    <button
+                                      type="button"
+                                      onClick={e => { e.stopPropagation(); enableLotsForProduct(countIndex) }}
+                                      className="ml-1 text-[10px] text-muted-foreground hover:text-blue-600 border border-dashed rounded px-1 py-0.5 transition-colors shrink-0"
+                                      title="Enable lot tracking for this product"
+                                    >
+                                      + Lots
+                                    </button>
+                                  )}
                                 </div>
                               </td>
                               <td className="p-2 text-right text-muted-foreground text-xs sm:text-sm whitespace-nowrap">
@@ -441,12 +686,151 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
                               </td>
                             </tr>
 
+                            {/* ── Enable lots inline config ── */}
+                            {count.enableLotsMode && (
+                              <tr key={`${count.productId}-enable`} className="bg-blue-50/40 border-t">
+                                <td colSpan={4} className="px-3 py-3">
+                                  <div className="space-y-2">
+                                    <p className="text-xs font-semibold text-blue-800 flex items-center gap-1.5">
+                                      <Layers size={12} />
+                                      Configure lot tracking for {count.productName}
+                                    </p>
+                                    <div className="grid grid-cols-3 gap-2">
+                                      <div className="space-y-1">
+                                        <span className="text-[10px] text-muted-foreground">Container name</span>
+                                        <Input
+                                          value={count.pendingContainerName}
+                                          onChange={e => updatePending(countIndex, 'pendingContainerName', e.target.value)}
+                                          placeholder="e.g. box, roll"
+                                          className="h-7 text-xs"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <span className="text-[10px] text-muted-foreground">Base unit</span>
+                                        <Input
+                                          value={count.pendingLotUnit}
+                                          onChange={e => updatePending(countIndex, 'pendingLotUnit', e.target.value)}
+                                          placeholder="e.g. pieces, metres"
+                                          className="h-7 text-xs"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <span className="text-[10px] text-muted-foreground">
+                                          {count.pendingLotUnit || 'units'} per {count.pendingContainerName || 'container'}
+                                        </span>
+                                        <Input
+                                          type="number"
+                                          min="1"
+                                          step="1"
+                                          value={count.pendingLotSize}
+                                          onChange={e => updatePending(countIndex, 'pendingLotSize', e.target.value)}
+                                          onFocus={e => e.target.select()}
+                                          className="h-7 text-xs"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="flex gap-2 pt-1">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        className="h-7 text-xs"
+                                        onClick={() => confirmEnableLots(countIndex)}
+                                      >
+                                        Confirm
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 text-xs"
+                                        onClick={() => cancelEnableLots(countIndex)}
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+
                             {/* ── Lot sub-rows (expanded) ── */}
                             {count.isLotProduct && count.lotsExpanded && (
                               <tr key={`${count.productId}-lots`} className="bg-blue-50/30">
                                 <td colSpan={4} className="px-2 pb-3 pt-1">
                                   {count.batchesLoading ? (
                                     <div className="text-xs text-muted-foreground py-2 pl-6">Loading lots…</div>
+                                  ) : count.migrationMode ? (
+                                    // ── Migration mode: no batches exist, define them ──
+                                    <div className="pl-6 space-y-2">
+                                      <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                                        <PackageCheck size={14} className="text-amber-600 shrink-0" />
+                                        <div className="text-xs text-amber-800">
+                                          <span className="font-semibold">No lots defined yet.</span>{' '}
+                                          This product has <span className="font-semibold">{count.systemStock} {count.lotUnit}</span> in stock.
+                                          Define batches below — they must total exactly {count.systemStock}.
+                                        </div>
+                                      </div>
+
+                                      {/* Column headers */}
+                                      <div className="grid grid-cols-12 gap-2 text-[10px] text-muted-foreground px-1">
+                                        <span className="col-span-6">Label</span>
+                                        <span className="col-span-4 text-right">Qty ({count.lotUnit})</span>
+                                        <span className="col-span-2" />
+                                      </div>
+
+                                      {count.migrationLots.map((row) => (
+                                        <div key={row.id} className="grid grid-cols-12 gap-1.5 items-center">
+                                          <div className="col-span-6">
+                                            <Input
+                                              value={row.label}
+                                              onChange={e => updateMigrationRow(countIndex, row.id, 'label', e.target.value)}
+                                              placeholder="e.g. Box 1"
+                                              className="h-7 text-xs"
+                                            />
+                                          </div>
+                                          <div className="col-span-4">
+                                            <Input
+                                              type="number"
+                                              min="0"
+                                              step="any"
+                                              value={row.quantity || ''}
+                                              onChange={e => updateMigrationRow(countIndex, row.id, 'quantity', e.target.value)}
+                                              onFocus={e => e.target.select()}
+                                              placeholder="0"
+                                              className="h-7 text-xs text-right"
+                                            />
+                                          </div>
+                                          <div className="col-span-2 flex justify-end">
+                                            <button
+                                              type="button"
+                                              onClick={() => removeMigrationRow(countIndex, row.id)}
+                                              className="p-1 text-muted-foreground hover:text-red-500 transition-colors"
+                                            >
+                                              <Trash2 size={12} />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))}
+
+                                      {/* Running total */}
+                                      <div className={`flex justify-between text-xs px-1 font-medium ${
+                                        migrationTotal(count.migrationLots) === count.systemStock
+                                          ? 'text-green-600'
+                                          : 'text-amber-600'
+                                      }`}>
+                                        <span>Total allocated:</span>
+                                        <span>{migrationTotal(count.migrationLots)} / {count.systemStock} {count.lotUnit}</span>
+                                      </div>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => addMigrationRow(countIndex)}
+                                        className="w-full flex items-center justify-center gap-1 h-7 text-xs border border-dashed rounded-md text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+                                      >
+                                        <Plus size={12} />
+                                        Add {count.lotContainerName || 'batch'}
+                                      </button>
+                                    </div>
                                   ) : count.batches.length === 0 ? (
                                     <div className="text-xs text-muted-foreground py-2 pl-6">
                                       No active lots found. Receive stock first to create lots.
@@ -559,12 +943,16 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
               </div>
 
               {/* Warning */}
-              {adjustmentCount > 0 && (
+              {(adjustmentCount > 0 || counts.some(c => c.migrationMode && c.migrationLots.length > 0)) && (
                 <div className="border border-orange-200 bg-orange-50 rounded-lg p-3 flex items-start gap-2">
                   <AlertTriangle size={16} className="text-orange-600 shrink-0 mt-0.5" />
                   <div className="text-xs sm:text-sm">
                     <p className="font-semibold text-orange-900">
-                      {adjustmentCount} product{adjustmentCount !== 1 ? 's' : ''} will be adjusted
+                      {adjustmentCount > 0 && `${adjustmentCount} product${adjustmentCount !== 1 ? 's' : ''} will be adjusted`}
+                      {adjustmentCount > 0 && counts.some(c => c.migrationMode) && ' · '}
+                      {counts.filter(c => c.migrationMode && c.migrationLots.length > 0).length > 0 && (
+                        `${counts.filter(c => c.migrationMode && c.migrationLots.length > 0).length} product${counts.filter(c => c.migrationMode && c.migrationLots.length > 0).length !== 1 ? 's' : ''} will be migrated to lots`
+                      )}
                     </p>
                     <p className="text-orange-700 mt-1 hidden sm:block">
                       Stock levels will be updated to match physical counts.
@@ -582,8 +970,7 @@ export function StockCountModal({ open, onOpenChange, onSuccess }: StockCountMod
                 <Button type="button" onClick={handleSubmit}
                   className="flex-1 text-sm h-9" disabled={submitting}>
                   {submitting ? 'Processing...' : 'Submit Count'}
-                </Button>
-              </div>
+                </Button>              </div>
             </div>
           </div>
         )}

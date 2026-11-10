@@ -66,6 +66,8 @@ export default function DashboardPage() {
     return features[key] === true && permissions[key] === true
   }
 
+  const canSeeCost = userType === 'user' || permissions['pos.buying-price'] === true
+
   const showBar     = can('bar.tabs')
   const showHospitality = can('hospitality.pos') || can('hospitality.orders')
   // kds.display was a legacy key — the canonical key is now kds.orders (any kds feature suffices)
@@ -375,7 +377,7 @@ export default function DashboardPage() {
                 <span className="text-sm text-muted-foreground">Low Stock</span>
                 <Badge variant={stats.products.lowStockItems > 0 ? 'destructive' : 'secondary'}>{stats.products.lowStockItems}</Badge>
               </div>
-              {stats.recentPeriod.grossProfit !== undefined && (
+              {canSeeCost && stats.recentPeriod.grossProfit !== undefined && (
                 <>
                   <Separator />
                   <div className="flex justify-between items-center">

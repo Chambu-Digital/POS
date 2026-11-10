@@ -1,6 +1,7 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { getBranchContext } from '@/lib/branch-context'
+import { canSeeBuyingPrice } from '@/lib/buying-price'
 import { NextRequest, NextResponse } from 'next/server'
 import { normalisePermissions } from '@/lib/modules'
 import { Types } from 'mongoose'
@@ -116,11 +117,12 @@ export async function GET(request: NextRequest) {
         ...(isStaff ? { servedBy: payload.userId } : {}),
       }).select('total discount payments paymentMethod createdAt').lean() : Promise.resolve([]),
 
-    // Today's credit payments AND customer deposits received from customer ledger
+      // Today's credit payments AND customer deposits received from customer ledger
       models.Customer.find({
         userId: ownerObjId,
         'ledger.date': { $gte: todayStart, $lte: todayEnd },
         'ledger.type': { $in: ['payment', 'deposit', 'deposit_refund'] },
+        ...(branchObjId ? { 'ledger.branchId': branchObjId } : {}),
       }).select('name ledger').lean(),
 
       // Period sales (for charts + payment methods) — populate only for top products
@@ -166,6 +168,7 @@ export async function GET(request: NextRequest) {
         userId: ownerObjId,
         'ledger.date': { $gte: periodStart },
         'ledger.type': { $in: ['payment', 'deposit', 'deposit_refund'] },
+        ...(branchObjId ? { 'ledger.branchId': branchObjId } : {}),
       }).select('ledger').lean() : Promise.resolve([]),
 
       // Rental aggregate — count + revenue, no full fetch
@@ -251,7 +254,7 @@ export async function GET(request: NextRequest) {
       creditCollectedTotal: creditCollected,
       byPaymentFromLedger:  todayByPaymentFromLedger,
       depositsReceivedTotal,
-    } = processLedgerEntries(todayCustomers as any[], todayStart, todayEnd, staffScopeIdForToday)
+    } = processLedgerEntries(todayCustomers as any[], todayStart, todayEnd, staffScopeIdForToday, branchContext)
 
     // ── Today stats ───────────────────────────────────────────────────────────
     const todayAll     = [...(todaySales as any[]), ...(todayHospitalitySales as any[])]
@@ -348,6 +351,13 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // ── Strip cost fields if caller lacks pos.buying-price ───────────────────
+    const showCost = canSeeBuyingPrice(payload)
+    if (!showCost && productStats) {
+      const { stockValueAtCost, estimatedProfit, ...safeStats } = productStats
+      productStats = safeStats
+    }
+
     // ── Sales by day chart (last 7 days) ──────────────────────────────────────
     const salesByDay: Record<string, { date: string; sales: number; revenue: number }> = {}
     // Retail last-7: filter from periodSalesRaw (avoid extra query if days >= 7)
@@ -399,7 +409,7 @@ export async function GET(request: NextRequest) {
     const {
       creditCollectedTotal: periodCreditCollected,
       byPaymentFromLedger:  periodByPaymentFromLedger,
-    } = processLedgerEntries(customers as any[], periodStart, new Date(), periodStaffScopeId)
+    } = processLedgerEntries(customers as any[], periodStart, new Date(), periodStaffScopeId, branchContext)
 
     // Merge period deposit inflows into the paymentMethods chart
     for (const [method, amount] of Object.entries(periodByPaymentFromLedger)) {

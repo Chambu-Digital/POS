@@ -223,6 +223,14 @@ export const RETAIL_MODULE: ModuleDefinition = {
       adminOnly: true,
       defaultOn: false,
     },
+    {
+      key: 'pos.buying-price',
+      label: 'View Buying Price',
+      description: 'See cost prices in inventory, reports, and restocking. Required to create or edit products.',
+      href: '/dashboard/retail/inventory',
+      adminOnly: false,
+      defaultOn: false,
+    },
   ],
 }
 
@@ -476,6 +484,7 @@ export const DEFAULT_STAFF_PERMISSIONS: Record<string, boolean> = {
   'pos.deposits.take':           true,
   'pos.deposits.refund':         false,
   'pos.deposits.refund-override': false,
+  'pos.buying-price': false,
   'core.customers':   false,
   'core.suppliers':   false,
   'core.restocking':  false,
@@ -511,6 +520,7 @@ export const DEFAULT_MANAGER_PERMISSIONS: Record<string, boolean> = {
   'pos.deposits.take':           true,
   'pos.deposits.refund':         true,
   'pos.deposits.refund-override': false,
+  'pos.buying-price': true,
   'core.customers':   true,
   'core.suppliers':   true,
   'core.restocking':  true,

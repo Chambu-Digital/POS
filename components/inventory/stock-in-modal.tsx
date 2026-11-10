@@ -44,6 +44,9 @@ interface ProductMeta {
   model?: string
   trackLots?: boolean
   lotUnit?: string
+  lotContainerName?: string
+  lotSize?: number
+  lotPrice?: number
 }
 
 interface LotEntry {
@@ -59,6 +62,8 @@ interface StockInItem {
   // lot fields — only populated when the chosen product has trackLots===true
   lotsExpanded: boolean
   lots: LotEntry[]
+  // container mode — when product has lotContainerName + lotSize configured
+  containerCount: number  // how many containers the user says they're receiving
 }
 
 interface StockInModalProps {
@@ -93,7 +98,7 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
   const [bankProviders, setBankProviders]   = useState<Array<{ _id: string; name: string }>>([])
   const [customMethods, setCustomMethods]   = useState<Array<{ _id: string; name: string }>>([])
   const [items, setItems]                   = useState<StockInItem[]>([
-    { productId: '', productName: '', quantity: 0, unitCost: 0, lotsExpanded: false, lots: [] },
+    { productId: '', productName: '', quantity: 0, unitCost: 0, lotsExpanded: false, lots: [], containerCount: 0 },
   ])
   const [productOpenStates, setProductOpenStates] = useState<Record<number, boolean>>({})
   const [submitting, setSubmitting]         = useState(false)
@@ -118,7 +123,7 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
       setSelectedBankId('')
       setSelectedCustomMethodId('')
       setPaymentReference('')
-      setItems([{ productId: '', productName: '', quantity: 0, unitCost: 0, lotsExpanded: false, lots: [] }])
+      setItems([{ productId: '', productName: '', quantity: 0, unitCost: 0, lotsExpanded: false, lots: [], containerCount: 0 }])
       setProductOpenStates({})
     }
   }, [open])
@@ -169,8 +174,44 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
   /** Auto-generate N lot entries with default labels from a total quantity. */
   function autoGenerateLots(item: StockInItem): LotEntry[] {
     if (item.quantity <= 0) return []
+    const product = getProduct(item.productId)
+    // If product has container config, use container-based seeding
+    if (product?.lotContainerName && product?.lotSize && product.lotSize > 1) {
+      const containerName = product.lotContainerName
+      const full = Math.floor(item.quantity / product.lotSize)
+      const remainder = item.quantity % product.lotSize
+      const rows: LotEntry[] = []
+      for (let i = 1; i <= full; i++) {
+        rows.push({ label: `${containerName} ${i}`, quantity: product.lotSize })
+      }
+      if (remainder > 0) {
+        rows.push({ label: `${containerName} ${full + 1}`, quantity: remainder })
+      }
+      return rows
+    }
     // Default: one lot covering the whole quantity
     return [{ label: 'Lot 1', quantity: item.quantity }]
+  }
+
+  /** Generate lot rows from a container count (e.g. "5 rolls" → 5 rows of lotSize each). */
+  function generateContainerLots(itemIndex: number, count: number) {
+    setItems(prev => prev.map((item, i) => {
+      if (i !== itemIndex) return item
+      const product = getProduct(item.productId)
+      if (!product?.lotContainerName || !product?.lotSize || product.lotSize <= 1) return item
+      const containerName = product.lotContainerName
+      const lotSize = product.lotSize
+      const rows: LotEntry[] = []
+      for (let i = 1; i <= count; i++) {
+        rows.push({ label: `${containerName} ${i}`, quantity: lotSize })
+      }
+      return {
+        ...item,
+        containerCount: count,
+        lots: rows,
+        quantity: count * lotSize,
+      }
+    }))
   }
 
   function addLotRow(itemIndex: number) {
@@ -221,7 +262,7 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
   function addItem() {
     setItems(prev => [
       ...prev,
-      { productId: '', productName: '', quantity: 0, unitCost: 0, lotsExpanded: false, lots: [] },
+      { productId: '', productName: '', quantity: 0, unitCost: 0, lotsExpanded: false, lots: [], containerCount: 0 },
     ])
   }
 
@@ -242,6 +283,7 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
           productName: formatProductName(product),
           // reset lots whenever product changes
           lots:         [],
+          containerCount: 0,
           // Auto-expand the lot section for lot-tracked products so it
           // can't be missed — staff don't have to know to click a toggle
           lotsExpanded: product.trackLots === true,
@@ -880,6 +922,88 @@ export function StockInModal({ open, onOpenChange, onSuccess }: StockInModalProp
                       {/* Lot tracking section — only for trackLots products */}
                       {isLotProduct && item.productId && (
                         <div className="pt-2 border-t">
+                          {/* Container config prompt — when trackLots is on but no container config set */}
+                          {(!product?.lotContainerName || !product?.lotSize || product.lotSize <= 1) && (
+                            <div className="flex items-center gap-2 py-2">
+                              <span className="text-xs text-muted-foreground shrink-0">Container:</span>
+                              <Input
+                                key={`cn-${item.productId}`}
+                                type="text"
+                                placeholder="e.g. roll, box"
+                                className="w-24 h-7 text-xs"
+                                onBlur={async (e) => {
+                                  const val = e.target.value.trim()
+                                  if (!val) return
+                                  await fetch(`/api/products/${item.productId}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ lotContainerName: val }),
+                                  })
+                                  fetchInitialData()
+                                }}
+                              />
+                              <span className="text-xs text-muted-foreground shrink-0">Units/container:</span>
+                              <Input
+                                key={`ls-${item.productId}`}
+                                type="number"
+                                min="1"
+                                placeholder="e.g. 90"
+                                className="w-16 h-7 text-xs"
+                                onBlur={async (e) => {
+                                  const val = parseInt(e.target.value) || 0
+                                  if (val <= 1) return
+                                  await fetch(`/api/products/${item.productId}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ lotSize: val }),
+                                  })
+                                  fetchInitialData()
+                                }}
+                              />
+                              <span className="text-[10px] text-muted-foreground ml-auto">
+                                Set once to enable container quick-fill
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Container quick-fill — only when product has lotContainerName + lotSize */}
+                          {product?.lotContainerName && product?.lotSize && product.lotSize > 1 && (
+                            <div className="flex items-center gap-2 py-2">
+                              <span className="text-xs text-muted-foreground shrink-0">
+                                Receiving
+                              </span>
+                              <Input
+                                type="number"
+                                min="0"
+                                value={item.containerCount || ''}
+                                onChange={e => {
+                                  const count = parseInt(e.target.value) || 0
+                                  if (count > 0) {
+                                    generateContainerLots(index, count)
+                                  } else {
+                                    setItems(prev => prev.map((it, i) =>
+                                      i === index ? { ...it, containerCount: 0, lots: [], quantity: 0 } : it
+                                    ))
+                                  }
+                                }}
+                                onFocus={e => e.target.select()}
+                                placeholder="0"
+                                className="w-16 h-8 text-sm text-center"
+                              />
+                              <span className="text-xs text-muted-foreground">
+                                {product.lotContainerName}{item.containerCount !== 1 ? 's' : ''}
+                              </span>
+                              {item.containerCount > 0 && (
+                                <span className="text-xs text-muted-foreground">
+                                  = {item.containerCount * product.lotSize} {product.lotUnit || 'units'}
+                                </span>
+                              )}
+                              <span className="text-[10px] text-muted-foreground ml-auto">
+                                {product.lotSize} {product.lotUnit} per {product.lotContainerName}
+                              </span>
+                            </div>
+                          )}
+
                           {/* Toggle button */}
                           <button
                             type="button"

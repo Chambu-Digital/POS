@@ -156,6 +156,10 @@ function SalesPageContent() {
   const [lotPickerProduct, setLotPickerProduct] = useState<Product | null>(null)
   // Which multi-lot product groups are expanded in the cart
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  // Raw string values for quantity inputs while the user is typing.
+  // Kept separate from cart state so mid-entry strings like "0." or "0.5"
+  // don't immediately trigger validation / item removal.
+  const [quantityDraftValues, setQuantityDraftValues] = useState<Record<string, string>>({})
 
   useEffect(() => { productsRef2.current = products }, [products])
 
@@ -719,7 +723,7 @@ function SalesPageContent() {
   }, [cart, products, selectedCartIndex])
 
   function updateQuantity(productId: string, quantity: number) {
-    if (quantity < 1) {
+    if (quantity <= 0) {
       removeFromCart(productId)
       return
     }
@@ -791,6 +795,12 @@ function SalesPageContent() {
     setCart((prevCart) => prevCart.filter(
       (item) => item.productId !== idOrBatchId
     ))
+    // Drop any pending draft for this item
+    setQuantityDraftValues(prev => {
+      const next = { ...prev }
+      delete next[idOrBatchId]
+      return next
+    })
   }
 
   function scrollToCart() {
@@ -1207,9 +1217,34 @@ function SalesPageContent() {
                             quantityInputRefs.current[item.productId] = el
                           }}
                           type="number"
-                          value={item.quantity || ''}
-                          onChange={(e) => updateQuantity(item.productId, parseInt(e.target.value) || 0)}
-                          onFocus={(e) => e.target.select()}
+                          step="any"
+                          value={quantityDraftValues[item.productId] ?? String(item.quantity)}
+                          onChange={(e) => {
+                            // Store the raw string — don't call updateQuantity yet.
+                            // This lets "0", "0.", "0.5" all coexist without
+                            // triggering premature item removal.
+                            setQuantityDraftValues(prev => ({ ...prev, [item.productId]: e.target.value }))
+                          }}
+                          onFocus={(e) => {
+                            // Seed the draft with the current numeric value so the
+                            // field is pre-populated and can be edited freely.
+                            setQuantityDraftValues(prev => ({ ...prev, [item.productId]: String(item.quantity) }))
+                            e.target.select()
+                          }}
+                          onBlur={() => {
+                            const raw = quantityDraftValues[item.productId]
+                            const parsed = raw !== undefined ? parseFloat(raw) : NaN
+                            // Commit: valid positive number → update; anything else → revert to current
+                            if (!isNaN(parsed) && parsed > 0) {
+                              updateQuantity(item.productId, parsed)
+                            }
+                            // Clear the draft so the input shows the live cart value again
+                            setQuantityDraftValues(prev => {
+                              const next = { ...prev }
+                              delete next[item.productId]
+                              return next
+                            })
+                          }}
                           onClick={(e) => e.stopPropagation()}
                           className="w-10 h-6 text-center text-xs p-0 quantity-input"
                         />
@@ -1270,7 +1305,7 @@ function SalesPageContent() {
                             }}
                             className="text-xs font-semibold ml-auto whitespace-nowrap text-gray-900 hover:text-blue-600 cursor-pointer"
                           >
-                            KSh {(item.sellingPrice * item.quantity - item.discount).toLocaleString()}
+                            KSh {(item.sellingPrice * item.quantity - item.discount).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                           </button>
                         )}
                         {/* Chevron — only for lot items */}

@@ -90,6 +90,7 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
   const {
     user,
     isLoading: isLoadingAuth,
+    isAuthenticated,
     logout,
     isLoggingOut,
     isCashierMode,
@@ -97,7 +98,7 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
     permissions,
   } = useAuth()
 
-  const { features } = useTenantConfig()
+  const { features, isLoading: isLoadingFeatures } = useTenantConfig(isAuthenticated)
   const { logo, shopName } = useSettings()
 
   const userType = user?.type ?? null
@@ -420,7 +421,7 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
           'flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] py-2',
           collapsed ? 'space-y-1' : 'space-y-1 px-1'
         )}>
-          {!mounted || isLoadingAuth ? (
+          {!mounted || isLoadingAuth || isLoadingFeatures ? (
             <div className="space-y-2 px-2">
               {[...Array(6)].map((_, i) => (
                 <div key={i} className={cn('h-10 bg-[hsl(var(--sidebar-accent))]/20 animate-pulse', collapsed ? 'mx-3' : '')} />

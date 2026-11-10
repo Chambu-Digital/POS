@@ -154,7 +154,8 @@ export async function GET(request: NextRequest) {
     const customers = await models.Customer.find({
       userId: ownerId,
       'ledger.date': { $gte: startOfDay, $lte: endOfDay },
-      'ledger.type': 'payment'
+      'ledger.type': 'payment',
+      'ledger.branchId': branchContext,
     }).lean()
 
     const creditPaymentsReceived: any[] = []
@@ -170,6 +171,9 @@ export async function GET(request: NextRequest) {
         ) {
           // Scope to this staff member's collections if not full-report view
           if (staffScopeId && entry.collectedBy?.toString() !== staffScopeId) continue
+
+          // Scope to this branch
+          if (branchContext && entry.branchId?.toString() !== branchContext.toString()) continue
 
           const paymentAmount = Math.abs(entry.amount)
 
@@ -229,6 +233,7 @@ export async function GET(request: NextRequest) {
       userId: ownerId,
       'ledger.date': { $gte: startOfDay, $lte: endOfDay },
       'ledger.type': { $in: ['deposit', 'deposit_refund'] },
+      'ledger.branchId': branchContext,
     }).lean()
 
     const depositsReceived: any[] = []
@@ -253,6 +258,9 @@ export async function GET(request: NextRequest) {
         if (entry.type === 'deposit' && entry.amount > 0) {
           // Scope to this staff member's collections if not full-report view
           if (staffScopeId && entry.collectedBy?.toString() !== staffScopeId) continue
+
+          // Scope to this branch
+          if (branchContext && entry.branchId?.toString() !== branchContext.toString()) continue
 
           const methodName = resolveLedgerMethodName(entry)
           const collectorId = entry.collectedBy?.toString() || 'owner'
@@ -280,6 +288,9 @@ export async function GET(request: NextRequest) {
           // Refunds are outflows; do NOT add to totalsByMethod. Track separately
           // and subtract in netByMethod.
           if (staffScopeId && entry.collectedBy?.toString() !== staffScopeId) continue
+
+          // Scope to this branch
+          if (branchContext && entry.branchId?.toString() !== branchContext.toString()) continue
 
           const methodName = resolveLedgerMethodName(entry)
           const refundAmount = Math.abs(entry.amount)

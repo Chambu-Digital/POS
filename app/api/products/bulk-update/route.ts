@@ -1,5 +1,6 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { canSeeBuyingPrice, buyingPriceForbidden } from '@/lib/buying-price'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
@@ -17,6 +18,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!canSeeBuyingPrice(payload)) return buyingPriceForbidden()
 
     const { models } = await getTenantDB(request)
     const data = await request.json() as { items: BulkUpdateItem[] }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthPayload } from '@/lib/jwt'
 import { getTenantDB } from '@/lib/tenant/get-db'
+import { canSeeBuyingPrice } from '@/lib/buying-price'
 import { getHistoricalInventorySnapshot, getStockMovements, getHistoricalCost } from '@/lib/historical-stock-service'
 
 export async function GET(request: NextRequest) {
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
 
     let reportData: any = {}
     if (reportType === 'sales')     reportData = await generateSalesReport(models, ownerId, new Date(startDate), new Date(endDate))
-    else if (reportType === 'inventory') reportData = await generateInventoryReport(models, ownerId, new Date(startDate), new Date(endDate))
+    else if (reportType === 'inventory') reportData = await generateInventoryReport(models, ownerId, new Date(startDate), new Date(endDate), canSeeBuyingPrice(payload))
     else if (reportType === 'profit')    reportData = await generateProfitReport(models, ownerId, new Date(startDate), new Date(endDate))
     else if (reportType === 'kitchen')   reportData = await generateKitchenReport(models, ownerId, new Date(startDate), new Date(endDate))
     else if (reportType === 'bar')       reportData = await generateBarReport(models, ownerId, new Date(startDate), new Date(endDate))
@@ -146,10 +147,10 @@ async function generateSalesReport(models: any, userId: string, startDate: Date,
   }
 }
 
-async function generateInventoryReport(models: any, userId: string, startDate?: Date, endDate?: Date) {
+async function generateInventoryReport(models: any, userId: string, startDate?: Date, endDate?: Date, showCost = true) {
   // If date provided, use historical calculation
   if (endDate) {
-    return await generateHistoricalInventoryReport(models, userId, endDate)
+    return await generateHistoricalInventoryReport(models, userId, endDate, showCost)
   }
 
   // Otherwise, use current stock
@@ -160,42 +161,39 @@ async function generateInventoryReport(models: any, userId: string, startDate?: 
     (sum, p) => sum + (p.stock * (p.sellingPrice || 0)),
     0
   )
-  const totalStockValueAtCost = products.reduce(
-    (sum, p) => sum + (p.stock * (p.buyingPrice || 0)),
-    0
-  )
-  const estimatedProfit = products.reduce(
-    (sum, p) => sum + (p.stock * ((p.sellingPrice || 0) - (p.buyingPrice || 0))),
-    0
-  )
+  const totalStockValueAtCost = showCost
+    ? products.reduce((sum, p) => sum + (p.stock * (p.buyingPrice || 0)), 0)
+    : undefined
+  const estimatedProfit = showCost
+    ? products.reduce((sum, p) => sum + (p.stock * ((p.sellingPrice || 0) - (p.buyingPrice || 0))), 0)
+    : undefined
   const lowStockItems = products.filter((p) => p.stock < (p.lowStockThreshold || 10)).length
   const outOfStockItems = products.filter((p) => p.stock === 0).length
 
-  // Group by category
+  // Group by category — strip cost fields if not permitted
   const byCategory = products.reduce((acc: any, product) => {
     const cat = product.category || 'Uncategorized'
     if (!acc[cat]) {
-      acc[cat] = { category: cat, count: 0, value: 0, valueAtCost: 0 }
+      acc[cat] = { category: cat, count: 0, value: 0, ...(showCost && { valueAtCost: 0 }) }
     }
     acc[cat].count += 1
     acc[cat].value += product.stock * (product.sellingPrice || 0)
-    acc[cat].valueAtCost += product.stock * (product.buyingPrice || 0)
+    if (showCost) acc[cat].valueAtCost += product.stock * (product.buyingPrice || 0)
     return acc
   }, {})
+
+  // Strip buyingPrice from product details if not permitted
+  const details = showCost ? products : products.map(({ buyingPrice, ...rest }: any) => rest)
+
+  const summary: any = { totalProducts, totalStockValue, lowStockItems, outOfStockItems }
+  if (showCost) { summary.totalStockValueAtCost = totalStockValueAtCost; summary.estimatedProfit = estimatedProfit }
 
   return {
     title: 'Inventory Report',
     description: 'Current inventory status',
     data: {
-      summary: {
-        totalProducts,
-        totalStockValue,
-        totalStockValueAtCost,
-        estimatedProfit,
-        lowStockItems,
-        outOfStockItems,
-      },
-      details: products,
+      summary,
+      details,
       charts: {
         byCategory: Object.values(byCategory),
       },
@@ -203,18 +201,18 @@ async function generateInventoryReport(models: any, userId: string, startDate?: 
   }
 }
 
-async function generateHistoricalInventoryReport(models: any, userId: string, asOfDate: Date) {
+async function generateHistoricalInventoryReport(models: any, userId: string, asOfDate: Date, showCost = true) {
   const snapshot = await getHistoricalInventorySnapshot(models, userId, asOfDate)
 
-  // Group by category
+  // Group by category — strip cost fields if not permitted
   const byCategory = snapshot.products.reduce((acc: any, product) => {
     const cat = product.category || 'Uncategorized'
     if (!acc[cat]) {
-      acc[cat] = { category: cat, count: 0, value: 0, valueAtCost: 0 }
+      acc[cat] = { category: cat, count: 0, value: 0, ...(showCost && { valueAtCost: 0 }) }
     }
     acc[cat].count += 1
     acc[cat].value += product.valueAtRetail
-    acc[cat].valueAtCost += product.valueAtCost
+    if (showCost) acc[cat].valueAtCost += product.valueAtCost
     return acc
   }, {})
 
@@ -227,11 +225,16 @@ async function generateHistoricalInventoryReport(models: any, userId: string, as
     description += ' (No historical data available, showing current stock)'
   }
 
+  // Strip cost fields from summary if not permitted
+  const summary = showCost
+    ? snapshot.summary
+    : (({ totalValueAtCost, estimatedProfit, ...rest }: any) => rest)(snapshot.summary)
+
   return {
     title: `Historical Inventory Report - ${dateStr}`,
     description,
     data: {
-      summary: snapshot.summary,
+      summary,
       details: snapshot.products,
       charts: {
         byCategory: Object.values(byCategory),

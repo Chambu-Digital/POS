@@ -36,8 +36,16 @@ export const productSchema = new mongoose.Schema(
     // When trackLots is true, stock is managed through individual ProductBatch
     // documents rather than a single integer counter.  lotUnit describes what
     // each measurable unit is called (metres, pieces, kg, litres, rolls …).
-    trackLots: { type: Boolean, default: false },
-    lotUnit:   { type: String, default: 'pieces' },  // display label for the quantity unit
+    trackLots:         { type: Boolean, default: false },
+    lotUnit:           { type: String,  default: 'pieces' }, // display label for the base unit
+    // Lot container config — only meaningful when trackLots is true.
+    // lotContainerName: what one container is called (box, carton, roll, pack …)
+    // lotSize:          how many base units fit in one container
+    // lotPrice:         selling price for one whole container
+    // sellingPrice (existing) remains the per-base-unit price — never changed here
+    lotContainerName:  { type: String,  default: '' },
+    lotSize:           { type: Number,  default: 1  }, // base units per container
+    lotPrice:          { type: Number,  default: 0  }, // selling price per whole container
     createdAt:    { type: Date, default: Date.now },
     updatedAt:    { type: Date, default: Date.now },
   },
@@ -290,12 +298,16 @@ export const customerSchema = new mongoose.Schema(
       // Empty string = refunded to original method (no override).
       refundMethodOverride: { type: String, default: '' },
       approvedBy:         { type: mongoose.Schema.Types.ObjectId },   // User/Staff who approved override/refund
-      // ── Cashier attribution (deposit + payment entries) ──────────────────────
-      // Who collected/processed this entry, for per-staff accountability in
-      // the end-of-day report. Used by 'payment' (credit settlement), 'deposit',
-      // 'deposit_use', and 'deposit_refund' ledger types.
+      // ── Staff / branch attribution ────────────────────────────────────────────
+      // Populated on every ledger entry regardless of type.
+      // collectedBy/collectedByType: who processed this entry (debt creation,
+      //   payment collection, deposit receipt, deposit use/refund).
+      // branchId: which branch the entry was recorded at.
+      // These let the end-of-day report scope credit/deposit totals per branch
+      // and give the owner a full "who did what, where" audit trail.
       collectedBy:      { type: mongoose.Schema.Types.ObjectId },
       collectedByType:  { type: String, enum: ['user', 'staff'], default: undefined },
+      branchId:         { type: mongoose.Schema.Types.ObjectId, ref: 'Branch' },
     }],
     createdAt:     { type: Date, default: Date.now },
   },
@@ -304,6 +316,7 @@ export const customerSchema = new mongoose.Schema(
 customerSchema.index({ userId: 1, name: 1 })
 customerSchema.index({ userId: 1, phone: 1 })
 customerSchema.index({ userId: 1, depositBalance: 1 })  // "customers with active prepayments" lookup
+customerSchema.index({ userId: 1, 'ledger.branchId': 1 }) // branch-scoped ledger queries
 
 // ── Category ──────────────────────────────────────────────────────────────────
 export const categorySchema = new mongoose.Schema(

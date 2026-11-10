@@ -46,10 +46,13 @@ export async function reserveInventory(
       throw new Error('Inventory not found for this product')
     }
 
-    const availableStock = inventory.stock - (inventory.reserved || 0)
-    if (availableStock < quantity) {
+    // stock is already net of pending transfers (it was deducted at
+    // transfer creation via the pessimistic lock below). 'reserved' tracks
+    // in-transit amounts for display/audit only — it must NOT be subtracted
+    // from stock here, or available stock is double-counted.
+    if (inventory.stock < quantity) {
       throw new Error(
-        `Insufficient stock to reserve. Available: ${availableStock}, Requested: ${quantity}`
+        `Insufficient stock to reserve. Available: ${inventory.stock}, Requested: ${quantity}`
       )
     }
 
@@ -71,10 +74,11 @@ export async function reserveInventory(
       throw new Error('Inventory not found for this drug')
     }
 
-    const availableStock = inventory.quantityAvailable - (inventory.quantityReserved || 0)
-    if (availableStock < quantity) {
+    // quantityAvailable is already net of pending transfers (deducted at
+    // creation). quantityReserved tracks in-transit amounts for audit only.
+    if (inventory.quantityAvailable < quantity) {
       throw new Error(
-        `Insufficient stock to reserve. Available: ${availableStock}, Requested: ${quantity}`
+        `Insufficient stock to reserve. Available: ${inventory.quantityAvailable}, Requested: ${quantity}`
       )
     }
 
@@ -230,7 +234,7 @@ export async function getAvailableStock(
     })
 
     if (!inventory) return 0
-    return inventory.stock - (inventory.reserved || 0)
+    return inventory.stock
 
   } else if (itemType === 'drug') {
     const inventory = await models.Inventory.findOne({
@@ -240,7 +244,7 @@ export async function getAvailableStock(
     })
 
     if (!inventory) return 0
-    return inventory.quantityAvailable - (inventory.quantityReserved || 0)
+    return inventory.quantityAvailable
   }
 
   return 0

@@ -1,6 +1,7 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { getBranchContext } from '@/lib/branch-context'
+import { canSeeBuyingPrice } from '@/lib/buying-price'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(request: NextRequest) {
@@ -79,7 +80,7 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return NextResponse.json({ items })
+    return NextResponse.json({ items: canSeeBuyingPrice(payload) ? items : items.map(({ buyingPrice, ...rest }) => rest) })
   } catch (error: any) {
     console.error('Retail low stock error:', error)
     return NextResponse.json(

@@ -186,6 +186,7 @@ export async function POST(request: NextRequest) {
       depositId: deposit._id,
       collectedBy: createdBy,
       collectedByType: payload.type === 'staff' ? 'staff' : 'user',
+      branchId: branchContext || undefined,
     })
     await customer.save()
 

@@ -36,9 +36,10 @@ interface BulkEditModalProps {
   onOpenChange: (open: boolean) => void
   products: Product[]
   onSuccess: () => void
+  canSeeCost?: boolean
 }
 
-export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkEditModalProps) {
+export function BulkEditModal({ open, onOpenChange, products, onSuccess, canSeeCost = true }: BulkEditModalProps) {
   const [editRows, setEditRows] = useState<EditRow[]>([])
   const [showConfirm, setShowConfirm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -203,7 +204,7 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
               <div key={change.id} className="border rounded-lg p-3 space-y-2">
                 <p className="font-semibold text-sm">{formatProductName(products.find((p) => p._id === change.id) || { productName: change.productName, category: '', brand: '', variant: '' })}</p>
                 <div className="text-xs space-y-1 text-muted-foreground">
-                  {change.buyingPrice !== undefined && (
+                  {change.buyingPrice !== undefined && canSeeCost && (
                     <p>
                       Buying Price: KSh {(products.find((p) => p._id === change.id)?.buyingPrice ?? 0).toLocaleString()} →{' '}
                       <span className="text-primary font-semibold">
@@ -300,7 +301,7 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
             <thead className="bg-muted sticky top-0 z-10">
               <tr>
                 <th className="text-left px-3 py-2 font-semibold min-w-[200px]">Product Name</th>
-                <th className="text-left px-3 py-2 font-semibold min-w-[120px]">Buying Price</th>
+                {canSeeCost && <th className="text-left px-3 py-2 font-semibold min-w-[120px]">Buying Price</th>}
                 <th className="text-left px-3 py-2 font-semibold min-w-[120px]">Selling Price</th>
                 <th className="text-left px-3 py-2 font-semibold min-w-[120px]">Wholesale</th>
                 <th className="text-left px-3 py-2 font-semibold min-w-[150px]">Barcode</th>
@@ -318,15 +319,17 @@ export function BulkEditModal({ open, onOpenChange, products, onSuccess }: BulkE
                 return (
                   <tr key={row.id} className={`border-t ${isChanged ? 'bg-yellow-50' : ''}`}>
                     <td className="px-3 py-2 font-medium text-xs">{row.productName}</td>
-                    <td className="px-3 py-2">
-                      <Input
-                        type="number"
-                        value={row.buyingPrice}
-                        onChange={(e) => handleFieldChange(row.id, 'buyingPrice', e.target.value ? parseFloat(e.target.value) : '')}
-                        className="h-8 text-xs"
-                        placeholder="0"
-                      />
-                    </td>
+                    {canSeeCost && (
+                      <td className="px-3 py-2">
+                        <Input
+                          type="number"
+                          value={row.buyingPrice}
+                          onChange={(e) => handleFieldChange(row.id, 'buyingPrice', e.target.value ? parseFloat(e.target.value) : '')}
+                          className="h-8 text-xs"
+                          placeholder="0"
+                        />
+                      </td>
+                    )}
                     <td className="px-3 py-2">
                       <Input
                         type="number"

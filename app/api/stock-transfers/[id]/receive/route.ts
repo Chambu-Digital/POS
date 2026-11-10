@@ -14,39 +14,11 @@ export async function PUT(
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    // Only managers of the receiving branch or owners can approve transfers
-    if (payload.type === 'staff') {
-      const { models } = await getTenantDB(request)
-      const branchContext = await getBranchContext(request)
-      
-      // Get the transfer to check destination branch
-      const transfer = await models.StockTransfer.findOne({
-        _id: id,
-        userId: payload.adminId,
-      })
-      
-      if (!transfer) {
-        return NextResponse.json({ error: 'Transfer not found' }, { status: 404 })
-      }
-      
-      // Staff must be a manager of the receiving branch
-      const staff = await models.Staff.findById(payload.userId)
-      const isManagerOfReceivingBranch = staff?.managerOfBranches?.some(
-        (branchId: any) => branchId.toString() === transfer.toBranchId.toString()
-      )
-      
-      if (!isManagerOfReceivingBranch) {
-        return NextResponse.json({ 
-          error: 'Only managers of the receiving branch can approve transfers' 
-        }, { status: 403 })
-      }
-    }
+    // Resolve id first — used in both staff auth check and main query
+    const { id } = await params
 
     const { models } = await getTenantDB(request)
     const ownerId = payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
-    const { id } = await params
-    const body = await request.json()
-    const { items: receivedItems } = body // Array with quantityReceived per item
 
     // Validate current branch context
     const branchContext = await getBranchContext(request)
@@ -57,25 +29,28 @@ export async function PUT(
     // If staff, verify manager status and branch access using JWT token
     if (payload.type === 'staff') {
       if (!canApproveTransfer({ isBranchManager: payload.isBranchManager })) {
-        return NextResponse.json({ 
-          error: 'Only branch managers can approve transfers. Contact your branch manager.' 
+        return NextResponse.json({
+          error: 'Only branch managers can approve transfers. Contact your branch manager.',
         }, { status: 403 })
       }
 
       try {
         validateBranchAccess(
-          { 
-            isBranchManager: payload.isBranchManager, 
+          {
+            isBranchManager: payload.isBranchManager,
             managerOfBranches: payload.managerOfBranches,
-            branchId: payload.branchId 
-          }, 
-          branchContext, 
+            branchId: payload.branchId,
+          },
+          branchContext,
           'receive transfer at this branch'
         )
       } catch (error: any) {
         return NextResponse.json({ error: error.message }, { status: 403 })
       }
     }
+
+    const body = await request.json()
+    const { items: receivedItems } = body // Array with quantityReceived per item
 
     // Find transfer
     const transfer = await models.StockTransfer.findOne({
@@ -86,8 +61,8 @@ export async function PUT(
     })
 
     if (!transfer) {
-      return NextResponse.json({ 
-        error: 'Transfer not found or already processed' 
+      return NextResponse.json({
+        error: 'Transfer not found or already processed',
       }, { status: 404 })
     }
 
@@ -99,7 +74,7 @@ export async function PUT(
       // Process each item
       for (const receivedItem of receivedItems) {
         const transferItem = transfer.items.find(
-          (item: any) => 
+          (item: any) =>
             (item.productId && item.productId.toString() === receivedItem.itemId) ||
             (item.drugId && item.drugId.toString() === receivedItem.itemId)
         )
@@ -119,7 +94,6 @@ export async function PUT(
           }).session(session)
 
           if (!inventory) {
-            // Create inventory record if it doesn't exist
             inventory = await models.ProductInventory.create([{
               userId: ownerId,
               branchId: branchContext,
@@ -129,7 +103,6 @@ export async function PUT(
             }], { session })
             inventory = inventory[0]
 
-            // Create ledger entry for the new inventory
             await models.StockLedger.create([{
               userId: ownerId,
               branchId: branchContext ? new Types.ObjectId(branchContext) : null,
@@ -142,13 +115,11 @@ export async function PUT(
               staffId: payload.type === 'staff' ? payload.userId : undefined,
             }], { session })
           } else {
-            // Update existing inventory
             const previousStock = inventory.stock
             inventory.stock += quantityReceived
             inventory.lastUpdated = new Date()
             await inventory.save({ session })
 
-            // Create ledger entry
             await models.StockLedger.create([{
               userId: ownerId,
               branchId: branchContext ? new Types.ObjectId(branchContext) : null,
@@ -162,8 +133,39 @@ export async function PUT(
             }], { session })
           }
 
+          // ── Lot tracking: create new batches at destination ─────────────
+          // Each entry in lotBreakdown becomes a new ProductBatch at the
+          // receiving branch. Source batches are already decremented on
+          // TRANSFER_OUT — we never move/share batch records across branches.
+          if (transferItem.lotBreakdown && Array.isArray(transferItem.lotBreakdown) && transferItem.lotBreakdown.length > 0) {
+            for (const lotEntry of transferItem.lotBreakdown) {
+              if (!lotEntry.quantity) continue
+              const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '')
+              const rand    = Math.random().toString(36).substring(2, 6).toUpperCase()
+              const lotId   = `LOT-${dateStr}-${rand}`
+              try {
+                await (models as any).ProductBatch.create([{
+                  userId:           ownerId,
+                  branchId:         new Types.ObjectId(branchContext),
+                  productId:        transferItem.productId,
+                  lotId,
+                  lotLabel:         lotEntry.lotLabel || lotId,
+                  supplierLot:      transfer.transferNumber,
+                  quantity:         lotEntry.quantity,
+                  initialQuantity:  lotEntry.quantity,
+                  reservedQuantity: 0,
+                  receivedDate:     new Date(),
+                  status:           'active',
+                  notes:            `Transferred from branch — ${transfer.transferNumber}`,
+                }], { session })
+              } catch (batchErr) {
+                console.error('[stock-transfers/receive] ProductBatch creation failed:', batchErr)
+              }
+            }
+          }
+
         } else if (transferItem.drugId) {
-          // Handle pharmacy drugs - find or create inventory record
+          // Handle pharmacy drugs
           let inventory = await models.Inventory.findOne({
             userId: ownerId,
             branchId: branchContext,
@@ -171,7 +173,6 @@ export async function PUT(
           }).session(session)
 
           if (!inventory) {
-            // Create new inventory record for this branch
             inventory = await models.Inventory.create([{
               userId: ownerId,
               branchId: branchContext,
@@ -181,13 +182,11 @@ export async function PUT(
             }], { session })
             inventory = inventory[0]
           } else {
-            // Update existing inventory
             const previousBalance = inventory.quantityAvailable
             inventory.quantityAvailable += quantityReceived
             inventory.lastStockUpdate = new Date()
             await inventory.save({ session })
 
-            // Create transaction entry
             await models.InventoryTransaction.create([{
               userId: ownerId,
               branchId: branchContext,
@@ -204,6 +203,48 @@ export async function PUT(
           }
         }
 
+        // ── Clear the reservation on the SOURCE branch ───────────────────
+        // Stock was deducted from the source when the transfer was created
+        // (reserveInventory: stock -= qty, reserved += qty). Now that the
+        // transfer is received, the stock is confirmed gone — clear the
+        // 'reserved' marker. For partial receipts, return the unreceived
+        // portion back to available stock.
+        const unreceived = Math.max(0, (transferItem.quantitySent || 0) - quantityReceived)
+
+        if (transferItem.productId) {
+          const sourceInv = await models.ProductInventory.findOne({
+            userId: ownerId,
+            branchId: transfer.fromBranchId,
+            productId: transferItem.productId,
+          }).session(session)
+
+          if (sourceInv) {
+            sourceInv.reserved = Math.max(
+              0,
+              (sourceInv.reserved || 0) - (transferItem.quantitySent || 0),
+            )
+            if (unreceived > 0) sourceInv.stock += unreceived
+            sourceInv.lastUpdated = new Date()
+            await sourceInv.save({ session })
+          }
+        } else if (transferItem.drugId) {
+          const sourceInv = await models.Inventory.findOne({
+            userId: ownerId,
+            branchId: transfer.fromBranchId,
+            drugId: transferItem.drugId,
+          }).session(session)
+
+          if (sourceInv) {
+            sourceInv.quantityReserved = Math.max(
+              0,
+              (sourceInv.quantityReserved || 0) - (transferItem.quantitySent || 0),
+            )
+            if (unreceived > 0) sourceInv.quantityAvailable += unreceived
+            sourceInv.lastStockUpdate = new Date()
+            await sourceInv.save({ session })
+          }
+        }
+
         // Update received quantity in transfer item
         transferItem.quantityReceived = quantityReceived
       }
@@ -214,7 +255,7 @@ export async function PUT(
       transfer.receivedAt = new Date()
       await transfer.save({ session })
 
-      // Create notification for sender
+      // Notify sender
       if (transfer.createdBy) {
         await models.Notification.create([{
           userId: ownerId,
@@ -244,8 +285,8 @@ export async function PUT(
 
   } catch (error: any) {
     console.error('[stock-transfers/receive] PUT error:', error)
-    return NextResponse.json({ 
-      error: error.message || 'Failed to receive transfer' 
+    return NextResponse.json({
+      error: error.message || 'Failed to receive transfer',
     }, { status: 500 })
   }
 }

@@ -1,5 +1,6 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { getBranchContext } from '@/lib/branch-context'
 import { NextRequest, NextResponse } from 'next/server'
 import { Types } from 'mongoose'
 
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { models } = await getTenantDB(request)
     const ownerId =
       payload.type === 'staff' && payload.adminId ? payload.adminId : payload.userId
+    const branchContext = await getBranchContext(request)
     const { id } = await params
 
     if (!Types.ObjectId.isValid(id)) {
@@ -181,6 +183,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         approvedBy: approvedById || undefined,
         collectedBy: refundedBy, // who processed the outflow
         collectedByType: payload.type === 'staff' ? 'staff' : 'user',
+        branchId: branchContext || undefined,
       })
       await customer.save()
     }

@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
@@ -49,6 +49,9 @@ interface Product {
   images?: string[]
   trackLots?: boolean
   lotUnit?: string
+  lotContainerName?: string
+  lotSize?: number
+  lotPrice?: number
 }
 
 interface ProductFormProps {
@@ -90,6 +93,9 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
       images: [],
       trackLots: false,
       lotUnit: 'pieces',
+      lotContainerName: '',
+      lotSize: 1,
+      lotPrice: 0,
     }
   )
 
@@ -215,9 +221,10 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
+    const numericFields = ['buyingPrice', 'sellingPrice', 'wholeSale', 'stock', 'lowStockThreshold', 'lotSize', 'lotPrice']
     setFormData((prev) => ({
       ...prev,
-      [name]: name.includes('Price') || name === 'stock' || name === 'lowStockThreshold' ? parseFloat(value) || 0 : value,
+      [name]: numericFields.includes(name) ? parseFloat(value) || 0 : value,
     }))
   }
 
@@ -493,38 +500,100 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
           </div>
 
           {formData.trackLots && (
-            <div className="space-y-2 pt-2 border-t">
-              <Label htmlFor="lotUnit">Lot Unit of Measure</Label>
-              <div className="flex gap-2 flex-wrap">
-                {['metres', 'pieces', 'kg', 'litres', 'rolls', 'boxes', 'cartons', 'packs'].map((u) => (
-                  <button
-                    key={u}
-                    type="button"
-                    onClick={() => setFormData((prev) => ({ ...prev, lotUnit: u }))}
-                    className={cn(
-                      'px-3 py-1 rounded-full text-xs border transition-all',
-                      formData.lotUnit === u
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'bg-background border-input hover:border-primary'
+            <div className="space-y-4 pt-2 border-t">
+              {/* ── Container / lot pricing config ─────────────────────── */}
+              <div className="pt-3 border-t space-y-3">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Container Pricing
+                </Label>
+                <p className="text-xs text-muted-foreground -mt-1">
+                  Define the container and base unit (e.g. roll of 90 metres, box of 100 pieces).
+                </p>
+                {/* Row 1: container name + base unit */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="lotContainerName" className="text-xs">Container name</Label>
+                    <Input
+                      id="lotContainerName"
+                      name="lotContainerName"
+                      value={formData.lotContainerName ?? ''}
+                      onChange={handleChange}
+                      placeholder="e.g. roll, box, carton"
+                      disabled={loading}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="lotUnit" className="text-xs">Base unit (sold individually)</Label>
+                    <Input
+                      id="lotUnit"
+                      name="lotUnit"
+                      value={formData.lotUnit ?? ''}
+                      onChange={handleChange}
+                      placeholder="e.g. metres, pieces, kg"
+                      disabled={loading}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                </div>
+                {/* Row 2: qty per container + price per base unit + price per container */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="lotSize" className="text-xs">
+                      {formData.lotUnit || 'units'} per {formData.lotContainerName || 'container'}
+                    </Label>
+                    <Input
+                      id="lotSize"
+                      name="lotSize"
+                      type="number"
+                      min="1"
+                      step="any"
+                      value={formData.lotSize ?? 1}
+                      onChange={handleChange}
+                      onFocus={(e) => e.target.select()}
+                      disabled={loading}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="sellingPrice" className="text-xs">
+                      Price per {formData.lotUnit || 'unit'}
+                    </Label>
+                    <Input
+                      id="sellingPrice"
+                      name="sellingPrice"
+                      type="number"
+                      step="0.01"
+                      value={formData.sellingPrice || ''}
+                      onChange={handleChange}
+                      onFocus={(e) => e.target.select()}
+                      disabled={loading}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="lotPrice" className="text-xs">
+                      Price per {formData.lotContainerName || 'container'}
+                    </Label>
+                    <Input
+                      id="lotPrice"
+                      name="lotPrice"
+                      type="number"
+                      step="0.01"
+                      value={formData.lotPrice ?? 0}
+                      onChange={handleChange}
+                      onFocus={(e) => e.target.select()}
+                      disabled={loading}
+                      className="h-8 text-sm"
+                    />
+                    {(formData.lotSize ?? 1) > 1 && formData.sellingPrice > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Full: {((formData.lotSize ?? 1) * formData.sellingPrice).toFixed(2)}
+                      </p>
                     )}
-                    disabled={loading}
-                  >
-                    {u}
-                  </button>
-                ))}
+                  </div>
+                </div>
               </div>
-              <Input
-                id="lotUnit"
-                name="lotUnit"
-                value={formData.lotUnit ?? ''}
-                onChange={handleChange}
-                placeholder="Or type a custom unit (e.g. sheets)"
-                disabled={loading}
-                className="mt-2"
-              />
-              <p className="text-xs text-muted-foreground">
-                This label appears next to quantities throughout the app (e.g. &quot;70 metres&quot;).
-              </p>
             </div>
           )}
         </div>
@@ -641,20 +710,29 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="buyingPrice">Buying Price *</Label>
+          <Label htmlFor="buyingPrice">
+            {formData.trackLots && (formData.lotSize ?? 1) > 1 && formData.lotContainerName
+              ? `Buying Price per ${formData.lotContainerName} *`
+              : 'Buying Price *'}
+          </Label>
           <Input
             id="buyingPrice"
             name="buyingPrice"
             type="number"
             step="0.01"
-            value={formData.buyingPrice || ''}
-            onChange={handleChange}
+            value={formData.trackLots && (formData.lotSize ?? 1) > 1 && formData.lotContainerName
+              ? (formData.buyingPrice * (formData.lotSize ?? 1)) || ''
+              : formData.buyingPrice || ''}
+            onChange={formData.trackLots && (formData.lotSize ?? 1) > 1 && formData.lotContainerName
+              ? (e) => setFormData(prev => ({ ...prev, buyingPrice: (parseFloat(e.target.value) || 0) / (formData.lotSize ?? 1) }))
+              : handleChange}
             onFocus={(e) => e.target.select()}
             required
             disabled={loading}
           />
         </div>
 
+        {!formData.trackLots && (
         <div className="space-y-2">
           <Label htmlFor="sellingPrice">Selling Price *</Label>
           <Input
@@ -669,6 +747,7 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             disabled={loading}
           />
         </div>
+        )}
 
         <div className="space-y-2">
           <Label htmlFor="wholeSale">Wholesale Price</Label>

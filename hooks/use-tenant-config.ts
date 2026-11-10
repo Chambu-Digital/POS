@@ -6,7 +6,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { normaliseFeatures, DEFAULT_MODULE_FEATURES } from '@/lib/modules'
+import { normaliseFeatures } from '@/lib/modules'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -35,7 +35,7 @@ async function fetchTenantConfig(): Promise<TenantConfig> {
 
 // ── Hook ───────────────────────────────────────────────────────────────────
 
-export function useTenantConfig() {
+export function useTenantConfig(isAuthenticated: boolean = false) {
   const {
     data,
     isLoading,
@@ -47,11 +47,11 @@ export function useTenantConfig() {
     staleTime: 10 * 60 * 1000, // 10 minutes (features rarely change)
     gcTime: 30 * 60 * 1000, // 30 minutes
     retry: 2,
-    // Fallback to default features if no data
-    placeholderData: { features: DEFAULT_MODULE_FEATURES },
+    // Only fetch when a user is authenticated — no auth means no features
+    enabled: isAuthenticated,
   })
   
-  // Normalize features to ensure all keys exist
+  // Normalize features — empty until API responds
   const features = normaliseFeatures(data?.features ?? {})
   
   return {

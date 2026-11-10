@@ -1,5 +1,6 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
+import { canSeeBuyingPrice, buyingPriceForbidden } from '@/lib/buying-price'
 import { NextRequest, NextResponse } from 'next/server'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
@@ -8,6 +9,7 @@ export async function POST(request: NextRequest) {
   try {
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!canSeeBuyingPrice(payload)) return buyingPriceForbidden()
 
     const { models } = await getTenantDB(request)
     const formData = await request.formData()

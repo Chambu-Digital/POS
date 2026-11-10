@@ -72,16 +72,18 @@ export interface LedgerResult {
  * Walk a list of customers (already filtered to today's date range by the
  * caller's MongoDB query) and extract all cash-movement ledger entries.
  *
- * @param customers   Array of lean Customer documents (must include `.ledger`)
- * @param startOfDay  Start of the reporting period
- * @param endOfDay    End of the reporting period
+ * @param customers     Array of lean Customer documents (must include `.ledger`)
+ * @param startOfDay    Start of the reporting period
+ * @param endOfDay      End of the reporting period
  * @param staffScopeId  When set, only include entries collected by this staff member
+ * @param branchScopeId When set, only include entries recorded at this branch
  */
 export function processLedgerEntries(
   customers: any[],
   startOfDay: Date,
   endOfDay: Date,
-  staffScopeId?: string | null
+  staffScopeId?: string | null,
+  branchScopeId?: string | null
 ): LedgerResult {
   const creditPayments: CreditPayment[] = []
   const depositReceipts: DepositReceipt[] = []
@@ -97,6 +99,9 @@ export function processLedgerEntries(
 
       // Staff scoping — only entries collected by this staff member
       if (staffScopeId && entry.collectedBy?.toString() !== staffScopeId) continue
+
+      // Branch scoping — only entries recorded at this branch
+      if (branchScopeId && entry.branchId?.toString() !== branchScopeId) continue
 
       if (entry.type === 'payment' && entry.amount < 0) {
         // Credit settlement — customer paid off (part of) their debt.

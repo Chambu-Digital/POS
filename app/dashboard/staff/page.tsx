@@ -761,8 +761,12 @@ export default function StaffPage() {
             {/* Business Modules Section */}
             {MODULES.filter(m => m.key !== 'core').map(mod => {
               const ModIcon = mod.icon
-              // Filter module features by tenant enablement
-              const visibleFeatures = mod.features.filter(f => tenantFeatures[f.key] === true)
+              // Filter module features by tenant enablement.
+              // Exception: pos.buying-price is a data-access permission, not a page
+              // toggle — always show it so admins can grant/revoke cost visibility.
+              const visibleFeatures = mod.features.filter(f =>
+                tenantFeatures[f.key] === true || f.key === 'pos.buying-price'
+              )
               // Skip module if no features are enabled for tenant
               if (visibleFeatures.length === 0) return null
               

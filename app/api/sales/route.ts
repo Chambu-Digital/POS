@@ -444,6 +444,9 @@ export async function POST(request: NextRequest) {
         balance: customer.creditBalance,
         saleId: null, // Will be updated after sale creation
         note: `Sale ${orderNumber} - Unpaid balance`,
+        collectedBy: new Types.ObjectId(payload.userId),
+        collectedByType: payload.type === 'staff' ? 'staff' : 'user',
+        branchId: branchContext ? new Types.ObjectId(branchContext) : undefined,
       })
       await customer.save()
       customerName = customer.name
@@ -583,6 +586,7 @@ export async function POST(request: NextRequest) {
             // No paymentMethod — this is an internal transfer, not new cash.
             collectedBy: cashierId,
             collectedByType: payload.type === 'staff' ? 'staff' : 'user',
+            branchId: branchContext ? new Types.ObjectId(branchContext) : undefined,
           })
         }
         depositDrawnTotal += cappedDraw

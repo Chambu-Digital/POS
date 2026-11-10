@@ -1,6 +1,7 @@
 import { getTenantDB } from '@/lib/tenant/get-db'
 import { getAuthPayload } from '@/lib/jwt'
 import { getBranchContext } from '@/lib/branch-context'
+import { canSeeBuyingPrice, buyingPriceForbidden, stripBuyingPrice } from '@/lib/buying-price'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(request: NextRequest) {
@@ -55,12 +56,12 @@ export async function GET(request: NextRequest) {
         product.reserved = inventory?.reserved || 0
       })
 
-      return NextResponse.json({ products })
+      return NextResponse.json({ products: canSeeBuyingPrice(payload) ? products : stripBuyingPrice(products) })
     }
 
     // No branch context: return all products (catalog view for owner)
     const products = await models.Product.find(query).sort({ createdAt: -1 }).lean()
-    return NextResponse.json({ products })
+    return NextResponse.json({ products: canSeeBuyingPrice(payload) ? products : stripBuyingPrice(products) })
   } catch (error) {
     console.error('[products] GET error:', error)
     return NextResponse.json({ error: 'Failed to fetch products' }, { status: 500 })
@@ -71,6 +72,7 @@ export async function POST(request: NextRequest) {
   try {
     const payload = await getAuthPayload()
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!canSeeBuyingPrice(payload)) return buyingPriceForbidden()
 
     const { models } = await getTenantDB(request)
     const data = await request.json()

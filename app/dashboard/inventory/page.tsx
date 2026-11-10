@@ -15,9 +15,15 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Upload, Download, Trash2, Edit2, Search, FolderTree, ArrowLeftRight, PackageOpen, Layers } from 'lucide-react'
+import { Plus, Upload, Download, Trash2, Edit2, Search, FolderTree, ArrowLeftRight, PackageOpen, Layers, Settings2, ChevronDown, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { PermissionGuard } from '@/components/auth/permission-guard'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { ProductForm } from '@/components/inventory/product-form'
 import { BatchProductForm } from '@/components/inventory/batch-product-form'
 import { ImportModal } from '@/components/inventory/import-modal'
@@ -27,7 +33,9 @@ import { StockCountModal } from '@/components/inventory/stock-count-modal'
 import { CreateProductTransferModal } from '@/components/stock-transfers/create-product-transfer-modal'
 import { ImportProductsModal } from '@/components/products/import-products-modal'
 import { BulkEditModal } from '@/components/inventory/bulk-edit-modal'
+import { LotCreatorModal } from '@/components/inventory/lot-creator-modal'
 import { ProductImage } from '@/components/ui/product-image'
+import { useAuth } from '@/hooks/use-auth'
 import { formatCurrency } from '@/lib/currency'
 
 interface Product {
@@ -41,6 +49,9 @@ interface Product {
   images?: string[]
   trackLots?: boolean
   lotUnit?: string
+  lotContainerName?: string
+  lotSize?: number
+  lotPrice?: number
 }
 
 export default function InventoryPage() {
@@ -52,6 +63,9 @@ export default function InventoryPage() {
 }
 
 function InventoryPageContent() {
+  const { user, permissions } = useAuth()
+  const canSeeCost = user?.type === 'user' || permissions?.['pos.buying-price'] === true
+
   const [products, setProducts] = useState<Product[]>([])
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
@@ -67,6 +81,7 @@ function InventoryPageContent() {
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false)
   const [isImportProductsOpen, setIsImportProductsOpen] = useState(false)
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false)
+  const [isLotCreatorOpen, setIsLotCreatorOpen] = useState(false)
   const [currency, setCurrency] = useState('KSh')
 
   useEffect(() => {
@@ -184,6 +199,169 @@ function InventoryPageContent() {
     toast.success(`Exported ${products.length} products`)
   }
 
+  function handleDownloadPDF() {
+    const shopName = (user as any)?.shopName || 'Stock Report'
+    const dateStr = new Date().toLocaleDateString('en-KE', { day: '2-digit', month: 'long', year: 'numeric' })
+
+    // Build product name from available parts — same logic as the sales page
+    function formatName(p: Product): string {
+      return [
+        (p as any).variant,
+        (p as any).brand,
+        p.productName,
+      ].filter(Boolean).join(' ')
+    }
+
+    const rows = products.map((p, i) => `
+      <tr class="${i % 2 === 0 ? 'row-even' : 'row-odd'}">
+        <td class="col-num">${i + 1}</td>
+        <td class="col-name">${formatName(p)}</td>
+        <td class="col-num">${p.stock ?? 0}</td>
+        <td class="col-num">${(p.sellingPrice ?? 0).toLocaleString()}</td>
+        <td class="col-num">${((p as any).wholeSale ?? 0).toLocaleString()}</td>
+      </tr>
+    `).join('')
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Stock Report — ${shopName}</title>
+  <style>
+    @page { size: A4 portrait; margin: 1.5cm 1.8cm; }
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11px;
+      color: #111;
+      background: #fff;
+    }
+
+    /* ── Header ─────────────────────────────────────────── */
+    .doc-header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      padding-bottom: 10px;
+      border-bottom: 3px solid #059669;
+      margin-bottom: 20px;
+    }
+    .doc-header .left .shop-name {
+      font-size: 22px;
+      font-weight: 800;
+      color: #059669;
+      letter-spacing: -0.5px;
+    }
+    .doc-header .left .doc-title {
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: 2px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .doc-header .right {
+      text-align: right;
+      font-size: 11px;
+      color: #6b7280;
+      line-height: 1.6;
+    }
+    .doc-header .right .date-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── Table ──────────────────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    thead tr {
+      background: #059669;
+      color: #fff;
+    }
+    thead th {
+      padding: 8px 10px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    thead th.col-num { text-align: right; }
+    thead th.col-name { text-align: left; }
+
+    tbody tr td {
+      padding: 7px 10px;
+      vertical-align: middle;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .row-even { background: #fff; }
+    .row-odd  { background: #f0fdf4; }
+
+    .col-num  { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .col-name { text-align: left; }
+
+    /* ── Footer ─────────────────────────────────────────── */
+    .doc-footer {
+      margin-top: 24px;
+      padding-top: 8px;
+      border-top: 1px solid #d1fae5;
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: #9ca3af;
+    }
+  </style>
+</head>
+<body>
+  <div class="doc-header">
+    <div class="left">
+      <div class="shop-name">${shopName}</div>
+      <div class="doc-title">Stock Report</div>
+    </div>
+    <div class="right">
+      <div class="date-label">Generated on</div>
+      <div><strong>${dateStr}</strong></div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="col-num">#</th>
+        <th class="col-name">Product Name</th>
+        <th class="col-num">Stock</th>
+        <th class="col-num">Selling Price (${currency})</th>
+        <th class="col-num">Wholesale (${currency})</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows}
+    </tbody>
+  </table>
+
+  <div class="doc-footer">
+    <span>${products.length} product${products.length !== 1 ? 's' : ''}</span>
+    <span>Powered by Chambu Digital</span>
+  </div>
+</body>
+</html>`
+
+    const printWindow = window.open('', '', 'width=900,height=700')
+    if (printWindow) {
+      printWindow.document.write(html)
+      printWindow.document.close()
+      printWindow.focus()
+      printWindow.onafterprint = () => printWindow.close()
+      setTimeout(() => { printWindow.print() }, 300)
+    }
+  }
+
   const totalStock = products.reduce((sum, p) => sum + p.stock, 0)
   const stockValue = products.reduce((sum, p) => sum + (p.stock * p.sellingPrice), 0)
   const stockValueAtCost = products.reduce((sum, p) => sum + (p.stock * p.buyingPrice), 0)
@@ -206,10 +384,12 @@ function InventoryPageContent() {
             <div>
               <div className="text-2xl font-bold">{products.length}</div>
             </div>
-            <div>
-              <CardTitle className="text-sm font-medium">Estimated Profit</CardTitle>
-              <div className="text-2xl font-bold text-green-600 mt-2">{formatCurrency(estimatedProfit, currency, false)}</div>
-            </div>
+            {canSeeCost && (
+              <div>
+                <CardTitle className="text-sm font-medium">Estimated Profit</CardTitle>
+                <div className="text-2xl font-bold text-green-600 mt-2">{formatCurrency(estimatedProfit, currency, false)}</div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -221,10 +401,12 @@ function InventoryPageContent() {
             <div>
               <div className="text-2xl font-bold">{totalStock.toLocaleString()}</div>
             </div>
-            <div>
-              <CardTitle className="text-sm font-medium">Stock Value At Cost</CardTitle>
-              <div className="text-2xl font-bold text-primary mt-2">{formatCurrency(stockValueAtCost, currency, false)}</div>
-            </div>
+            {canSeeCost && (
+              <div>
+                <CardTitle className="text-sm font-medium">Stock Value At Cost</CardTitle>
+                <div className="text-2xl font-bold text-primary mt-2">{formatCurrency(stockValueAtCost, currency, false)}</div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -291,14 +473,25 @@ function InventoryPageContent() {
             <Upload size={16} className="mr-2" />
             Import Items
           </Button>
-          <Button
-            onClick={handleDownloadStock}
-            variant="outline"
-            size="sm"
-          >
-            <Download size={16} className="mr-2" />
-            Download Stock
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Download size={16} className="mr-2" />
+                Download Stock
+                <ChevronDown size={14} className="ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleDownloadStock}>
+                <Download size={14} className="mr-2" />
+                Download CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleDownloadPDF}>
+                <FileText size={14} className="mr-2" />
+                Download PDF
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             onClick={() => setIsCategoryManagerOpen(true)}
             variant="outline"
@@ -371,7 +564,7 @@ function InventoryPageContent() {
                       <div className="text-xs text-muted-foreground flex items-center gap-1">
                         Stock
                         {product.trackLots && (
-                          <Layers size={10} className="text-blue-500" title="Lot tracked" />
+                          <span title="Lot tracked"><Layers size={10} className="text-blue-500" /></span>
                         )}
                       </div>
                       <div className={`font-bold ${stockColor}`}>
@@ -384,13 +577,33 @@ function InventoryPageContent() {
 
                     {/* Prices */}
                     <div className="flex gap-4 flex-wrap text-sm">
+                      {canSeeCost && (
+                        <div className="min-w-[90px]">
+                          <div className="text-xs text-muted-foreground">
+                            Buy{product.trackLots && (product.lotSize ?? 1) > 1 && product.lotContainerName ? `/${product.lotContainerName}` : ''}
+                          </div>
+                          <div className="font-semibold">
+                            {formatCurrency(
+                              product.trackLots && (product.lotSize ?? 1) > 1 && product.lotContainerName
+                                ? (product.buyingPrice || 0) * (product.lotSize || 1)
+                                : product.buyingPrice || 0,
+                              currency
+                            )}
+                          </div>
+                        </div>
+                      )}
                       <div className="min-w-[90px]">
-                        <div className="text-xs text-muted-foreground">Buy</div>
-                        <div className="font-semibold">{formatCurrency(product.buyingPrice || 0, currency)}</div>
-                      </div>
-                      <div className="min-w-[90px]">
-                        <div className="text-xs text-muted-foreground">Sell</div>
-                        <div className="font-semibold text-primary">{formatCurrency(product.sellingPrice || 0, currency)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Sell{product.trackLots && (product.lotSize ?? 1) > 1 && product.lotContainerName ? `/${product.lotContainerName}` : ''}
+                        </div>
+                        <div className="font-semibold text-primary">
+                          {formatCurrency(
+                            product.trackLots && (product.lotSize ?? 1) > 1 && product.lotContainerName
+                              ? (product.lotPrice || (product.sellingPrice || 0) * (product.lotSize || 1))
+                              : product.sellingPrice || 0,
+                            currency
+                          )}
+                        </div>
                       </div>
                       {(product as any).wholeSale > 0 && (
                         <div className="min-w-[90px]">
@@ -411,6 +624,21 @@ function InventoryPageContent() {
                       className="flex gap-1.5 ml-auto"
                       onClick={(e) => e.stopPropagation()}
                     >
+                      {product.trackLots && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 px-2 text-blue-600 hover:bg-blue-50"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedProduct(product)
+                            setIsLotCreatorOpen(true)
+                          }}
+                          title="Manage lots"
+                        >
+                          <Settings2 size={14} />
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         variant="ghost"
@@ -579,21 +807,45 @@ function InventoryPageContent() {
                       </p>
                     </div>
                     <div>
-                      <Label className="text-muted-foreground">Buying Price</Label>
-                      <p className="text-lg font-semibold">{formatCurrency(selectedProduct.buyingPrice, currency)}</p>
+                      <Label className="text-muted-foreground">
+                        {selectedProduct.trackLots && (selectedProduct.lotSize ?? 1) > 1 && selectedProduct.lotContainerName
+                          ? `Buying Price per ${selectedProduct.lotContainerName}`
+                          : 'Buying Price'}
+                      </Label>
+                      <p className="text-lg font-semibold">{canSeeCost ? formatCurrency(
+                        selectedProduct.trackLots && (selectedProduct.lotSize ?? 1) > 1 && selectedProduct.lotContainerName
+                          ? selectedProduct.buyingPrice * (selectedProduct.lotSize ?? 1)
+                          : selectedProduct.buyingPrice,
+                        currency) : '—'}</p>
                     </div>
                     <div>
-                      <Label className="text-muted-foreground">Selling Price</Label>
-                      <p className="text-lg font-semibold">{formatCurrency(selectedProduct.sellingPrice, currency)}</p>
+                      <Label className="text-muted-foreground">
+                        {selectedProduct.trackLots && (selectedProduct.lotSize ?? 1) > 1 && selectedProduct.lotContainerName
+                          ? `Selling Price per ${selectedProduct.lotContainerName}`
+                          : 'Selling Price'}
+                      </Label>
+                      <p className="text-lg font-semibold">{formatCurrency(
+                        selectedProduct.trackLots && (selectedProduct.lotSize ?? 1) > 1 && selectedProduct.lotContainerName
+                          ? (selectedProduct.lotPrice || selectedProduct.sellingPrice * (selectedProduct.lotSize ?? 1))
+                          : selectedProduct.sellingPrice,
+                        currency)}</p>
                     </div>
                     <div>
                       <Label className="text-muted-foreground">Wholesale Price</Label>
                       <p className="text-lg font-semibold">{formatCurrency((selectedProduct as any).wholeSale || 0, currency)}</p>
                     </div>
                     <div>
-                      <Label className="text-muted-foreground">Profit Margin</Label>
+                      <Label className="text-muted-foreground">
+                        {selectedProduct.trackLots && (selectedProduct.lotSize ?? 1) > 1 && selectedProduct.lotContainerName
+                          ? `Profit per ${selectedProduct.lotContainerName}`
+                          : 'Profit Margin'}
+                      </Label>
                       <p className="text-lg font-semibold text-green-600">
-                        {formatCurrency(selectedProduct.sellingPrice - selectedProduct.buyingPrice, currency)}
+                        {canSeeCost ? formatCurrency(
+                          selectedProduct.trackLots && (selectedProduct.lotSize ?? 1) > 1 && selectedProduct.lotContainerName
+                            ? (selectedProduct.sellingPrice - selectedProduct.buyingPrice) * (selectedProduct.lotSize ?? 1)
+                            : selectedProduct.sellingPrice - selectedProduct.buyingPrice,
+                          currency) : '—'}
                       </p>
                     </div>
                     {selectedProduct.trackLots && (
@@ -702,8 +954,24 @@ function InventoryPageContent() {
         open={isBulkEditOpen}
         onOpenChange={setIsBulkEditOpen}
         products={filteredProducts}
+        canSeeCost={canSeeCost}
         onSuccess={() => {
           setIsBulkEditOpen(false)
+          fetchProducts()
+        }}
+      />
+
+      {/* Lot Creator Modal */}
+      <LotCreatorModal
+        open={isLotCreatorOpen}
+        product={selectedProduct}
+        onClose={() => {
+          setIsLotCreatorOpen(false)
+          setSelectedProduct(null)
+        }}
+        onSaved={() => {
+          setIsLotCreatorOpen(false)
+          setSelectedProduct(null)
           fetchProducts()
         }}
       />
