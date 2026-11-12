@@ -524,7 +524,12 @@ function SalesPageContent() {
   function addToCartWithLots(item: CartItem) {
     setLotPickerProduct(null)
     setCart(prevCart => {
-      const existingIdx = prevCart.findIndex(c => c.productId === item.productId)
+      // Only merge with an existing item if it has the same productId AND the
+      // same sell mode (both boxes or both pieces). Mixed modes go on separate rows
+      // to avoid quantity/price corruption.
+      const existingIdx = prevCart.findIndex(
+        c => c.productId === item.productId && !!c.soldInBoxes === !!item.soldInBoxes
+      )
       if (existingIdx !== -1) {
         // Merge: add quantities, merge lot breakdowns
         return prevCart.map((c, i) => {

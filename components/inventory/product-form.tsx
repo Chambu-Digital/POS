@@ -75,7 +75,16 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
   const [batches, setBatches]         = useState<Array<{ _id: string; lotId: string; lotLabel: string; quantity: number; initialQuantity: number; status: string; receivedDate: string }>>([])
   const [batchesLoading, setBatchesLoading] = useState(false)
   const [formData, setFormData] = useState<Product>(
-    product || {
+    product
+      ? {
+          ...product,
+          // If lotPrice was never explicitly set (0), seed it from the computed
+          // value (sellingPrice × lotSize) so the edit form pre-fills correctly.
+          lotPrice: (!product.lotPrice || product.lotPrice === 0) && (product.lotSize ?? 1) > 1 && product.sellingPrice > 0
+            ? product.sellingPrice * (product.lotSize ?? 1)
+            : (product.lotPrice ?? 0),
+        }
+      : {
       productName: '',
       category: '',
       supplierId: '',
@@ -253,6 +262,9 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
       }
 
       toast.success(product ? 'Product updated' : 'Product created')
+      // Bust the sales page session cache so the updated product data
+      // (including lotPrice, lotSize etc.) is fetched fresh on next visit.
+      try { sessionStorage.removeItem('sessionProducts') } catch {}
       onSuccess()
     } catch (error) {
       toast.error('Error saving product')

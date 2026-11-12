@@ -25,6 +25,10 @@ interface CartItem {
   quantity: number
   discount: number
   lotBreakdown?: Array<{ batchId: string; lotLabel: string; quantity: number }>
+  // box-mode fields
+  soldInBoxes?: boolean
+  boxSize?: number
+  boxUnit?: string
 }
 
 interface Customer {
@@ -621,6 +625,11 @@ function PaymentPageContent() {
           discount:     item.discount,
           // lot breakdown — API uses this to decrement individual batches
           ...(item.lotBreakdown && { lotBreakdown: item.lotBreakdown }),
+          // box-mode fields — API uses these for aggregate stock deduction
+          ...(item.soldInBoxes && {
+            soldInBoxes: true,
+            boxSize: item.boxSize,
+          }),
         })),
         subtotal,
         discount: cartDiscount,
@@ -684,6 +693,8 @@ function PaymentPageContent() {
             price: item.sellingPrice,
             discount: item.discount,
             total: item.sellingPrice * item.quantity - item.discount,
+            soldInBoxes: item.soldInBoxes,
+            boxUnit: item.boxUnit,
           })),
           subtotal,
           discount: cartDiscount,
@@ -760,7 +771,13 @@ function PaymentPageContent() {
         // The sales page reads from IndexedDB on load, so the next page load
         // will reflect the correct stock without any further action here.
         await deductCachedStock(
-          cart.map(item => ({ productId: item.productId, quantity: item.quantity }))
+          cart.map(item => ({
+            productId: item.productId,
+            // Convert boxes → base units so the IndexedDB cache stays accurate
+            quantity: item.soldInBoxes && item.boxSize && item.boxSize > 1
+              ? Math.round(item.quantity * item.boxSize)
+              : item.quantity,
+          }))
         ).catch(() => {})
 
         setLastSale({
@@ -768,6 +785,7 @@ function PaymentPageContent() {
             productName: item.productName, brand: item.brand, model: item.model,
             variant: item.variant, quantity: item.quantity, price: item.sellingPrice,
             discount: item.discount, total: item.sellingPrice * item.quantity - item.discount,
+            soldInBoxes: item.soldInBoxes, boxUnit: item.boxUnit,
           })),
           subtotal, discount: cartDiscount, total: Math.max(0, chargeTotal),
           paymentMethod: 'offline',

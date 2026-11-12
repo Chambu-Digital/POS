@@ -113,8 +113,8 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
   // ── Visibility helpers ────────────────────────────────────────────────────
 
   function canSeeFeature(f: ModuleFeature): boolean {
+    if (userType === null) return false
     if (userType === 'user') return true
-    if (userType === null) return !f.adminOnly
     if (isCashierMode) {
       return allowedRoutes.some(r => f.href === r || f.href.startsWith(r + '/'))
     }
@@ -123,8 +123,8 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
   }
 
   function canSeeStatic(item: StaticItem): boolean {
+    if (userType === null) return false
     if (userType === 'user') return true
-    if (userType === null) return !item.adminOnly
     if (userType === 'staff') {
       if (isCashierMode) {
         return allowedRoutes.some(r => item.href === r || item.href.startsWith(r + '/'))
@@ -427,6 +427,10 @@ export function Sidebar({ collapsed, onCollapsedChange }: SidebarProps) {
                 <div key={i} className={cn('h-10 bg-[hsl(var(--sidebar-accent))]/20 animate-pulse', collapsed ? 'mx-3' : '')} />
               ))}
             </div>
+          ) : !isAuthenticated || isLoggingOut ? (
+            // Not authenticated or actively logging out — render nothing to prevent
+            // the full module list flashing before the redirect fires
+            null
           ) : (
             <>
               {STATIC_TOP.filter(canSeeStatic).map(renderNavItem)}

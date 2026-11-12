@@ -13,6 +13,9 @@ interface ReceiptItem {
   discount: number     // 0 for rentals
   total: number
   rateType?: string    // e.g. 'hourly', 'daily' — rentals only
+  // Box-mode fields — when item was sold in containers rather than base units
+  soldInBoxes?: boolean
+  boxUnit?: string     // e.g. "box", "carton"
   // Return tracking
   quantityReturned?: number
   returnCondition?: 'resellable' | 'damaged'
@@ -311,7 +314,7 @@ export const Receipt = forwardRef<ReceiptRef, ReceiptProps>(({
               )}
               {/* qty × unit price / rate */}
               <div className="item-meta">
-                {item.quantity} × {money(item.price)}{isRental ? rateLabel(item.rateType) : ''}
+                {item.quantity}{item.soldInBoxes && item.boxUnit ? ` ${item.boxUnit}${item.quantity !== 1 ? 's' : ''}` : ''} × {money(item.price)}{isRental ? rateLabel(item.rateType) : ''}
               </div>
               {/* return condition note */}
               {hasReturns && (

@@ -242,8 +242,8 @@ export async function POST(request: NextRequest) {
     console.log('[login] ✓ Login successful as', winner.type, 'for:', email)
 
     if (winner.type === 'user') {
-      winner.record.lastLogin = new Date()
-      await winner.record.save()
+      // Fire-and-forget — don't block the response for a non-critical timestamp update
+      winner.record.updateOne({ lastLogin: new Date() }).exec().catch(() => {})
     }
 
     const tokenStart = Date.now()

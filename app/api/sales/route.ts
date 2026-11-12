@@ -340,6 +340,13 @@ export async function POST(request: NextRequest) {
         let previousStock = 0
         let newStock = 0
 
+        // When sold in box mode, item.quantity is the number of boxes (may be
+        // fractional, e.g. 0.5).  Convert to base units for all stock counters.
+        // lotBreakdown entries already carry base units so they need no adjustment.
+        const baseQty = item.soldInBoxes && item.boxSize && item.boxSize > 1
+          ? Math.round(item.quantity * item.boxSize)
+          : item.quantity
+
         // Multi-branch: update ProductInventory (branch-specific stock)
         if (branchContext) {
           const inventory = await models.ProductInventory.findOne({
@@ -350,7 +357,7 @@ export async function POST(request: NextRequest) {
 
           if (inventory) {
             previousStock          = inventory.stock ?? 0
-            newStock               = Math.max(0, previousStock - item.quantity)
+            newStock               = Math.max(0, previousStock - baseQty)
             inventory.stock        = newStock
             inventory.lastUpdated  = new Date()
             await inventory.save()
@@ -362,7 +369,7 @@ export async function POST(request: NextRequest) {
           // Also update Product.stock for backward compatibility (legacy field)
           await models.Product.findByIdAndUpdate(
             productObjId,
-            { $inc: { stock: -item.quantity }, updatedAt: new Date() }
+            { $inc: { stock: -baseQty }, updatedAt: new Date() }
           )
         } else {
           // Legacy single-branch: update Product.stock only
@@ -370,11 +377,11 @@ export async function POST(request: NextRequest) {
           if (!product) continue
 
           previousStock = product.stock ?? 0
-          newStock      = Math.max(0, previousStock - item.quantity)
+          newStock      = Math.max(0, previousStock - baseQty)
 
           await models.Product.findByIdAndUpdate(
             productObjId,
-            { $inc: { stock: -item.quantity }, updatedAt: new Date() }
+            { $inc: { stock: -baseQty }, updatedAt: new Date() }
           )
         }
 
@@ -409,7 +416,7 @@ export async function POST(request: NextRequest) {
             productId:     productObjId,
             staffId:       payload.type === 'staff' ? new Types.ObjectId(payload.userId) : null,
             type:          'SALE',
-            quantity:      -item.quantity,
+            quantity:      -baseQty,
             previousStock,
             newStock,
             orderNumber,

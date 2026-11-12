@@ -60,6 +60,16 @@ interface ProductVariant {
   barcode: string
   images: string[]
   errors: Record<string, string>
+  // Pricing — per-variant so each size/type can have different prices
+  buyingPrice: number
+  sellingPrice: number
+  wholeSale: number
+  // Container config — per-variant (1-inch nails vs 2-inch nails differ)
+  lotContainerName: string
+  lotSize: number
+  lotPrice: number
+  // Per-variant opening lots
+  initialLots: InitialLot[]
 }
 
 interface InitialLot {
@@ -74,19 +84,13 @@ interface ProductCardState {
   category: string
   supplierId?: string
   unit: string
-  buyingPrice: number
-  sellingPrice: number
-  wholeSale: number
   lowStockThreshold: number
   description?: string
   variants: ProductVariant[]
   errors: Record<string, string>
+  // Lot tracking config — shared across all variants of this product
   trackLots: boolean
   lotUnit: string
-  lotContainerName: string
-  lotSize: number
-  lotPrice: number
-  initialLots: InitialLot[]
   duplicate: boolean
 }
 
@@ -120,19 +124,12 @@ export function BatchProductForm({ onSuccess }: BatchProductFormProps) {
       category: '',
       supplierId: '',
       unit: 'piece',
-      buyingPrice: 0,
-      sellingPrice: 0,
-      wholeSale: 0,
       lowStockThreshold: 10,
       description: '',
       variants: [createEmptyVariant()],
       errors: {},
       trackLots: false,
       lotUnit: 'pieces',
-      lotContainerName: '',
-      lotSize: 1,
-      lotPrice: 0,
-      initialLots: [],
       duplicate: false,
     }
   }
@@ -151,6 +148,13 @@ export function BatchProductForm({ onSuccess }: BatchProductFormProps) {
       barcode: '',
       images: [],
       errors: {},
+      buyingPrice: 0,
+      sellingPrice: 0,
+      wholeSale: 0,
+      lotContainerName: '',
+      lotSize: 1,
+      lotPrice: 0,
+      initialLots: [],
     }
   }
 
@@ -233,9 +237,6 @@ export function BatchProductForm({ onSuccess }: BatchProductFormProps) {
           ? {
               ...p,
               ...updates,
-              ...(updates.buyingPrice !== undefined && { buyingPrice: typeof updates.buyingPrice === 'string' ? parseFloat(updates.buyingPrice) || 0 : updates.buyingPrice }),
-              ...(updates.sellingPrice !== undefined && { sellingPrice: typeof updates.sellingPrice === 'string' ? parseFloat(updates.sellingPrice) || 0 : updates.sellingPrice }),
-              ...(updates.wholeSale !== undefined && { wholeSale: typeof updates.wholeSale === 'string' ? parseFloat(updates.wholeSale) || 0 : updates.wholeSale }),
               ...(updates.lowStockThreshold !== undefined && { lowStockThreshold: typeof updates.lowStockThreshold === 'string' ? parseFloat(updates.lowStockThreshold) || 0 : updates.lowStockThreshold }),
             }
           : p
@@ -254,7 +255,12 @@ export function BatchProductForm({ onSuccess }: BatchProductFormProps) {
                   ? {
                       ...v,
                       ...updates,
-                      ...(updates.stock !== undefined && { stock: typeof updates.stock === 'string' ? parseFloat(updates.stock) || 0 : updates.stock }),
+                      ...(updates.stock        !== undefined && { stock:        typeof updates.stock        === 'string' ? parseFloat(updates.stock)        || 0 : updates.stock }),
+                      ...(updates.buyingPrice  !== undefined && { buyingPrice:  typeof updates.buyingPrice  === 'string' ? parseFloat(updates.buyingPrice)  || 0 : updates.buyingPrice }),
+                      ...(updates.sellingPrice !== undefined && { sellingPrice: typeof updates.sellingPrice === 'string' ? parseFloat(updates.sellingPrice) || 0 : updates.sellingPrice }),
+                      ...(updates.wholeSale    !== undefined && { wholeSale:    typeof updates.wholeSale    === 'string' ? parseFloat(updates.wholeSale)    || 0 : updates.wholeSale }),
+                      ...(updates.lotSize      !== undefined && { lotSize:      typeof updates.lotSize      === 'string' ? parseFloat(updates.lotSize)      || 1 : updates.lotSize }),
+                      ...(updates.lotPrice     !== undefined && { lotPrice:     typeof updates.lotPrice     === 'string' ? parseFloat(updates.lotPrice)     || 0 : updates.lotPrice }),
                     }
                   : v
               ),
@@ -264,47 +270,58 @@ export function BatchProductForm({ onSuccess }: BatchProductFormProps) {
     )
   }
 
+  // ── Variant-level lot helpers ──────────────────────────────────────────────
+
+  function addVariantLot(cardId: string, variantId: string) {
+    setProducts(prev => prev.map(p =>
+      p.id !== cardId ? p : {
+        ...p,
+        variants: p.variants.map(v =>
+          v.id !== variantId ? v : {
+            ...v,
+            initialLots: [...v.initialLots, createEmptyLot()],
+          }
+        ),
+      }
+    ))
+  }
+
+  function removeVariantLot(cardId: string, variantId: string, lotId: string) {
+    setProducts(prev => prev.map(p =>
+      p.id !== cardId ? p : {
+        ...p,
+        variants: p.variants.map(v =>
+          v.id !== variantId ? v : {
+            ...v,
+            initialLots: v.initialLots.filter(l => l.id !== lotId),
+          }
+        ),
+      }
+    ))
+  }
+
+  function updateVariantLot(cardId: string, variantId: string, lotId: string, field: keyof InitialLot, value: string | number) {
+    setProducts(prev => prev.map(p =>
+      p.id !== cardId ? p : {
+        ...p,
+        variants: p.variants.map(v =>
+          v.id !== variantId ? v : {
+            ...v,
+            initialLots: v.initialLots.map(l =>
+              l.id !== lotId ? l : { ...l, [field]: value }
+            ),
+          }
+        ),
+      }
+    ))
+  }
+
   function clearErrors(id: string) {
     updateProduct(id, { errors: {} })
   }
 
   function clearVariantErrors(cardId: string, variantId: string) {
     updateVariant(cardId, variantId, { errors: {} })
-  }
-
-  // ── Initial lot helpers ────────────────────────────────────────────────────
-
-  function addInitialLot(cardId: string) {
-    setProducts(prev => prev.map(p =>
-      p.id === cardId
-        ? { ...p, initialLots: [...p.initialLots, createEmptyLot()] }
-        : p
-    ))
-  }
-
-  function removeInitialLot(cardId: string, lotId: string) {
-    setProducts(prev => prev.map(p =>
-      p.id === cardId
-        ? { ...p, initialLots: p.initialLots.filter(l => l.id !== lotId) }
-        : p
-    ))
-  }
-
-  function updateInitialLot(cardId: string, lotId: string, field: keyof InitialLot, value: string | number) {
-    setProducts(prev => prev.map(p =>
-      p.id === cardId
-        ? {
-            ...p,
-            initialLots: p.initialLots.map(l =>
-              l.id === lotId ? { ...l, [field]: value } : l
-            ),
-          }
-        : p
-    ))
-  }
-
-  function lotsTotal(lots: InitialLot[]): number {
-    return lots.reduce((s, l) => s + (Number(l.quantity) || 0), 0)
   }
 
   async function uploadImages(cardId: string, variantId: string, files: FileList | File[]) {
@@ -353,6 +370,8 @@ export function BatchProductForm({ onSuccess }: BatchProductFormProps) {
     const errors: Record<string, string> = {}
     if (!variant.brand?.trim()) errors.brand = 'Brand is required'
     if (variant.stock === undefined || variant.stock < 0) errors.stock = 'Stock must be 0 or greater'
+    if (variant.buyingPrice === undefined || variant.buyingPrice <= 0) errors.buyingPrice = 'Buying price required'
+    if (variant.sellingPrice === undefined || variant.sellingPrice <= 0) errors.sellingPrice = 'Selling price required'
     return errors
   }
 
@@ -360,8 +379,6 @@ export function BatchProductForm({ onSuccess }: BatchProductFormProps) {
     const errors: Record<string, string> = {}
     if (!product.productName?.trim()) errors.productName = 'Product name is required'
     if (!product.category?.trim()) errors.category = 'Category is required'
-    if (product.buyingPrice === undefined || product.buyingPrice <= 0) errors.buyingPrice = 'Buying price must be greater than 0'
-    if (product.sellingPrice === undefined || product.sellingPrice <= 0) errors.sellingPrice = 'Selling price must be greater than 0'
     if (!product.unit?.trim()) errors.unit = 'Unit is required'
     return errors
   }
@@ -403,31 +420,26 @@ async function submitBatch() {
       for (const product of products) {
         for (const variant of product.variants) {
           try {
-            const { id: varId, errors: varErrors, images: varImages, ...varData } = variant
-            const { id: prodId, errors: prodErrors, variants, initialLots, ...prodData } = product
+            const { id: varId, errors: varErrors, images: varImages, initialLots: varLots, ...varData } = variant
+            const { id: prodId, errors: prodErrors, variants: _variants, ...prodData } = product
 
-            // For lot-tracked products, stock = sum of initial lots (or 0 if none)
+            // For lot-tracked products, stock = sum of this variant's initial lots (or 0)
             const openingStock = product.trackLots
-              ? lotsTotal(product.initialLots)
+              ? varLots.reduce((s, l) => s + (Number(l.quantity) || 0), 0)
               : variant.stock
 
             // When trackLots is on and initial lots are defined, the batch
-            // creation endpoint ($inc) will set the stock. So create the product
-            // with stock: 0 to avoid double-counting.
-            const effectiveStock = product.trackLots && product.initialLots.length > 0
+            // creation endpoint ($inc) will set the stock. Create with stock: 0
+            // to avoid double-counting.
+            const effectiveStock = product.trackLots && varLots.length > 0
               ? 0
               : openingStock
 
             const createData = {
-              ...prodData,
-              ...varData,
-              stock:     effectiveStock,
-              images:    varImages,
-              trackLots:        product.trackLots,
-              lotUnit:          product.lotUnit,
-              lotContainerName: product.lotContainerName,
-              lotSize:          product.lotSize,
-              lotPrice:         product.lotPrice,
+              ...prodData,   // productName, category, supplierId, unit, lowStockThreshold, description, trackLots, lotUnit
+              ...varData,    // brand, model, variant, stock, barcode, buyingPrice, sellingPrice, wholeSale, lotContainerName, lotSize, lotPrice
+              stock:  effectiveStock,
+              images: varImages,
             }
 
             const response = await fetch('/api/products', {
@@ -439,7 +451,6 @@ async function submitBatch() {
             if (!response.ok) {
               const data = await response.json()
               if (data.duplicate) {
-                // Mark the card as duplicate so it turns orange in the UI
                 setProducts(prev => prev.map(p =>
                   p.id === product.id ? { ...p, duplicate: true } : p
                 ))
@@ -457,22 +468,21 @@ async function submitBatch() {
 
             const created = await response.json()
 
-            // ── Create opening-balance lots if trackLots is on ──────────────
-            if (product.trackLots && product.initialLots.length > 0) {
-              const validLots = product.initialLots.filter(l => Number(l.quantity) > 0)
+            // ── Create opening-balance lots for this variant ────────────────
+            if (product.trackLots && varLots.length > 0) {
+              const validLots = varLots.filter(l => Number(l.quantity) > 0)
               if (validLots.length > 0) {
                 const batchRes = await fetch(`/api/products/${created._id}/batches`, {
                   method:  'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body:    JSON.stringify({
                     lots:        validLots.map(l => ({ label: l.label || `Lot ${l.id}`, quantity: Number(l.quantity) })),
-                    buyingPrice: product.buyingPrice,
+                    buyingPrice: variant.buyingPrice,
                     notes:       'Opening balance',
                   }),
                 })
                 if (!batchRes.ok) {
                   const batchData = await batchRes.json()
-                  // Warn but don't fail — product exists, lots can be added via Stock In
                   toast.warning(`Product created but lots failed: ${batchData.error || 'Unknown error'}. Add lots via Stock In.`)
                 }
               }
@@ -491,6 +501,7 @@ async function submitBatch() {
 
       if (results.success > 0) {
         toast.success(`✓ ${results.success} product${results.success !== 1 ? 's' : ''} created`)
+        try { sessionStorage.removeItem('sessionProducts') } catch {}
         onSuccess()
       }
 
@@ -658,20 +669,25 @@ async function submitBatch() {
                                               productName: match.productName,
                                               category: match.category,
                                               unit: (match as any).unit || 'piece',
-                                              buyingPrice: match.buyingPrice,
-                                              sellingPrice: match.sellingPrice,
-                                              wholeSale: (match as any).wholeSale,
                                               lowStockThreshold: (match as any).lowStockThreshold,
                                               supplierId: (match as any).supplierId,
+                                              trackLots: (match as any).trackLots || false,
+                                              lotUnit: (match as any).lotUnit || 'pieces',
                                             })
                                             
-                                            // Fill first variant with selected product data
+                                            // Fill first variant with selected product data including prices
                                             if (product.variants.length > 0) {
                                               const firstVariant = product.variants[0]
                                               updateVariant(product.id, firstVariant.id, {
-                                                brand: (match as any).brand || '',
-                                                model: (match as any).model || '',
-                                                variant: (match as any).variant || '',
+                                                brand:            (match as any).brand || '',
+                                                model:            (match as any).model || '',
+                                                variant:          (match as any).variant || '',
+                                                buyingPrice:      match.buyingPrice,
+                                                sellingPrice:     match.sellingPrice,
+                                                wholeSale:        (match as any).wholeSale || 0,
+                                                lotContainerName: (match as any).lotContainerName || '',
+                                                lotSize:          (match as any).lotSize || 1,
+                                                lotPrice:         (match as any).lotPrice || 0,
                                               })
                                             }
                                             
@@ -852,8 +868,8 @@ async function submitBatch() {
               {/* Row 2: Variant fields (Brand, Model, Variant, Stock) - repeatable per variant */}
               <div className="space-y-2 mb-3 border-t border-gray-100 pt-2">
                 {product.variants.map((variant, variantIndex) => (
-                  <div key={variant.id} className="grid grid-cols-5 gap-2">
-                    {/* Brand - 1 col */}
+                  <div key={variant.id} className="grid grid-cols-7 gap-2">
+                    {/* Brand */}
                     <div className="space-y-1">
                       <Label className="text-xs font-medium">
                         Brand {variant.errors.brand && <span className="text-red-500">*</span>}
@@ -871,61 +887,118 @@ async function submitBatch() {
                       />
                     </div>
 
-                    {/* Model - 1 col */}
+                    {/* Model */}
                     <div className="space-y-1">
-                      <Label className="text-xs font-medium">
-                        Model
-                      </Label>
+                      <Label className="text-xs font-medium">Model</Label>
                       <Input
                         type="text"
                         value={variant.model}
-                        onChange={(e) => {
-                          updateVariant(product.id, variant.id, { model: e.target.value })
-                          if (variant.errors.model) clearVariantErrors(product.id, variant.id)
-                        }}
+                        onChange={(e) => updateVariant(product.id, variant.id, { model: e.target.value })}
                         disabled={loading}
-                        className={cn('h-8 text-sm', variant.errors.model ? 'border-red-500' : '')}
+                        className="h-8 text-sm"
                         placeholder="e.g. A2846"
                       />
                     </div>
 
-                    {/* Variant - 1 col */}
+                    {/* Variant */}
                     <div className="space-y-1">
-                      <Label className="text-xs font-medium">
-                        Variant
-                      </Label>
+                      <Label className="text-xs font-medium">Variant</Label>
                       <Input
                         type="text"
                         value={variant.variant}
-                        onChange={(e) => {
-                          updateVariant(product.id, variant.id, { variant: e.target.value })
-                          if (variant.errors.variant) clearVariantErrors(product.id, variant.id)
-                        }}
+                        onChange={(e) => updateVariant(product.id, variant.id, { variant: e.target.value })}
                         disabled={loading}
-                        className={cn('h-8 text-sm', variant.errors.variant ? 'border-red-500' : '')}
-                        placeholder="e.g. Silver 64GB"
+                        className="h-8 text-sm"
+                        placeholder="e.g. 1 inch"
                       />
                     </div>
 
-                    {/* Stock - 1 col — hidden when lot tracking is on (stock = sum of lots) */}
-                    {!product.trackLots && (
+                    {/* Buy — label adapts to container config */}
                     <div className="space-y-1">
                       <Label className="text-xs font-medium">
-                        Stock {variant.errors.stock && <span className="text-red-500">*</span>}
+                        {product.trackLots && variant.lotSize > 1 && variant.lotContainerName
+                          ? `Buy/${variant.lotContainerName}`
+                          : 'Buy'}
+                        {variant.errors.buyingPrice && <span className="text-red-500 ml-0.5">*</span>}
                       </Label>
                       <Input
                         type="number"
-                        value={variant.stock || ''}
+                        step="0.01"
+                        value={variant.buyingPrice || ''}
                         onChange={(e) => {
-                          updateVariant(product.id, variant.id, { stock: e.target.value })
-                          if (variant.errors.stock) clearVariantErrors(product.id, variant.id)
+                          updateVariant(product.id, variant.id, { buyingPrice: e.target.value })
+                          if (variant.errors.buyingPrice) clearVariantErrors(product.id, variant.id)
                         }}
                         onFocus={(e) => e.target.select()}
                         disabled={loading}
-                        className={cn('h-8 text-sm', variant.errors.stock ? 'border-red-500' : '')}
-                        placeholder="0"
+                        className={cn('h-8 text-sm', variant.errors.buyingPrice ? 'border-red-500' : '')}
+                        placeholder="0.00"
                       />
                     </div>
+
+                    {/* Sell — shows lotPrice when container config set */}
+                    <div className="space-y-1">
+                      <Label className="text-xs font-medium">
+                        {product.trackLots && variant.lotSize > 1 && variant.lotContainerName
+                          ? `Sell/${variant.lotContainerName}`
+                          : 'Sell'}
+                        {variant.errors.sellingPrice && <span className="text-red-500 ml-0.5">*</span>}
+                      </Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={product.trackLots && variant.lotSize > 1 && variant.lotContainerName
+                          ? (variant.lotPrice || '')
+                          : variant.sellingPrice || ''}
+                        onChange={(e) => {
+                          if (product.trackLots && variant.lotSize > 1 && variant.lotContainerName) {
+                            updateVariant(product.id, variant.id, { lotPrice: e.target.value })
+                          } else {
+                            updateVariant(product.id, variant.id, { sellingPrice: e.target.value })
+                          }
+                          if (variant.errors.sellingPrice) clearVariantErrors(product.id, variant.id)
+                        }}
+                        onFocus={(e) => e.target.select()}
+                        disabled={loading}
+                        className={cn('h-8 text-sm', variant.errors.sellingPrice ? 'border-red-500' : '')}
+                        placeholder="0.00"
+                      />
+                    </div>
+
+                    {/* Wholesale */}
+                    <div className="space-y-1">
+                      <Label className="text-xs font-medium">W/Sale</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={variant.wholeSale || ''}
+                        onChange={(e) => updateVariant(product.id, variant.id, { wholeSale: e.target.value })}
+                        onFocus={(e) => e.target.select()}
+                        disabled={loading}
+                        className="h-8 text-sm"
+                        placeholder="0.00"
+                      />
+                    </div>
+
+                    {/* Stock — hidden when lot tracking on */}
+                    {!product.trackLots && (
+                      <div className="space-y-1">
+                        <Label className="text-xs font-medium">
+                          Stock {variant.errors.stock && <span className="text-red-500">*</span>}
+                        </Label>
+                        <Input
+                          type="number"
+                          value={variant.stock || ''}
+                          onChange={(e) => {
+                            updateVariant(product.id, variant.id, { stock: e.target.value })
+                            if (variant.errors.stock) clearVariantErrors(product.id, variant.id)
+                          }}
+                          onFocus={(e) => e.target.select()}
+                          disabled={loading}
+                          className={cn('h-8 text-sm', variant.errors.stock ? 'border-red-500' : '')}
+                          placeholder="0"
+                        />
+                      </div>
                     )}
 
                     {/* Remove Variant Button */}
@@ -960,10 +1033,9 @@ async function submitBatch() {
                 </Button>
               </div>
 
-              {/* Row 3: Unit, Buying, Selling, Wholesale (product-level, shared) */}
+              {/* Row 3: Unit (product-level, shared across variants) */}
               <div className="grid grid-cols-6 gap-2 mb-3 border-t border-gray-100 pt-2">
-                {/* Unit - 1 col */}
-                <div className="space-y-1">
+                <div className="col-span-2 space-y-1">
                   <Label htmlFor={`unit-${product.id}`} className="text-xs font-medium">
                     Unit {product.errors.unit && <span className="text-red-500">*</span>}
                   </Label>
@@ -978,86 +1050,6 @@ async function submitBatch() {
                     disabled={loading}
                     className={cn('h-8 text-sm', product.errors.unit ? 'border-red-500' : '')}
                     placeholder="e.g. piece"
-                  />
-                </div>
-
-                {/* Buying Price - 1.5 cols */}
-                <div className="col-span-1 space-y-1">
-                  <Label htmlFor={`buyingPrice-${product.id}`} className="text-xs font-medium">
-                    {product.trackLots && product.lotSize > 1 && product.lotContainerName
-                      ? `Buy/${product.lotContainerName} `
-                      : 'Buying '}
-                    {product.errors.buyingPrice && <span className="text-red-500">*</span>}
-                  </Label>
-                  <Input
-                    id={`buyingPrice-${product.id}`}
-                    type="number"
-                    step="0.01"
-                    value={product.trackLots && product.lotSize > 1 && product.lotContainerName
-                      ? (product.buyingPrice * product.lotSize) || ''
-                      : product.buyingPrice || ''}
-                    onChange={(e) => {
-                      if (product.trackLots && product.lotSize > 1 && product.lotContainerName) {
-                        updateProduct(product.id, { buyingPrice: String((parseFloat(e.target.value) || 0) / product.lotSize) })
-                      } else {
-                        updateProduct(product.id, { buyingPrice: e.target.value })
-                      }
-                      if (product.errors.buyingPrice) clearErrors(product.id)
-                    }}
-                    onFocus={(e) => e.target.select()}
-                    required
-                    disabled={loading}
-                    className={cn('h-8 text-sm', product.errors.buyingPrice ? 'border-red-500' : '')}
-                    placeholder="0.00"
-                  />
-                </div>
-
-                {/* Selling Price - 1.5 cols */}
-                <div className="col-span-1 space-y-1">
-                  <Label htmlFor={`sellingPrice-${product.id}`} className="text-xs font-medium">
-                    {product.trackLots && product.lotSize > 1 && product.lotContainerName
-                      ? `Sell/${product.lotContainerName} `
-                      : 'Selling '}
-                    {product.errors.sellingPrice && <span className="text-red-500">*</span>}
-                  </Label>
-                  <Input
-                    id={`sellingPrice-${product.id}`}
-                    type="number"
-                    step="0.01"
-                    value={product.trackLots && product.lotSize > 1 && product.lotContainerName
-                      ? (product.lotPrice || '') 
-                      : product.sellingPrice || ''}
-                    onChange={(e) => {
-                      if (product.trackLots && product.lotSize > 1 && product.lotContainerName) {
-                        updateProduct(product.id, { lotPrice: parseFloat(e.target.value) || 0 } as any)
-                      } else {
-                        updateProduct(product.id, { sellingPrice: e.target.value })
-                      }
-                      if (product.errors.sellingPrice) clearErrors(product.id)
-                    }}
-                    onFocus={(e) => e.target.select()}
-                    required
-                    disabled={loading}
-                    className={cn('h-8 text-sm', product.errors.sellingPrice ? 'border-red-500' : '')}
-                    placeholder="0.00"
-                  />
-                </div>
-
-                {/* Wholesale Price - 2 cols */}
-                <div className="col-span-2 space-y-1">
-                  <Label htmlFor={`wholeSale-${product.id}`} className="text-xs font-medium">
-                    Wholesale
-                  </Label>
-                  <Input
-                    id={`wholeSale-${product.id}`}
-                    type="number"
-                    step="0.01"
-                    value={product.wholeSale || ''}
-                    onChange={(e) => updateProduct(product.id, { wholeSale: e.target.value })}
-                    onFocus={(e) => e.target.select()}
-                    disabled={loading}
-                    className="h-8 text-sm"
-                    placeholder="0.00"
                   />
                 </div>
               </div>
@@ -1117,7 +1109,7 @@ async function submitBatch() {
                     />
                   </div>
 
-                  {/* ── Lot / unit tracking ───────────────────────────────── */}
+                  {/* ── Lot / unit tracking toggle + base unit ───────────── */}
                   <div className="space-y-2 border rounded-lg p-3 bg-muted/30 border-gray-200">
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -1133,13 +1125,7 @@ async function submitBatch() {
                       <Switch
                         checked={product.trackLots}
                         onCheckedChange={(checked) => {
-                          updateProduct(product.id, {
-                            trackLots:   checked,
-                            initialLots: checked && product.initialLots.length === 0
-                              ? [createEmptyLot()]
-                              : product.initialLots,
-                          })
-                          // Auto-open More Details so the lots table is immediately visible
+                          updateProduct(product.id, { trackLots: checked })
                           if (checked) setExpandedCardId(product.id)
                         }}
                         disabled={loading}
@@ -1147,170 +1133,167 @@ async function submitBatch() {
                     </div>
 
                     {product.trackLots && (
-                      <div className="space-y-3 pt-2 border-t border-gray-200">
-
-                        {/* Container pricing */}
-                        <div className="space-y-1.5 pt-2 border-t border-gray-100">
-                          <Label className="text-xs font-medium">Container pricing</Label>
-                          {/* Row 1: container name + base unit */}
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="space-y-1">
-                              <span className="text-[10px] text-muted-foreground">Container name</span>
-                              <Input
-                                value={product.lotContainerName ?? ''}
-                                onChange={(e) => updateProduct(product.id, { lotContainerName: e.target.value })}
-                                placeholder="e.g. roll, box, carton"
-                                disabled={loading}
-                                className="h-7 text-xs"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <span className="text-[10px] text-muted-foreground">Base unit (sold individually)</span>
-                              <Input
-                                value={product.lotUnit ?? ''}
-                                onChange={(e) => updateProduct(product.id, { lotUnit: e.target.value })}
-                                placeholder="e.g. metres, pieces, kg"
-                                disabled={loading}
-                                className="h-7 text-xs"
-                              />
-                            </div>
-                          </div>
-                          {/* Row 2: qty per container + price per base unit + price per container */}
-                          <div className="grid grid-cols-3 gap-2">
-                            <div className="space-y-1">
-                              <span className="text-[10px] text-muted-foreground">
-                                {product.lotUnit || 'units'} per {product.lotContainerName || 'container'}
-                              </span>
-                              <Input
-                                type="number"
-                                min="1"
-                                step="any"
-                                value={product.lotSize ?? 1}
-                                onChange={(e) => updateProduct(product.id, { lotSize: parseFloat(e.target.value) || 1 })}
-                                onFocus={(e) => e.target.select()}
-                                disabled={loading}
-                                className="h-7 text-xs"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <span className="text-[10px] text-muted-foreground">
-                                Price per {product.lotUnit || 'unit'}
-                              </span>
-                              <Input
-                                type="number"
-                                step="0.01"
-                                value={product.sellingPrice || ''}
-                                onChange={(e) => updateProduct(product.id, { sellingPrice: parseFloat(e.target.value) || 0 })}
-                                onFocus={(e) => e.target.select()}
-                                disabled={loading}
-                                className="h-7 text-xs"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <span className="text-[10px] text-muted-foreground">
-                                Price per {product.lotContainerName || 'container'}
-                              </span>
-                              <Input
-                                type="number"
-                                step="0.01"
-                                value={product.lotPrice ?? 0}
-                                onChange={(e) => updateProduct(product.id, { lotPrice: parseFloat(e.target.value) || 0 })}
-                                onFocus={(e) => e.target.select()}
-                                disabled={loading}
-                                className="h-7 text-xs"
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Initial lots table */}
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <Label className="text-xs font-medium">
-                              Opening lots
-                              <span className="text-muted-foreground font-normal ml-1">(optional — add later via Stock In)</span>
-                            </Label>
-                            {product.initialLots.length > 0 && (
-                              <span className="text-[10px] text-muted-foreground">
-                                Total: {lotsTotal(product.initialLots)} {product.lotUnit}
-                              </span>
-                            )}
-                          </div>
-
-                          {product.initialLots.length > 0 && (
-                            <div className="space-y-1.5">
-                              {/* Column headers */}
-                              <div className="grid grid-cols-12 gap-1.5 px-1">
-                                <span className="col-span-7 text-[10px] text-muted-foreground">Label (e.g. Roll 1)</span>
-                                <span className="col-span-4 text-[10px] text-muted-foreground">Qty ({product.lotUnit})</span>
-                                <span className="col-span-1" />
-                              </div>
-
-                              {product.initialLots.map((lot, li) => (
-                                <div key={lot.id} className="grid grid-cols-12 gap-1.5 items-center">
-                                  <div className="col-span-7">
-                                    <Input
-                                      value={lot.label}
-                                      onChange={(e) => updateInitialLot(product.id, lot.id, 'label', e.target.value)}
-                                      placeholder={`e.g. Roll ${li + 1}`}
-                                      disabled={loading}
-                                      className="h-7 text-xs"
-                                    />
-                                  </div>
-                                  <div className="col-span-4">
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      step="any"
-                                      value={lot.quantity || ''}
-                                      onChange={(e) => updateInitialLot(product.id, lot.id, 'quantity', parseFloat(e.target.value) || 0)}
-                                      onFocus={(e) => e.target.select()}
-                                      placeholder="0"
-                                      disabled={loading}
-                                      className="h-7 text-xs"
-                                    />
-                                  </div>
-                                  <div className="col-span-1 flex justify-end">
-                                    <button
-                                      type="button"
-                                      onClick={() => removeInitialLot(product.id, lot.id)}
-                                      disabled={loading}
-                                      className="text-red-400 hover:text-red-600 p-0.5"
-                                    >
-                                      <X size={12} />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => addInitialLot(product.id)}
-                            disabled={loading}
-                            className="w-full h-7 text-xs border-dashed gap-1"
-                          >
-                            <Plus size={12} />
-                            {product.initialLots.length === 0 ? 'Add opening lot' : 'Add another lot'}
-                          </Button>
-                        </div>
-
+                      <div className="pt-2 border-t border-gray-200 space-y-1.5">
+                        <Label className="text-[10px] text-muted-foreground">Base unit (sold individually)</Label>
+                        <Input
+                          value={product.lotUnit ?? ''}
+                          onChange={(e) => updateProduct(product.id, { lotUnit: e.target.value })}
+                          placeholder="e.g. metres, pieces, kg"
+                          disabled={loading}
+                          className="h-7 text-xs"
+                        />
                       </div>
                     )}
                   </div>
 
-                  {/* Per-Variant Images Section */}
+                  {/* Per-Variant: container pricing + opening lots + images */}
                   <div className="space-y-2 border-t border-gray-100 pt-2">
                     <div className="text-xs font-semibold text-gray-700 mb-2">Variant Images</div>
                     {product.variants.map((variant, varIdx) => (
                       <div key={variant.id} className="space-y-2 p-2 bg-gray-50 rounded border border-gray-100">
                         <div className="text-xs font-medium text-gray-600">
-                          {variant.variant || `Variant ${varIdx + 1}`}
+                          {[variant.brand, variant.model, variant.variant].filter(Boolean).join(' › ') || `Variant ${varIdx + 1}`}
                         </div>
-                        
+
+                        {/* Container pricing — only when trackLots is on */}
+                        {product.trackLots && (
+                          <div className="space-y-1.5 pb-2 border-b border-gray-200">
+                            <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Container pricing</span>
+                            {/* Row 1: container name + qty per container */}
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <span className="text-[10px] text-muted-foreground">Container name</span>
+                                <Input
+                                  value={variant.lotContainerName ?? ''}
+                                  onChange={(e) => updateVariant(product.id, variant.id, { lotContainerName: e.target.value })}
+                                  placeholder="e.g. box, roll"
+                                  disabled={loading}
+                                  className="h-7 text-xs"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <span className="text-[10px] text-muted-foreground">
+                                  {product.lotUnit || 'units'} per {variant.lotContainerName || 'container'}
+                                </span>
+                                <Input
+                                  type="number"
+                                  min="1"
+                                  step="any"
+                                  value={variant.lotSize ?? 1}
+                                  onChange={(e) => updateVariant(product.id, variant.id, { lotSize: e.target.value })}
+                                  onFocus={(e) => e.target.select()}
+                                  disabled={loading}
+                                  className="h-7 text-xs"
+                                />
+                              </div>
+                            </div>
+                            {/* Row 2: price per unit + price per container */}
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <span className="text-[10px] text-muted-foreground">
+                                  Price per {product.lotUnit || 'unit'}
+                                </span>
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  value={variant.sellingPrice || ''}
+                                  onChange={(e) => updateVariant(product.id, variant.id, { sellingPrice: e.target.value })}
+                                  onFocus={(e) => e.target.select()}
+                                  disabled={loading}
+                                  className="h-7 text-xs"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <span className="text-[10px] text-muted-foreground">
+                                  Price per {variant.lotContainerName || 'container'}
+                                </span>
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  value={variant.lotPrice ?? 0}
+                                  onChange={(e) => updateVariant(product.id, variant.id, { lotPrice: e.target.value })}
+                                  onFocus={(e) => e.target.select()}
+                                  disabled={loading}
+                                  className="h-7 text-xs"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Opening lots — only when trackLots is on */}
+                        {product.trackLots && (
+                          <div className="space-y-1.5 pb-2 border-b border-gray-200">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                                Opening lots
+                                <span className="font-normal ml-1 normal-case">(optional)</span>
+                              </span>
+                              {variant.initialLots.length > 0 && (
+                                <span className="text-[10px] text-muted-foreground">
+                                  Total: {variant.initialLots.reduce((s, l) => s + (Number(l.quantity) || 0), 0)} {product.lotUnit}
+                                </span>
+                              )}
+                            </div>
+                            {variant.initialLots.length > 0 && (
+                              <div className="space-y-1">
+                                <div className="grid grid-cols-12 gap-1.5 px-1">
+                                  <span className="col-span-7 text-[10px] text-muted-foreground">Label</span>
+                                  <span className="col-span-4 text-[10px] text-muted-foreground">Qty ({product.lotUnit})</span>
+                                  <span className="col-span-1" />
+                                </div>
+                                {variant.initialLots.map((lot, li) => (
+                                  <div key={lot.id} className="grid grid-cols-12 gap-1.5 items-center">
+                                    <div className="col-span-7">
+                                      <Input
+                                        value={lot.label}
+                                        onChange={(e) => updateVariantLot(product.id, variant.id, lot.id, 'label', e.target.value)}
+                                        placeholder={`e.g. ${variant.lotContainerName || 'Batch'} ${li + 1}`}
+                                        disabled={loading}
+                                        className="h-7 text-xs"
+                                      />
+                                    </div>
+                                    <div className="col-span-4">
+                                      <Input
+                                        type="number"
+                                        min="0"
+                                        step="any"
+                                        value={lot.quantity || ''}
+                                        onChange={(e) => updateVariantLot(product.id, variant.id, lot.id, 'quantity', parseFloat(e.target.value) || 0)}
+                                        onFocus={(e) => e.target.select()}
+                                        placeholder="0"
+                                        disabled={loading}
+                                        className="h-7 text-xs"
+                                      />
+                                    </div>
+                                    <div className="col-span-1 flex justify-end">
+                                      <button
+                                        type="button"
+                                        onClick={() => removeVariantLot(product.id, variant.id, lot.id)}
+                                        disabled={loading}
+                                        className="text-red-400 hover:text-red-600 p-0.5"
+                                      >
+                                        <X size={12} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => addVariantLot(product.id, variant.id)}
+                              disabled={loading}
+                              className="w-full h-7 text-xs border-dashed gap-1"
+                            >
+                              <Plus size={12} />
+                              {variant.initialLots.length === 0 ? 'Add opening lot' : 'Add another lot'}
+                            </Button>
+                          </div>
+                        )}
+
                         {/* Image Upload Area */}
                         <div
                           onDragOver={(e) => e.preventDefault()}
@@ -1327,9 +1310,7 @@ async function submitBatch() {
                           </div>
                         </div>
                         <input
-                          ref={(ref) => {
-                            fileInputRefs.current[`${product.id}-${variant.id}`] = ref
-                          }}
+                          ref={(ref) => { fileInputRefs.current[`${product.id}-${variant.id}`] = ref }}
                           type="file"
                           accept="image/*"
                           multiple
@@ -1339,8 +1320,6 @@ async function submitBatch() {
                             e.target.value = ''
                           }}
                         />
-
-                        {/* Image Preview */}
                         {variant.images && variant.images.length > 0 && (
                           <div className="grid grid-cols-4 gap-1">
                             {variant.images.map((src, i) => (
