@@ -103,6 +103,13 @@ export async function PUT(
             }], { session })
             inventory = inventory[0]
 
+            // Sync global Product.stock so owner catalog view stays accurate
+            await models.Product.findByIdAndUpdate(
+              transferItem.productId,
+              { $inc: { stock: quantityReceived }, updatedAt: new Date() },
+              { session }
+            )
+
             await models.StockLedger.create([{
               userId: ownerId,
               branchId: branchContext ? new Types.ObjectId(branchContext) : null,
@@ -119,6 +126,13 @@ export async function PUT(
             inventory.stock += quantityReceived
             inventory.lastUpdated = new Date()
             await inventory.save({ session })
+
+            // Sync global Product.stock so owner catalog view stays accurate
+            await models.Product.findByIdAndUpdate(
+              transferItem.productId,
+              { $inc: { stock: quantityReceived }, updatedAt: new Date() },
+              { session }
+            )
 
             await models.StockLedger.create([{
               userId: ownerId,

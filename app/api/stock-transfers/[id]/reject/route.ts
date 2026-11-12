@@ -96,6 +96,15 @@ export async function PUT(
           console.error(`Failed to release reservation for item ${item.itemName}:`, error)
           // Continue anyway - best effort
         }
+
+        // Sync global Product.stock — restore the quantity that was deducted on transfer creation
+        if (item.productId) {
+          await models.Product.findByIdAndUpdate(
+            new Types.ObjectId(item.productId.toString()),
+            { $inc: { stock: item.quantitySent }, updatedAt: new Date() },
+            { session }
+          )
+        }
       }
 
       // Update transfer status

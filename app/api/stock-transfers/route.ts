@@ -117,6 +117,15 @@ export async function POST(request: NextRequest) {
         } catch (error: any) {
           throw new Error(`Failed to reserve ${item.itemName}: ${error.message}`)
         }
+
+        // Sync global Product.stock so owner catalog view stays accurate
+        if (item.productId) {
+          await models.Product.findByIdAndUpdate(
+            new Types.ObjectId(item.productId),
+            { $inc: { stock: -item.quantitySent }, updatedAt: new Date() },
+            { session }
+          )
+        }
       }
 
       // Generate transfer number

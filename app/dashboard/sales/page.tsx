@@ -56,6 +56,10 @@ interface Product {
   images?: string[]
   trackLots?: boolean
   lotUnit?: string
+  // box / container config (only relevant when trackLots is true)
+  lotContainerName?: string  // e.g. "box", "carton", "roll"
+  lotSize?: number           // base units per container
+  lotPrice?: number          // selling price per whole container
 }
 
 interface CartItem {
@@ -70,6 +74,12 @@ interface CartItem {
   // lot breakdown — only present when sold via the lot picker
   // carries the per-lot split for API batch deduction; invisible to cart display
   lotBreakdown?: Array<{ batchId: string; lotLabel: string; quantity: number }>
+  // box-mode fields — set when the cashier sells in containers (boxes, cartons, etc.)
+  // quantity = number of boxes (may be fractional e.g. 0.5)
+  // lotBreakdown.quantity = base units for stock deduction (boxes × boxSize)
+  soldInBoxes?: boolean
+  boxSize?: number    // lotSize at time of sale — base units per box
+  boxUnit?: string    // lotContainerName e.g. "box", "carton"
 }
 
 export default function SalesPage() {
@@ -205,6 +215,7 @@ function SalesPageContent() {
 
   useEffect(() => {
     sessionStorage.removeItem('sessionProducts')
+    sessionStorage.removeItem('sessionProductsTs')
     fetchProducts()
     fetchUserInfo()
     initAutoSync()
@@ -227,6 +238,7 @@ function SalesPageContent() {
     function onVisible() {
       if (document.visibilityState === 'visible') {
         sessionStorage.removeItem('sessionProducts')
+        sessionStorage.removeItem('sessionProductsTs')
         fetchProducts()
       }
     }
@@ -256,17 +268,29 @@ function SalesPageContent() {
       if (cachedSessionProducts) {
         try {
           prods = JSON.parse(cachedSessionProducts)
-          const hasImagesField = prods.length === 0 || 'images' in prods[0]
-          if (prods.length > 0 && hasImagesField) {
+          // Validate cache has the fields we need — bust if missing lotPrice/lotSize
+          const hasRequiredFields = prods.length === 0 || (
+            'images' in prods[0] &&
+            'lotPrice' in prods[0]
+          )
+          if (prods.length > 0 && hasRequiredFields) {
             setProducts(prods)
             const cats = Array.from(new Set(prods.map((p: Product) => p.category))).sort()
             setCategories(cats as string[])
             setLoading(false)
             return
           }
+          // Cache is stale — clear it and fetch fresh
+          sessionStorage.removeItem('sessionProducts')
+          sessionStorage.removeItem('sessionProductsTs')
+          prods = []
         } catch (e) {
           console.error('Failed to parse session cache:', e)
         }
+      } else if (cachedSessionProducts) {
+        // Cache expired — clear it
+        sessionStorage.removeItem('sessionProducts')
+        sessionStorage.removeItem('sessionProductsTs')
       }
 
       if (isOnline()) {
@@ -517,7 +541,17 @@ function SalesPageContent() {
               merged.push(lot)
             }
           }
-          return { ...c, quantity: c.quantity + item.quantity, lotBreakdown: merged }
+          // Preserve box-mode metadata from incoming item if set
+          return {
+            ...c,
+            quantity: c.quantity + item.quantity,
+            lotBreakdown: merged,
+            ...(item.soldInBoxes && {
+              soldInBoxes: true,
+              boxSize: item.boxSize,
+              boxUnit: item.boxUnit,
+            }),
+          }
         })
       }
       setSelectedCartIndex(prevCart.length)
@@ -847,6 +881,7 @@ function SalesPageContent() {
     setLastSale(null)
     // Refresh products to get updated stock
     sessionStorage.removeItem('sessionProducts')
+    sessionStorage.removeItem('sessionProductsTs')
     fetchProducts()
   }
 
@@ -1182,6 +1217,11 @@ function SalesPageContent() {
                               <span className="text-[10px] text-blue-600 font-medium">
                                 {item.lotBreakdown!.length} lot{item.lotBreakdown!.length !== 1 ? 's' : ''}
                               </span>
+                              {item.soldInBoxes && (
+                                <span className="text-[10px] text-orange-500 font-medium ml-0.5">
+                                  · {item.quantity} {item.boxUnit ?? 'box'}{item.quantity !== 1 ? 'es' : ''}
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1198,7 +1238,7 @@ function SalesPageContent() {
                         </Button>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        KSh {item.sellingPrice.toLocaleString()} each
+                        KSh {item.sellingPrice.toLocaleString()} {item.soldInBoxes ? `per ${item.boxUnit ?? 'box'}` : 'each'}
                       </p>
                       <div className="flex items-center gap-1.5 mt-1.5">
                         <Button
@@ -1333,7 +1373,12 @@ function SalesPageContent() {
                             <div key={lot.batchId} className="flex items-center gap-1 text-[10px] text-muted-foreground pl-1">
                               <Layers size={9} className="text-blue-300 shrink-0" />
                               <span className="text-blue-600 font-medium">{lot.lotLabel}</span>
-                              <span className="ml-auto">{lot.quantity}</span>
+                              <span className="ml-auto">
+                                {lot.quantity}
+                                {item.soldInBoxes && item.boxSize && item.boxSize > 1 && (
+                                  <span className="ml-0.5 opacity-60">pcs</span>
+                                )}
+                              </span>
                             </div>
                           ))}
                         </div>

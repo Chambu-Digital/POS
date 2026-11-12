@@ -135,7 +135,7 @@ function InventoryPageContent() {
 
   async function fetchProducts() {
     try {
-      const response = await fetch('/api/products')
+      const response = await fetch('/api/products', { cache: 'no-store' })
       if (response.ok) {
         const data = await response.json()
         setProducts(data.products || [])
